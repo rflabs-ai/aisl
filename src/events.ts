@@ -117,7 +117,7 @@ export class EventLog {
     const partial = {
       ...input,
       seq: this.events.length,
-      timestamp: input.timestamp ?? Date.now(),
+      timestamp: input.timestamp ?? Date.now(), // ponytail: event timestamp at append time, not decision time. upgrade: pass decisionAt explicitly when events need sub-ms precision.
       previousEventHash,
     };
     const event: SecurityEvent = { ...partial, eventHash: eventHash(partial) };

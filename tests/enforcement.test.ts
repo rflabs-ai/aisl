@@ -14,7 +14,7 @@ import { isDockerAvailable, ContainerSandbox, resetDockerCache } from '../src/co
 import { EgressProxy } from '../src/egress-proxy.ts';
 import { EnvelopeSecretBroker, encryptSecret, decryptSecret } from '../src/envelope-secrets.ts';
 import { LocalSandbox, ToolRegistry, AgentSession } from '../src/runtime.ts';
-import { testWorld } from '../src/testing.ts';
+import { testWorld, mockAuth } from '../src/testing.ts';
 import { TENANT_A, TENANT_B } from '../src/scenario.ts';
 import { runAttackCorpus } from '../src/attacks.ts';
 
@@ -277,8 +277,9 @@ describe('envelope encryption for secrets', () => {
       provenance: { source: 'human-approval', approvedBy: world.user.id },
     });
 
+    const userAuthCtx = mockAuth({ subject: world.user.id, amr: ['pwd', 'mfa'] });
     const approval = {
-      id: 'a1', approvedBy: world.user.id, principalId: world.agent.id,
+      id: 'a1', approvedBy: world.user.id, reviewerAuth: userAuthCtx, principalId: world.agent.id,
       action: 'secret.use' as const, resourceId: 'sec-bg',
       expiresAt: world.clock.now() + 60_000,
     };
@@ -315,8 +316,9 @@ describe('envelope encryption for secrets', () => {
       provenance: { source: 'human-approval', approvedBy: world.user.id },
     });
 
+    const userAuthCtx = mockAuth({ subject: world.user.id, amr: ['pwd', 'mfa'] });
     const approval = {
-      id: 'a2', approvedBy: world.user.id, principalId: world.agent.id,
+      id: 'a2', approvedBy: world.user.id, reviewerAuth: userAuthCtx, principalId: world.agent.id,
       action: 'secret.use' as const, resourceId: 'sec-log',
       expiresAt: world.clock.now() + 60_000,
     };
@@ -378,8 +380,9 @@ describe('brokered injection: agent never sees the secret value', () => {
       provenance: { source: 'human-approval', approvedBy: world.user.id },
     });
 
+    const userAuthCtx = mockAuth({ subject: world.user.id, amr: ['pwd', 'mfa'] });
     const approval = {
-      id: 'a-inj', approvedBy: world.user.id, principalId: world.agent.id,
+      id: 'a-inj', approvedBy: world.user.id, reviewerAuth: userAuthCtx, principalId: world.agent.id,
       action: 'secret.use' as const, resourceId: 'sec-inj',
       expiresAt: world.clock.now() + 60_000,
     };

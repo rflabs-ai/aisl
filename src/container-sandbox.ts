@@ -37,7 +37,7 @@ export function resetDockerCache(): void {
 
 const IMAGE_TAG = 'ai-security-layer-sandbox:latest';
 
-let _imageBuilt = false;
+let _imageBuilt = false; // ponytail: module-level bool is safe in single-process. upgrade: use a promise/lock if multi-process.
 
 function ensureImage(): void {
   if (_imageBuilt) return;
@@ -81,6 +81,36 @@ export class ContainerSandbox implements Sandbox {
       : `fallback/${fallback.kind}`;
   }
 
+  private buildDockerArgs(taskId: string, workDir: string, extraArgs: string[]): { args: string[]; timeout: number } {
+    const memory = this.opts.memoryLimit ?? '128m';
+    const cpuPeriod = this.opts.cpuPeriod ?? 100_000;
+    const cpuQuota = this.opts.cpuQuota ?? 50_000;
+    const pids = this.opts.pidsLimit ?? 64;
+    const timeout = this.opts.timeoutMs ?? 30_000;
+
+    return {
+      args: [
+        'run', '--rm',
+        '--network', 'none',
+        '--read-only',
+        '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
+        '--user', '1000:1000',
+        '--cap-drop', 'ALL',
+        '--security-opt', 'no-new-privileges',
+        '--memory', memory,
+        '--memory-swap', memory,
+        '--cpu-period', String(cpuPeriod),
+        '--cpu-quota', String(cpuQuota),
+        '--pids-limit', String(pids),
+        '--label', `task=${taskId}`,
+        '--volume', `${workDir}:/sandbox:ro`,
+        IMAGE_TAG,
+        ...extraArgs,
+      ],
+      timeout,
+    };
+  }
+
   run<T>(fn: () => T): T {
     if (!this.useDocker) return this.fallback.run(fn);
 
@@ -93,31 +123,11 @@ export class ContainerSandbox implements Sandbox {
         const context = JSON.stringify({ fnSource: fn.toString(), taskId });
         writeFileSync(join(workDir, 'context.json'), context);
 
-        const memory = this.opts.memoryLimit ?? '128m';
-        const cpuPeriod = this.opts.cpuPeriod ?? 100_000;
-        const cpuQuota = this.opts.cpuQuota ?? 50_000;
-        const pids = this.opts.pidsLimit ?? 64;
-        const timeout = this.opts.timeoutMs ?? 30_000;
+        const { args, timeout } = this.buildDockerArgs(taskId, workDir, []);
 
         const output = execFileSync(
           'docker',
-          [
-            'run', '--rm',
-            '--network', 'none',
-            '--read-only',
-            '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
-            '--user', '1000:1000',
-            '--cap-drop', 'ALL',
-            '--security-opt', 'no-new-privileges',
-            '--memory', memory,
-            '--memory-swap', memory,
-            '--cpu-period', String(cpuPeriod),
-            '--cpu-quota', String(cpuQuota),
-            '--pids-limit', String(pids),
-            '--label', `task=${taskId}`,
-            '--volume', `${workDir}:/sandbox:ro`,
-            IMAGE_TAG,
-          ],
+          args,
           { timeout, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf8' },
         );
 
@@ -145,35 +155,14 @@ export class ContainerSandbox implements Sandbox {
       const workDir = mkdtempSync(join(tmpdir(), `sandbox-${taskId}-`));
 
       try {
-        const payload = JSON.stringify({ tool: tool.name, context: ctx });
+        const payload = JSON.stringify({ tool: tool.name, fnSource: tool.invoke.toString(), context: ctx });
         writeFileSync(join(workDir, 'ctx.json'), payload);
 
-        const memory = this.opts.memoryLimit ?? '128m';
-        const cpuPeriod = this.opts.cpuPeriod ?? 100_000;
-        const cpuQuota = this.opts.cpuQuota ?? 50_000;
-        const pids = this.opts.pidsLimit ?? 64;
-        const timeout = this.opts.timeoutMs ?? 30_000;
+        const { args, timeout } = this.buildDockerArgs(taskId, workDir, ['/sandbox/ctx.json']);
 
         const output = execFileSync(
           'docker',
-          [
-            'run', '--rm',
-            '--network', 'none',
-            '--read-only',
-            '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
-            '--user', '1000:1000',
-            '--cap-drop', 'ALL',
-            '--security-opt', 'no-new-privileges',
-            '--memory', memory,
-            '--memory-swap', memory,
-            '--cpu-period', String(cpuPeriod),
-            '--cpu-quota', String(cpuQuota),
-            '--pids-limit', String(pids),
-            '--label', `task=${taskId}`,
-            '--volume', `${workDir}:/sandbox:ro`,
-            IMAGE_TAG,
-            '/sandbox/ctx.json',
-          ],
+          args,
           { timeout, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf8' },
         );
 

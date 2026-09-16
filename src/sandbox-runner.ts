@@ -2,20 +2,13 @@
  * Self-contained runner for the container sandbox.
  *
  * Reads tool name + context from process.argv[2] (a JSON file path),
- * executes the named tool, writes result JSON to stdout.
+ * executes the serialized invoke function, writes result JSON to stdout.
  *
- * Tool implementations are hardcoded here — no imports from the host
- * module graph, so the image only needs this single .js file.
+ * No tool implementations are hardcoded here — the host sends the function
+ * source in the context JSON, so the image stays generic.
  */
 
 import { readFileSync } from 'node:fs';
-
-const TOOLS: Record<string, (ctx: Record<string, unknown>) => Record<string, unknown>> = {
-  read: (ctx) => ({ output: ctx.content ?? '' }),
-  write: (ctx) => ({ output: `wrote ${ctx.resourceId}`, changed: true }),
-  delete: (ctx) => ({ output: `deleted ${ctx.resourceId}`, changed: true }),
-  export: (ctx) => ({ output: ctx.content ?? '' }),
-};
 
 const arg = process.argv[2];
 if (!arg) {
@@ -24,15 +17,15 @@ if (!arg) {
 }
 
 const raw = readFileSync(arg, 'utf8');
-const ctx = JSON.parse(raw) as { tool: string; context: Record<string, unknown> };
+const ctx = JSON.parse(raw) as { tool: string; fnSource: string; context: Record<string, unknown> };
 
-const handler = TOOLS[ctx.tool];
-if (!handler) {
-  process.stdout.write(JSON.stringify({ ok: false, error: `unknown tool: ${ctx.tool}` }));
+if (!ctx.fnSource) {
+  process.stdout.write(JSON.stringify({ ok: false, error: 'no fnSource provided' }));
   process.exit(1);
 }
 
 try {
+  const handler = new Function('ctx', ctx.fnSource);
   const result = handler(ctx.context);
   process.stdout.write(JSON.stringify({ ok: true, value: result }));
 } catch (err) {

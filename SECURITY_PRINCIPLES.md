@@ -4,6 +4,31 @@ Each principle below is followed by the mechanism that implements it, the code
 that enforces it, and the test that would fail if it were removed. A principle
 with no mechanism is a slogan; there are none here.
 
+## The bar
+
+**99.9996% is a north star, not a claim.** It is a reminder of what we are
+working towards and of how this project ends: we do every control we know how
+to do, and then we stop and wait for independent verifiers to tell us where we
+are wrong. Until they do, we do not declare victory. The number is never
+published as a property of the system — it has no denominator and no test that
+could falsify it (ADR-014).
+
+**Obvious flaws are unacceptable.** A security failure that exists because we
+wrote the code wrong is a defect, not a tradeoff:
+
+| Defect (unacceptable) | Tradeoff (acceptable, documented in an ADR) |
+|---|---|
+| Identity taken from a client-controlled header | In-process policy engine instead of a sidecar |
+| `as never` cast that hides a type error | Capabilities in memory instead of persisted |
+| Port read before the socket is listening | `LocalSandbox` fallback when Docker is absent |
+| A fallback that silently disables a control | Sealed evidence needing a master key on the host |
+| Authorization bypassed on one path but not another | Fail-closed costing availability |
+
+Tradeoffs are choices between two working designs, written down with their
+costs. Defects are bugs. When one is found it is fixed at the root — one guard
+in the shared function, not a patch per caller — and it gets a regression test
+that fails without the fix. It is never recorded as accepted risk.
+
 ## Zero Trust
 
 Nothing is trusted by default: not the model, not the document, not the tool,

@@ -7,12 +7,14 @@
 
 import { type Action, type ActionRequest, type Principal } from './domain.ts';
 import { EventLog } from './events.ts';
-import { NetworkGateway, SecretBroker } from './gates.ts';
+import { NetworkGateway } from './gates.ts';
+import { EnvelopeSecretBroker } from './envelope-secrets.ts';
 import { type ModelPort, ScriptedModel } from './model.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyEngine, type PolicyRule } from './policy.ts';
 import { AuthorizationService, authorizationRoot } from './pdp.ts';
 import { ResourceRegistry, defineResource, ingestDocument } from './registry.ts';
 import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from './runtime.ts';
+import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 
 export const TENANT_A = 'acme';
@@ -44,7 +46,7 @@ export interface World {
   readonly policy: PolicyEngine;
   readonly tools: ToolRegistry;
   readonly network: NetworkGateway;
-  readonly secrets: SecretBroker;
+  readonly secrets: EnvelopeSecretBroker;
   readonly content: Map<string, string>;
   readonly secretValues: string[];
   readonly agent: Principal;
@@ -113,7 +115,8 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
 
   const policy = createPolicyEngine([...BASELINE_POLICY, ...(options.policies ?? [EGRESS_ALLOWLIST_RULE])]);
   const authorization = new AuthorizationService(registry, policy, eventLog, clock.now);
-  const secrets = new SecretBroker(registry, authorization, eventLog);
+  const masterKey = Buffer.from(process.env.SECRET_MASTER_KEY ?? 'dev-master-key-not-for-production-32b!', 'utf8');
+  const secrets = new EnvelopeSecretBroker(masterKey, authorization, eventLog, registry);
   const network = new NetworkGateway(registry, authorization, eventLog);
 
   const secretValues = ['sk-fake-TESTKEY-0000', 'Pg!fake-password-42'];
@@ -197,7 +200,7 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
         authorization,
         eventLog,
         tools,
-        sandbox: new LocalSandbox(),
+        sandbox: new ContainerSandbox(new LocalSandbox()),
         content,
         approvals: overrides?.approvals,
         checks: overrides?.checks ?? [secretLeakCheck(secretValues)],

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-16T17:42:11.393Z",
+  "generatedAt": "2026-09-16T18:28:10.786Z",
   "node": "v24.18.0",
   "policyEngine": "in-process-rego-free-v1",
   "adversarial": {
@@ -24,7 +24,7 @@
     "expectedDecisions": 17,
     "auditCompleteness": 1,
     "hashChainValid": true,
-    "head": "020f373f98ef4b04e47c83c1170cb9f8eb33a58f2d1f0d3c11f52f466cb947d4"
+    "head": "91f71b89ddabe0a1561cb0e7698fa190a0ef32a5c45d79d4ad94531c745b8632"
   },
   "corpus": {
     "documents": 4,

@@ -337,11 +337,19 @@ failure event, and no test that could falsify it. Publishing it would break the
 rule this project was founded on — every claim must bind to a property, a threat
 model, a mechanism, a test, and evidence.
 
-**Decision:** Refuse the single number. Publish one measurable target per
-control instead (ROADMAP.md, "Assurance targets"), each with a named
-measurement, and report current values on every run via
-`npm run benchmark`. Where a target is unmeasurable (unknown future
-vulnerabilities), say so in IMPOSSIBLE+ rather than assigning it a number.
+**Decision:** Adopt 99.9996% as an internal **north star**, never as a published
+claim. Publish one measurable target per control instead (ROADMAP.md,
+"Assurance targets"), each with a named measurement, and report current values
+on every run via `npm run benchmark`. Where a target is unmeasurable (unknown
+future vulnerabilities), say so in IMPOSSIBLE+ rather than assigning a number.
+
+**The defect bar (recorded here because it governs every ADR below):** a
+security failure caused by writing the code wrong — client-supplied identity,
+a cast that hides a type error, a value read before it exists, a fallback that
+silently disables a control, one path that skips authorization — is a **defect,
+not a tradeoff**. It gets fixed at the root and gets a regression test that
+fails without the fix. It is never written down as accepted risk. A tradeoff is
+a choice between two working designs, and it carries a stated cost.
 
 **Alternatives:** adopt the percentage as a marketing figure (rejected —
 indefensible under audit); adopt a qualitative maturity model (useful later, but

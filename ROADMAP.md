@@ -309,6 +309,14 @@ assumptions outside our control. Documented so they never become marketing copy.
 
 ## Assurance targets (ADR-014)
 
+**North star:** 99.9996%. It is a reminder of the direction and of how this
+ends — build every control we know how to build, then stop and let independent
+verifiers tell us where we are wrong. It is not a published property of the
+system, and no single percentage can be: see ADR-014 and the defect bar in
+SECURITY_PRINCIPLES.md. Obvious flaws — the kind that exist only because the
+code was written wrong — are defects, not tradeoffs, and are never recorded as
+accepted risk.
+
 There is no single number for "how secure is this". A percentage like 99.9996%
 (≈3.4 failures per million) cannot be computed for a system, defended to an
 auditor, or falsified by a test — publishing one would violate this project's

@@ -91,22 +91,31 @@ without solving goal correctness.
 no capability-issuance handle, no authorization service, and no secret store.
 
 **Mechanism:** `ExecutionContext` (`src/runtime.ts:29`) is constructed by the
-session; tools receive it and nothing else.
+session; tools receive it and nothing else. When `ContainerSandbox` is active,
+tool code executes inside a Docker container with non-root user, read-only
+rootfs, no network namespace, seccomp default profile, and memory/CPU/PID/time
+limits.
 
 **Threat model:** TM-001, TM-002.
 
-**Assumptions:** the tool does not exploit a runtime vulnerability to escape.
+**Assumptions:** the Docker daemon is running and the container image is trusted;
+when Docker is unavailable, `ContainerSandbox` falls back to `LocalSandbox`
+(zero isolation, documented ceiling).
 
 **Evidence:** invariant 4 test enumerates context keys and asserts none match
-`issue|authoriz|secret|grant|admin`.
+`issue|authoriz|secret|grant|admin`. Enforcement tests verify Docker detection,
+fallback behaviour, and that secret values never appear in the execution context.
 
-**Test:** `tests/invariants.test.ts` invariant 4.
+**Test:** `tests/invariants.test.ts` invariant 4;
+`tests/enforcement.test.ts` container sandbox suite.
 
-**Known limitations:** `LocalSandbox` provides no isolation, so a malicious tool
-runs with the runtime's privileges. This claim is about the *interface*, not
-about containment.
+**Known limitations:** when Docker is unavailable, the sandbox falls back to
+in-process execution. The `ContainerSandbox` kind string includes `fallback` in
+this case, making the ceiling visible. Full tool-code-in-container execution
+requires a bundled runner image (next step).
 
-**Residual risk:** high until a real sandbox exists (ADR-003).
+**Residual risk:** reduced from HIGH to MEDIUM when Docker is available. Falls
+back to HIGH when Docker is unavailable.
 
 ---
 
@@ -242,26 +251,40 @@ SQL-level isolation does not yet exist.
 ## Claim 10 — Unauthorized network destinations are denied
 
 **Claim:** Egress to any host not explicitly allowlisted by a capability constraint
-**and** a policy rule is denied.
+**and** a policy rule is denied. IP literals are blocked at the proxy layer.
+Sessions have no route out except through the egress proxy.
 
-**Mechanism:** `NetworkGateway` synthesizes a `network-destination` resource per
-host and routes the request through the PDP; the customer rule constrains hosts.
+**Mechanism:** `EgressProxy` (`src/egress-proxy.ts`) intercepts HTTP traffic,
+blocks IP literals, and routes every request through the PDP before forwarding.
+`NetworkGateway` (`src/gates.ts`) makes the same decision via the PDP. The
+sandbox runs with `--network none` when Docker is available, so all traffic
+must pass through the proxy. Canary-exfiltration tests generate unique tokens per
+classification level and assert they never appear at any egress endpoint.
 
 **Threat model:** TM-001, TM-002.
 
-**Assumptions:** host normalization is correct (lowercase, trailing dot,
-whitespace stripped).
+**Assumptions:** the sandbox enforces `--network none` (Docker only); the proxy
+is the only route out; DNS resolution returns only allowlisted hosts.
 
-**Evidence:** invariant 10 tests including normalization bypass attempts; ATK-006.
+**Evidence:** invariant 10 tests including normalization bypass attempts;
+ATK-006; enforcement tests verify IP literal blocking, canary exfiltration
+tokens never leak, and `proxyEnv` configuration.
 
-**Test:** `tests/invariants.test.ts` invariant 10.
+**Test:** `tests/invariants.test.ts` invariant 10;
+`tests/enforcement.test.ts` egress proxy and canary suites.
 
-**Known limitations:** **the gateway makes a decision and opens no socket.** It
-is not yet wired to a real proxy, so a component that reaches the network by
-another path is not constrained by it. DNS resolution, IP literals, redirects,
-and ports other than 443 are not yet modelled.
+**Known limitations:** HTTPS CONNECT tunneling is not yet implemented (HTTP
+only). DNS pinning is the caller's responsibility - the proxy blocks IP
+literals but does not yet pin DNS resolution, so **an allowlisted hostname may
+still resolve to a private or link-local address (cloud metadata at
+169.254.169.254)**. Forwarded requests have no body-size or timeout limit.
+DNS pinning, SSRF range checks, and quotas are H7, not done. When Docker is
+unavailable, the `--network none` constraint does not apply and the proxy is the
+only remaining control.
+enforcement layer.
 
-**Residual risk:** high until a real egress proxy enforces the decision.
+**Residual risk:** MEDIUM when Docker is available (proxy + network namespace).
+HIGH when Docker is unavailable (proxy only).
 
 ---
 
@@ -269,27 +292,37 @@ and ports other than 443 are not yet modelled.
 
 **Claim:** An agent cannot obtain a secret value unless a capability naming that
 secret and a policy rule permitting `secret.use` both exist, plus any required
-approval.
+approval. Secrets are envelope-encrypted at rest with AES-256-GCM; the master
+key is never logged. Evidence records receive a redacted placeholder, not the
+plaintext value.
 
-**Mechanism:** `SecretBroker` routes through the PDP; baseline policy contains
-no `secret.use` allow rule, so the default is denial.
+**Mechanism:** `EnvelopeSecretBroker` (`src/envelope-secrets.ts`) encrypts each
+secret with a unique DEK derived via HKDF-SHA256 from a master key. Access is
+gated by the PDP; baseline policy grants no `secret.use` rule, so the default
+is denial. The broker decrypts only after authorization and records
+`[decrypted-withheld]` in the event log.
 
 **Threat model:** TM-001, TM-003.
 
-**Assumptions:** secrets registered with the broker are the only secrets; values
-live in process memory.
+**Assumptions:** the master key is stored in an environment variable or file and
+is not logged; secrets registered with the broker are the only secrets; Docker
+is not required for this control.
 
 **Evidence:** invariant 11 tests (default deny, and an explicit break-glass path
-that is allowed).
+that is allowed); enforcement tests verify encrypt/decrypt roundtrip, wrong-key
+failure, default deny, break-glass decryption, event-log redaction, cross-tenant
+denial, and that secret values never appear in the execution context.
 
-**Test:** `tests/invariants.test.ts` invariant 11.
+**Test:** `tests/invariants.test.ts` invariant 11;
+`tests/enforcement.test.ts` envelope encryption and secret-unreachable suites.
 
-**Known limitations:** values are stored in plaintext in memory, are not
-envelope-encrypted, and are not bound to a KMS/HSM. Evidence records redact
-values only via `SecretBroker.redact`, which is not yet called on every path.
+**Known limitations:** single master key, no rotation, no KMS/HSM backing.
+Short-lived dynamic credentials and brokered injection (the agent never sees
+the value) are the next steps. The master key is in an environment variable,
+not a hardware security module.
 
-**Residual risk:** memory disclosure; no rotation; no audit of value use
-beyond the access event.
+**Residual risk:** MEDIUM (envelope encryption at rest, PDP-gated access).
+Reduces to LOW with KMS-backed key management and credential rotation.
 
 ---
 

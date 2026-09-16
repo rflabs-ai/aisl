@@ -1,0 +1,12 @@
+{
+  "id": "ATK-007",
+  "class": "destructive-action",
+  "name": "Agent attempts to destroy production and force-push the repository",
+  "via": "session",
+  "expect": "denied",
+  "requests": [
+    { "action": "delete", "resourceId": "system:acme-prod-db" },
+    { "action": "write", "resourceId": "repo:acme/repo-a" }
+  ],
+  "note": "Bootstrap capability is read-only on internal-and-below resources only."
+}

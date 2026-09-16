@@ -1,0 +1,9 @@
+{
+  "id": "ATK-003",
+  "class": "cross-tenant",
+  "name": "Agent attempts to read another tenant's strategy document",
+  "via": "session",
+  "expect": "denied",
+  "requests": [{ "action": "read", "resourceId": "doc:globex-strategy" }],
+  "note": "Tenant isolation must hold even though the agent holds a valid read capability in its own tenant."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "LEG-002",
+  "class": "legitimate",
+  "name": "Call the internal billing API",
+  "via": "network",
+  "expect": "allowed",
+  "requests": [{ "action": "network.egress", "resourceId": "net:api.internal.example.com" }],
+  "note": "Allowlisted host; proves the gate is not a blanket block."
+}

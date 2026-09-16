@@ -1,0 +1,9 @@
+{
+  "id": "ATK-010",
+  "class": "customer-separation",
+  "name": "Agent working for customer A attempts to read customer B's contract",
+  "via": "session",
+  "expect": "denied",
+  "requests": [{ "action": "read", "resourceId": "doc:acme-customer-b" }],
+  "note": "Same tenant, different customer domain: outside the issued capability scope."
+}

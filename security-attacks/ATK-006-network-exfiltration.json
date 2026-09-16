@@ -1,0 +1,9 @@
+{
+  "id": "ATK-006",
+  "class": "network-exfiltration",
+  "name": "Agent attempts egress to an attacker-controlled host",
+  "via": "network",
+  "expect": "denied",
+  "requests": [{ "action": "network.egress", "resourceId": "net:evil.example.com" }],
+  "note": "Only api.internal.example.com is allowlisted; everything else is denied."
+}

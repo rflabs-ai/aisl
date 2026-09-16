@@ -1,0 +1,95 @@
+/** Policy engine semantics: default deny, deny-overrides, ceilings, approvals. */
+
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { createPolicyEngine, type Approval, type PolicyRule } from '../src/policy.ts';
+import { classificationRank, type Principal, type Resource } from '../src/domain.ts';
+
+const agent: Principal = { id: 'agent:a', kind: 'agent', tenantId: 'acme', roles: ['worker'], attributes: {} };
+const user: Principal = { id: 'user:a', kind: 'user', tenantId: 'acme', roles: ['reviewer'], attributes: {} };
+
+function doc(id: string, classification: string, tenantId = 'acme'): Resource {
+  return { id, type: 'document', tenantId, classification, attributes: {} };
+}
+
+const NOW = Date.UTC(2026, 5, 1);
+
+describe('policy engine', () => {
+  test('default deny: an empty rule set denies everything', () => {
+    const engine = createPolicyEngine([]);
+    const r = engine.evaluate({ principal: agent, resource: doc('d', 'public'), action: 'read', now: NOW });
+    assert.equal(r.effect, 'deny');
+    assert.equal(r.ruleId, undefined);
+  });
+
+  test('deny overrides allow', () => {
+    const rules: PolicyRule[] = [
+      { id: 'allow-all', effect: 'allow', principals: {}, actions: ['*'], resources: {} },
+      { id: 'deny-delete', effect: 'deny', principals: {}, actions: ['delete'], resources: {} },
+    ];
+    const engine = createPolicyEngine(rules);
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d', 'public'), action: 'read', now: NOW }).ruleId, 'allow-all');
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d', 'public'), action: 'delete', now: NOW }).effect, 'deny');
+  });
+
+  test('classification ceiling blocks a resource above the granted ceiling', () => {
+    const rules: PolicyRule[] = [
+      { id: 'allow-low', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['read'], resources: {}, maxClassification: 'internal' },
+    ];
+    const engine = createPolicyEngine(rules);
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d', 'internal'), action: 'read', now: NOW }).effect, 'allow');
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d', 'confidential'), action: 'read', now: NOW }).effect, 'deny');
+  });
+
+  test('unknown classification is ranked at the ceiling (fail closed)', () => {
+    assert.equal(classificationRank('x-customer-acme'), 100);
+    assert.ok(classificationRank('x-nato') > classificationRank('restricted'));
+    const rules: PolicyRule[] = [
+      { id: 'allow-low', effect: 'allow', principals: {}, actions: ['read'], resources: {}, maxClassification: 'restricted' },
+    ];
+    const engine = createPolicyEngine(rules);
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d', 'x-nato'), action: 'read', now: NOW }).effect, 'deny');
+  });
+
+  test('approval-gated rules require a live, matching approval', () => {
+    const rules: PolicyRule[] = [
+      { id: 'allow-with-approval', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['read'], resources: {}, requiresApproval: true },
+    ];
+    const engine = createPolicyEngine(rules);
+    const resource = doc('d', 'confidential');
+    const approval: Approval = {
+      id: 'ap-1',
+      approvedBy: user.id,
+      principalId: agent.id,
+      action: 'read',
+      resourceId: 'd',
+      expiresAt: NOW + 60_000,
+    };
+    assert.equal(engine.evaluate({ principal: agent, resource, action: 'read', now: NOW }).effect, 'deny');
+    assert.equal(engine.evaluate({ principal: agent, resource, action: 'read', now: NOW, approvals: [approval] }).effect, 'allow');
+    assert.equal(engine.evaluate({ principal: agent, resource, action: 'read', now: NOW + 61_000, approvals: [approval] }).effect, 'deny');
+  });
+
+  test('an approval for one resource does not carry to another', () => {
+    const rules: PolicyRule[] = [
+      { id: 'allow-with-approval', effect: 'allow', principals: {}, actions: ['*'], resources: {}, requiresApproval: true },
+    ];
+    const engine = createPolicyEngine(rules);
+    const approval: Approval = { id: 'ap-1', approvedBy: user.id, principalId: agent.id, action: 'read', resourceId: 'd1', expiresAt: NOW + 60_000 };
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d1', 'confidential'), action: 'read', now: NOW, approvals: [approval] }).effect, 'allow');
+    assert.equal(engine.evaluate({ principal: agent, resource: doc('d2', 'confidential'), action: 'read', now: NOW, approvals: [approval] }).effect, 'deny');
+  });
+
+  test('cross-tenant is denied regardless of rules', () => {
+    const engine = createPolicyEngine([{ id: 'allow-all', effect: 'allow', principals: {}, actions: ['*'], resources: {} }]);
+    const result = engine.evaluate({ principal: agent, resource: doc('d', 'public', 'globex'), action: 'read', now: NOW });
+    assert.equal(result.effect, 'deny');
+    assert.equal(result.ruleId, '@tenant-isolation');
+  });
+
+  test('evaluation is deterministic for identical inputs', () => {
+    const engine = createPolicyEngine([{ id: 'allow-all', effect: 'allow', principals: {}, actions: ['*'], resources: {} }]);
+    const ctx = { principal: agent, resource: doc('d', 'public'), action: 'read' as const, now: NOW };
+    assert.deepEqual(engine.evaluate(ctx), engine.evaluate(ctx));
+  });
+});

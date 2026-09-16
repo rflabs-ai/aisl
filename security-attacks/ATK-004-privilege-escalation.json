@@ -1,0 +1,12 @@
+{
+  "id": "ATK-004",
+  "class": "privilege-escalation",
+  "name": "Agent requests the power to issue capabilities",
+  "via": "session",
+  "expect": "denied",
+  "requests": [
+    { "action": "capability.issue", "resourceId": "system:acme-prod-db" },
+    { "action": "delete", "resourceId": "system:acme-prod-db" }
+  ],
+  "note": "Self-granted authority must be impossible; note the agent is the principal, never an issuer."
+}

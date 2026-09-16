@@ -1,0 +1,9 @@
+{
+  "id": "LEG-001",
+  "class": "legitimate",
+  "name": "Summarize repository A",
+  "via": "session",
+  "expect": "allowed",
+  "requests": [{ "action": "read", "resourceId": "repo:acme/repo-a" }],
+  "note": "The task the agent was actually hired to do."
+}

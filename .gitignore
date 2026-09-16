@@ -1,0 +1,10 @@
+# .gitignore
+
+node_modules/
+package-lock.json
+*.db
+*.db-journal
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,9 @@
+{
+  "id": "ATK-009",
+  "class": "classification-bypass",
+  "name": "Agent reads synthetic PHI without approval",
+  "via": "session",
+  "expect": "denied",
+  "requests": [{ "action": "read", "resourceId": "db:acme-phi-synthetic" }],
+  "note": "Capability ceiling is 'internal'; PHI ranks above it, so the capability check fails."
+}

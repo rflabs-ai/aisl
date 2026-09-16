@@ -1,0 +1,68 @@
+# THREAT MODEL
+
+Top-level model. Per-boundary detail lives in `threat-models/`.
+
+## 1. Assets
+
+| Asset | Why it matters |
+| --- | --- |
+| Customer documents, source, PHI/PII, secrets | confidentiality |
+| Source repositories, infrastructure configuration | integrity of the business |
+| Production systems reachable by tools | availability, integrity |
+| The policy set | defines the security boundary itself |
+| Capability signing key | forging it means forging authority |
+| The event log | the only record of what happened |
+| Model provider credentials | cost, and a path to data egress |
+
+## 2. Actors
+
+| Actor | Assumed capability |
+| --- | --- |
+| Legitimate user | acts within granted authority; may be careless |
+| Malicious insider | valid identity, valid approvals, intent to exfiltrate |
+| AI model | **assumed hostile**: lies, hallucinates, retries, escalates |
+| Document / web page / repo / email | contains adversarial instructions |
+| Tool | returns malicious output; attempts scope expansion |
+| External attacker | no identity; targets the API, the sandbox, the supply chain |
+| Operator / administrator | can change policy and code (see B10) |
+
+## 3. Trust boundaries
+
+See `ARCHITECTURE.md` §4 for B1–B10 with enforcement points. Summary of failure
+direction: all boundaries fail closed except B10, which is an accepted open risk
+at this stage.
+
+## 4. Attack classes and current status
+
+| Attack class | Control today | Status | Residual risk |
+| --- | --- | --- | --- |
+| Prompt injection (direct) | data/authority split | **mitigated by construction** | model may still refuse to work |
+| Indirect injection (docs, repos, web, email) | same | **mitigated by construction** | same |
+| Tool-output injection | same; tool context has no issuance handle | **mitigated** | none identified |
+| Cross-tenant access | `@tenant-isolation` + PDP tenant check | **mitigated** | shared-process memory safety |
+| Cross-customer (same tenant) | capability scope | **mitigated** | policy authoring errors |
+| Privilege escalation | issuer-kind allowlist + attenuation | **mitigated** | operator-issued over-broad caps |
+| Secret theft | no allow rule by default; broker gate | **mitigated** | secrets are in memory, unencrypted |
+| Network exfiltration | egress gateway, allowlist | **mitigated (decision only)** | no real proxy yet; see below |
+| Destructive action | no write/delete capability issued | **mitigated** | depends on issued scope |
+| Resource exhaustion | none | **open** | no quotas, timeouts, or rate limits |
+| Sandbox escape | none — `LocalSandbox` is not isolation | **open** | arbitrary code runs in-process |
+| Evidence tampering | hash chain | **detected** | no external anchoring; a full rewrite is possible with DB access |
+| Policy tampering (operator) | none | **open** | B10 |
+| Supply chain | none | **open** | no pinning, signing, or SBOM |
+| Model provider compromise | no provider is wired in | **not applicable yet** | becomes critical at provider integration |
+| Replay | single-use consumption, expiry | **mitigated** | multi-node consistency not solved |
+
+## 5. Out of scope at this stage
+
+Authentication (nothing authenticates anyone yet), transport security (no
+transport), DoS, physical security, side channels, insider abuse of legitimate
+authority, model-data memorisation, and anything requiring hardware trust.
+
+## 6. How to extend this model
+
+1. Add a file under `threat-models/` using the same structure.
+2. For each new attack path, add a case to `security-attacks/`.
+3. A case with no matching test is a claim with no evidence — do not ship it.
+4. Re-run `npm run benchmark`; the numbers in `benchmarks/results.json` change
+   only when behaviour changes.

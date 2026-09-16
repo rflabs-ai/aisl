@@ -1,0 +1,21 @@
+{
+  "name": "ai-security-layer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "High-assurance AI execution environment: the model is not the authority, the infrastructure is.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "test": "node --test \"tests/*.test.ts\" \"security-tests/*.test.ts\"",
+    "demo": "node src/cli.ts demo",
+    "benchmark": "node src/cli.ts benchmark",
+    "attack": "node src/cli.ts attack",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "typescript": "^7.0.2"
+  }
+}

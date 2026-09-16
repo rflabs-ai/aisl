@@ -328,6 +328,47 @@ the benchmark as a usability metric, never as a security metric.
 
 ---
 
+## ADR-014: No single security percentage; per-control assurance targets
+
+**Context:** The project's ambition is expressed as "as close to 99.9996% secure
+as possible". That number (≈3.4 failures per million, the Six Sigma figure) is a
+legitimate aspiration and an unusable metric: it has no denominator, no defined
+failure event, and no test that could falsify it. Publishing it would break the
+rule this project was founded on — every claim must bind to a property, a threat
+model, a mechanism, a test, and evidence.
+
+**Decision:** Refuse the single number. Publish one measurable target per
+control instead (ROADMAP.md, "Assurance targets"), each with a named
+measurement, and report current values on every run via
+`npm run benchmark`. Where a target is unmeasurable (unknown future
+vulnerabilities), say so in IMPOSSIBLE+ rather than assigning it a number.
+
+**Alternatives:** adopt the percentage as a marketing figure (rejected —
+indefensible under audit); adopt a qualitative maturity model (useful later, but
+it hides whether a specific control works); derive a composite score from the
+per-control numbers (rejected — averaging distinct controls produces a number
+that means nothing and ages badly).
+
+**Reasoning:** The instinct behind 99.9996% is right: make unauthorized access
+extraordinarily difficult, and prove it. The way to prove it is per-control
+measurement with growing evidence, not a single figure that no test can fail.
+A composite percentage would also create pressure to keep it high rather than
+to report honestly.
+
+**Security implications:** None directly. Indirectly large: it keeps the
+evidence honest, which is what makes the other twelve claims credible.
+
+**Tradeoffs:** Harder to summarise for a buyer than one number. Some customers
+will ask for the number anyway; the answer is the table plus the test suite.
+
+**Future migration path:** As the corpus grows past ~10^5 trials with
+independent authorship, and as formal verification of the decision core lands,
+per-control rates become statistically meaningful and can be published with
+confidence intervals. At that point a composite reliability figure for the
+*decision core* — never for the whole system — may become defensible.
+
+---
+
 ## ADR-013: Evidence confidentiality — seal at rest, decrypt by clearance
 
 **Context:** Evidence must be reconstructable by a cleared reviewer, but the

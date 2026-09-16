@@ -38,6 +38,9 @@ where it exists today.
 | Basic Git integration | read-only repo access | sandbox | M | P | **[ ]** |
 | Minimal UI (task + evidence view) | operator usability | REST API | M | P | **[ ]** |
 | Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[ ]** |
+| Trust-boundary parser tests | model output is hostile input to a parser | model gateway | S | MVP | **[DONE]** |
+| Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[NEXT]** |
+| Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[NEXT]** |
 
 Nothing above is inflated to look hard. It is a foundation, not a product.
 
@@ -64,6 +67,8 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Audit query + export API | customers read their own evidence | events | M | MVP | **[ ]** |
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[ ]** |
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
+| Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[ ]** |
+| Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[ ]** |
 
 ---
 
@@ -76,7 +81,10 @@ residual risk, as required.
 
 - **Attack surface:** the issuance function, the signing key, the root principal.
 - **Failure modes:** over-broad issuance; key theft; root used for routine work;
-  issuance not attributable to a human.
+  issuance not attributable to a human; **delegation chains asserted by the
+  caller instead of proven** (today `issuerAuthority` is a declared object — a
+  caller can overstate it; ADR-002). Chained delegation must carry the parent's
+  signature so attenuation is enforced cryptographically, not by convention.
 - **Assumptions:** at least one honest key custodian; dual control for root.
 - **Test methodology:** key ceremony drills; issuance fuzzing (every field
   extreme); attempt every attenuation bypass in the harness.
@@ -209,11 +217,11 @@ residual risk, as required.
 ### H13 — Incident response mechanisms
 
 - **Attack surface:** everything, under the assumption of an active incident.
-- **Failure modes:** cannot revoke a session quickly; cannot freeze capability
-  issuance; cannot reconstruct what happened; cannot preserve evidence.
+- **Failure modes:** cannot revoke a session or a capability quickly; cannot
+  freeze issuance; cannot reconstruct what happened; cannot preserve evidence.
 - **Assumptions:** an on-call human exists and can act.
-- **Test methodology:** game days: kill-switch latency measured; session
-  revocation propagation measured; evidence export completeness measured.
+- **Test methodology:** game days measuring kill-switch latency, **capability
+  revocation propagation (target <= 5 s)**, and evidence export completeness.
 - **Residual risk:** incident response is slower than the attack.
 - **Class:** MVP/E.
 
@@ -228,6 +236,24 @@ residual risk, as required.
   differential runs across versions; external red team at defined intervals.
 - **Residual risk:** unknown-unknown attacks.
 - **Class:** MVP/HA.
+
+### H15 — Fail-closed availability engineering
+
+- **Attack surface:** the failure modes of the safety mechanisms themselves.
+- **Failure modes:** a broken policy engine, a full disk, or a closed evidence
+  store denies **everything, silently, per decision**. There is no health
+  signal, no degraded mode, no budget, and no alerting. Fail-closed is correct
+  and currently incompressible: one fault stops all legitimate work with no
+  operator-visible difference from an attack.
+- **Assumptions:** fail-closed stays the default; degradation must never widen
+  authority.
+- **Test methodology:** fault injection for each dependency (engine throws,
+  store unwritable, clock stalled); assert deny + a distinct `denyReason` +
+  an emitted health signal; measure decision latency p99 with and without
+  persistence; define and test the degraded mode explicitly.
+- **Residual risk:** an adversary who can induce the failure gets a denial of
+  service. That is the accepted trade; make it loud, bounded, and recoverable.
+- **Class:** MVP/E.
 
 ---
 
@@ -278,6 +304,39 @@ assumptions outside our control. Documented so they never become marketing copy.
 | Every possible future attack is prevented | the space of attacks is open-ended | defense in depth; fast detection and recovery | none | continuous red teaming; corpus growth rate vs. novel-attack rate |
 | Absolute confidentiality against a compromised model provider | we do not run their hardware | don't send data there: customer-hosted or local inference | provider contract and telemetry | data-flow audits; egress canaries |
 | Mathematical proof that the whole system is secure | the system is too large and changes too often | prove the small, stable core (the PDP) formally | the rest of the system is correctly modelled | scope the proof explicitly; never overclaim its coverage |
+
+---
+
+## Assurance targets (ADR-014)
+
+There is no single number for "how secure is this". A percentage like 99.9996%
+(≈3.4 failures per million) cannot be computed for a system, defended to an
+auditor, or falsified by a test — publishing one would violate this project's
+own rule that every claim binds to a property, a mechanism, and a test. What we
+publish instead is one target per control, each with a measurement.
+
+| # | Property | Target | Measured by | Today |
+|---|---|---|---|---|
+| 1 | Unauthorized action denial | 100% of corpus requests | `unauthorizedActionDenialRate` | 15/15 |
+| 2 | Cross-tenant denial | 100% | invariant 9, ATK-003 | 3/3 |
+| 3 | Injection becoming authority | 0 successes | `promptInjectionSuccesses` | 0/4 |
+| 4 | Decision audit completeness | 100% | `auditCompleteness` | 17/17 |
+| 5 | Evidence chain integrity | valid on every run | `hashChainValid` | true |
+| 6 | Secret values at rest in the store | 0 occurrences | store scan | 0 |
+| 7 | False denial of legitimate work | <= 1% | `falseDenialRate` | 0/2 (corpus far too small to mean it) |
+| 8 | Capability revocation propagation | <= 5 s | not implemented | — |
+| 9 | Decision latency p99 | <= 10 ms | not measured | — |
+| 10 | Recovery from evidence-store failure | defined degraded mode | not implemented | denies everything silently |
+| 11 | Independence of the security core from any single model | structural, by construction | model swap test | met |
+| 12 | Unknown future vulnerability | **not measurable** | IMPOSSIBLE+ | — |
+
+Read row 1 honestly: 15/15 on a corpus written by the same person who wrote the
+code is not evidence of a 10^-6 failure rate. Reaching a defensible
+high-assurance number requires roughly: 10^5–10^6 automated adversarial trials
+with a corpus authored by someone other than the implementer, an independent
+red team, formal verification of the decision core (H-stage), and continuous
+adversarial testing in production-like conditions. Until those exist, the
+defensible statement is "these controls hold on this corpus", not a percentage.
 
 ---
 

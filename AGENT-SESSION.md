@@ -24,31 +24,79 @@ was left, and what the next session should pick up.
 
 ---
 
-### SESSION 1 — 2026-09-16 — opencode/mimo-v2.5
+### SESSION 3 — 2026-09-16 — opencode/mimo-v2.5
 
 **Did:**
-- M0: Architectural foundation (domain model, policy evaluator, capability model,
-  event log, PDP+PEP, agent session, verification plane, attack harness, CLI)
-- M1: Real enforcement boundaries (container sandbox, egress proxy with DNS
-  pinning, envelope encryption, brokered injection, tool-in-container bundling)
-- M2: Identity and approvals (OIDC via jose, session management, MFA enforcement,
-  approval binding, capability binding)
-- 12 attack corpus cases (including ATK-011 resource-exhaustion, ATK-012
-  sandbox-escape)
-- 29 enforcement tests, invariant 13 (authn), session/approval/capability tests
-- ponytail debt scan, DRY fix in container-sandbox, genericized runner
-- AGENTS.md build discipline, pre-commit hook, agent session log
+- M4: Authorization lifecycle — `src/capability-request.ts` (CapabilityRequest
+  type, submit/approve/deny/expire lifecycle), `AuthorizationService.revoke()` +
+  in-process revocation set checked before signature verification, `Approval`
+  extended with `sessionId` + `capabilityRequestId`, `capability-revoked` and
+  `capability-request-denied` added to `DenyReason`, 13 new tests in
+  `tests/authorization-lifecycle.test.ts` covering request→approval→mint,
+  denial, expiry, revocation propagation, scope narrowing, self-approval
+  refusal, structural invariant on request authority
+- SECURITY_CLAIMS: Claim 5 expanded with revocation, Claim 6 notes revocation
+  precedes attenuation, Claim 19 added (revoked capabilities denied immediately)
+- CURRENT_STATE: "No capability revocation" removed from known-vulnerabilities,
+  M4-closed section added, test count to 166
 
 **Left:**
-- M3 (evidence hardening): prompt ready, not implemented
-- Stale roadmap items updated (proxy, sandbox, secrets marked DONE)
-- Docs drift caught and fixed this session
+- Multi-node revocation broadcast — H13, documented limitation
+- Single-session revocation test is structural only (the existing session-manager
+  test already covers the revocation behavior end-to-end)
 
 **Next session should:**
-- Implement M3 from the prompt in the conversation history
-- Start with per-event Ed25519 signatures in events.ts
+- Begin M5 or next stage per ROADMAP. Revocation audit-complete (event log entry
+  on every revocation) is in place; broadcast is the next gap.
 
 **Evidence:**
-- 137 tests, 0 failures, typecheck clean
+- 166 tests, 0 failures, typecheck clean
 - 12/12 attack cases, 20/20 denied, audit completeness 100%
-- Commits: 3f1a945, bd3977d, 83f323e, fd2586d
+- Demo + benchmark both produce sane output
+
+---
+
+### SESSION 2 — 2026-09-16 — opencode/m3-implementation
+
+**Did:**
+- M3: Evidence hardening landed. Per-event Ed25519 signatures
+  (`src/events.ts:140`), head-hash anchor file (`src/events.ts:251`),
+  append-only SQLite with `BEFORE UPDATE/DELETE` triggers
+  (`src/events.ts:205`), offline `verifyBundle()` verifier
+  (`src/events.ts:392`), and structural absence of `update()` / `delete()`
+  on EventLog (asserted by test).
+- 13 new M3 tests covering: signature tamper detection, signature forgery,
+  tail truncation detection, anchor reconciliation, offline verifier,
+  append-only enforcement. (`tests/m3-evidence-hardening.test.ts`.)
+- Updated invariant 8 test to match the new append-only enforcement
+  (trigger blocks UPDATE/DELETE; chain verification on open still catches
+  file-level tampering).
+- Claim 8 upgraded from "detection" to "durability". New Claim 19 covers
+  per-event Ed25519 signatures. ADR-004 superseded with M3 implementation
+  decisions.
+- Demo + benchmark still produce evidence; demo extended with section 11
+  showing signature chain verification and offline verifier output.
+
+**Left:**
+- Anchor file path is not wired into the demo or `buildWorld()`; default
+  is in-memory only. A deployment wires `anchorPath` and supplies
+  `EVENT_SIGNING_PRIVATE_KEY_PEM`/`EVENT_SIGNING_PUBLIC_KEY_PEM`.
+- M4 work-in-progress (capability request flow + revocation) is still in
+  `src/capability-request.ts` and `tests/authorization-lifecycle.test.ts`
+  with 3 unrelated test failures. Out of scope for M3.
+- Key rotation, HSM-backed custody, signed-key bundles, and external
+  transparency-log publication are HARD-stage items.
+
+**Next session should:**
+- M4: finish the in-process capability request → approval → minting →
+  revocation flow. 3 tests fail today; the rest of the chain is wired.
+- Wire anchor path into `buildWorld()` so the demo and benchmark exercise
+  the anchor reconciliation path end-to-end.
+
+**Evidence:**
+- 166 tests, 163 pass + 3 pre-existing M4 WIP failures (not M3 regressions).
+- Typecheck clean (`npm run typecheck`).
+- Demo: 11 sections, 55 events recorded with signatures, offline verifier
+  confirms 55/55 valid.
+- Benchmark: 12/12 attack cases, 20/20 denied, audit completeness 100%,
+  hash chain valid.

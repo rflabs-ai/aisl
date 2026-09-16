@@ -177,7 +177,9 @@ export type DenyReason =
   | 'idp-unavailable'
   | 'session-revoked'
   | 'approval-mfa-required'
-  | 'approval-session-bound';
+  | 'approval-session-bound'
+  | 'capability-revoked'
+  | 'capability-request-denied';
 
 export interface AuthorizationDecision {
   readonly decision: Decision;

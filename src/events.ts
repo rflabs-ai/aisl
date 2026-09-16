@@ -3,9 +3,22 @@
  *
  * Invariant 7: every decision (allow OR deny) produces an event.
  * Invariant 8: mutating, deleting, or reordering any event breaks `verify()`.
+ * M3: each event is also Ed25519-signed, and the head hash is anchored to an
+ * external append-only file so an attacker with host access must rewrite both
+ * consistently.
  */
 
-import { createHash } from 'node:crypto';
+import {
+  createHash,
+  generateKeyPairSync,
+  sign as cryptoSign,
+  verify as cryptoVerify,
+  createPrivateKey,
+  createPublicKey,
+  type KeyObject,
+} from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
   type Action,
@@ -34,18 +47,21 @@ export interface SecurityEvent {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly previousEventHash: string;
   readonly eventHash: string;
+  readonly signature?: string;
 }
 
-export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'eventHash' | 'timestamp'> & {
+export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'eventHash' | 'timestamp' | 'signature'> & {
   readonly timestamp?: number;
 };
 
 export const GENESIS_HASH = '0'.repeat(64);
 
-export function eventHash(
-  e: Omit<SecurityEvent, 'eventHash'>,
-): string {
-  const body = canonicalJson({
+/**
+ * Canonical body used for hashing AND signing. Both must cover the same bytes
+ * so a verifier can independently recompute both and detect any tamper.
+ */
+export function eventBody(e: Omit<SecurityEvent, 'eventHash' | 'signature'>): Record<string, unknown> {
+  return {
     seq: e.seq,
     timestamp: e.timestamp,
     tenantId: e.tenantId,
@@ -61,8 +77,17 @@ export function eventHash(
     result: e.result,
     metadata: e.metadata ?? null,
     previousEventHash: e.previousEventHash,
-  });
-  return createHash('sha256').update(body).digest('hex');
+  };
+}
+
+export function eventHash(
+  e: Omit<SecurityEvent, 'eventHash' | 'signature'>,
+): string {
+  return createHash('sha256').update(canonicalJson(eventBody(e))).digest('hex');
+}
+
+function signatureBody(e: Omit<SecurityEvent, 'eventHash' | 'signature'>): Buffer {
+  return Buffer.from(canonicalJson(eventBody(e)), 'utf8');
 }
 
 export interface ChainVerification {
@@ -72,12 +97,99 @@ export interface ChainVerification {
   readonly detail?: string;
 }
 
+export interface SigningKeyPair {
+  readonly privateKey: KeyObject;
+  readonly publicKey: KeyObject;
+}
+
+/**
+ * Ed25519 signing key for events. Separate from the HMAC capability signing
+ * key (ADR-002) so a leak of one does not break the other. Generated lazily
+ * with a public-key fingerprint exposed for export.
+ *
+ * Production: supply `EVENT_SIGNING_PRIVATE_KEY_PEM` (PKCS8 PEM) plus
+ * `EVENT_SIGNING_PUBLIC_KEY_PEM` for verification. Without it we generate an
+ * ephemeral key per process — events are still signed, but the key is lost
+ * across restarts (same caveat as capability signing, documented in ADR-002).
+ *
+ * ponytail: ephemeral-per-process key is fine for MVP. Cross-process
+ * verification requires the operator to set the PEM env vars or wire HSM
+ * custody (HARD stage).
+ */
+let cachedSigning: SigningKeyPair | undefined;
+let cachedPublicKey: KeyObject | undefined;
+
+export function eventSigningKeyPair(): SigningKeyPair {
+  if (cachedSigning) return cachedSigning;
+  const privPem = process.env.EVENT_SIGNING_PRIVATE_KEY_PEM;
+  const pubPem = process.env.EVENT_SIGNING_PUBLIC_KEY_PEM;
+  if (privPem && pubPem) {
+    cachedSigning = {
+      privateKey: createPrivateKey(privPem),
+      publicKey: createPublicKey(pubPem),
+    };
+    return cachedSigning;
+  }
+  const generated = generateKeyPairSync('ed25519');
+  cachedSigning = generated;
+  process.emitWarning?.(
+    'EVENT_SIGNING_*_PEM unset: using ephemeral Ed25519 event signing key (not durable across restarts)',
+  );
+  return generated;
+}
+
+export function eventPublicKey(): KeyObject {
+  if (cachedPublicKey) return cachedPublicKey;
+  cachedPublicKey = eventSigningKeyPair().publicKey;
+  return cachedPublicKey;
+}
+
+export function signEventBody(
+  e: Omit<SecurityEvent, 'eventHash' | 'signature'>,
+): string {
+  const sig = cryptoSign(null, signatureBody(e), eventSigningKeyPair().privateKey);
+  return sig.toString('base64');
+}
+
+export function verifyEventSignature(
+  e: Pick<SecurityEvent, 'seq' | 'timestamp' | 'tenantId' | 'principal' | 'actor' | 'actorKind' | 'action' | 'resourceId' | 'decision' | 'denyReason' | 'policyId' | 'capabilityId' | 'result' | 'metadata' | 'previousEventHash' | 'signature'>,
+  publicKey: KeyObject,
+): boolean {
+  if (!e.signature) return false;
+  const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
+    seq: e.seq,
+    timestamp: e.timestamp,
+    tenantId: e.tenantId,
+    principal: e.principal,
+    actor: e.actor,
+    actorKind: e.actorKind,
+    action: e.action,
+    resourceId: e.resourceId,
+    decision: e.decision,
+    denyReason: e.denyReason,
+    policyId: e.policyId,
+    capabilityId: e.capabilityId,
+    result: e.result,
+    metadata: e.metadata,
+    previousEventHash: e.previousEventHash,
+  };
+  let sigBuf: Buffer;
+  try {
+    sigBuf = Buffer.from(e.signature, 'base64');
+  } catch {
+    return false;
+  }
+  return cryptoVerify(null, signatureBody(body), publicKey, sigBuf);
+}
+
 export class EventLog {
   private readonly events: SecurityEvent[] = [];
   private readonly db?: DatabaseSync;
   private readonly insert?: ReturnType<DatabaseSync['prepare']>;
+  private readonly anchorPath?: string;
 
-  constructor(sqlitePath?: string) {
+  constructor(sqlitePath?: string, options: { anchorPath?: string } = {}) {
+    if (options.anchorPath) this.anchorPath = options.anchorPath;
     if (!sqlitePath) return;
     this.db = new DatabaseSync(sqlitePath);
     this.db.exec(`
@@ -88,6 +200,21 @@ export class EventLog {
         event_hash TEXT NOT NULL,
         event TEXT NOT NULL
       );
+    `);
+    // M3: append-only enforcement. Any UPDATE or DELETE on security_events
+    // raises — including a direct sqlite3 exec from a script. The runtime
+    // has no update() or delete() method by design.
+    this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS security_events_no_update
+      BEFORE UPDATE ON security_events
+      BEGIN
+        SELECT RAISE(ABORT, 'security_events is append-only');
+      END;
+      CREATE TRIGGER IF NOT EXISTS security_events_no_delete
+      BEFORE DELETE ON security_events
+      BEGIN
+        SELECT RAISE(ABORT, 'security_events is append-only');
+      END;
     `);
     this.insert = this.db.prepare(
       'INSERT INTO security_events (seq, tenant_id, timestamp, event_hash, event) VALUES (?, ?, ?, ?, ?)',
@@ -114,16 +241,36 @@ export class EventLog {
 
   append(input: EventInput): SecurityEvent {
     const previousEventHash = this.events.at(-1)?.eventHash ?? GENESIS_HASH;
-    const partial = {
+    const partial: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
       ...input,
       seq: this.events.length,
       timestamp: input.timestamp ?? Date.now(), // ponytail: event timestamp at append time, not decision time. upgrade: pass decisionAt explicitly when events need sub-ms precision.
       previousEventHash,
     };
-    const event: SecurityEvent = { ...partial, eventHash: eventHash(partial) };
+    const signature = signEventBody(partial);
+    const eventHashValue = eventHash(partial);
+    const event: SecurityEvent = { ...partial, eventHash: eventHashValue, signature };
     this.events.push(event);
     this.insert?.run(event.seq, event.tenantId, event.timestamp, event.eventHash, JSON.stringify(event));
+    if (this.anchorPath) this.appendAnchor(event);
     return event;
+  }
+
+  /**
+   * Append one line to the anchor file. Format: `<seq>:<eventHash>\n`.
+   * The file is a simple external witness — an attacker with host access can
+   * rewrite both the SQLite store and this file, but doing so consistently
+   * requires knowing the entire chain up to the truncation point.
+   *
+   * ponytail: per-append `appendFileSync` is fine at low write volume. If
+   * throughput grows, batch writes (one flush every N appends or T ms) —
+   * the worst case is losing the most recent un-flushed anchor line.
+   */
+  private appendAnchor(event: SecurityEvent): void {
+    const path = this.anchorPath!;
+    const dir = dirname(path);
+    if (dir && dir !== '.' && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(path, `${event.seq}:${event.eventHash}\n`, 'utf8');
   }
 
   all(): readonly SecurityEvent[] {
@@ -134,25 +281,56 @@ export class EventLog {
     return this.events.filter((e) => e.tenantId === tenantId);
   }
 
-  verify(): ChainVerification {
+  verify(options: { publicKey?: KeyObject } = {}): ChainVerification {
     for (let i = 0; i < this.events.length; i++) {
       const e = this.events[i]!;
       const expectedPrev = i === 0 ? GENESIS_HASH : this.events[i - 1]!.eventHash;
       if (e.previousEventHash !== expectedPrev) {
         return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'previous hash mismatch' };
       }
-      const { eventHash: _h, ...rest } = e;
-      if (eventHash(rest) !== e.eventHash) {
+      const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
+        seq: e.seq,
+        timestamp: e.timestamp,
+        tenantId: e.tenantId,
+        principal: e.principal,
+        actor: e.actor,
+        actorKind: e.actorKind,
+        action: e.action,
+        resourceId: e.resourceId,
+        decision: e.decision,
+        denyReason: e.denyReason,
+        policyId: e.policyId,
+        capabilityId: e.capabilityId,
+        result: e.result,
+        metadata: e.metadata,
+        previousEventHash: e.previousEventHash,
+      };
+      if (eventHash(body) !== e.eventHash) {
         return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'event hash mismatch' };
+      }
+      if (options.publicKey) {
+        if (!e.signature) {
+          return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'missing signature' };
+        }
+        if (!verifyEventSignature(e, options.publicKey)) {
+          return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'signature mismatch' };
+        }
       }
     }
     return { valid: true, count: this.events.length };
   }
 
+  /** Read the full anchor file content. Returns empty string if no anchor configured. */
+  anchor(): string {
+    if (!this.anchorPath) return '';
+    if (!existsSync(this.anchorPath)) return '';
+    return readFileSync(this.anchorPath, 'utf8');
+  }
+
   /** Portable evidence bundle for offline verification. */
   bundle(): string {
     return canonicalJson({
-      algorithm: 'sha256-chain-v1',
+      algorithm: 'sha256-chain-ed25519-v1',
       genesis: GENESIS_HASH,
       events: this.events,
       head: this.events.at(-1)?.eventHash ?? GENESIS_HASH,
@@ -162,4 +340,94 @@ export class EventLog {
   close(): void {
     this.db?.close();
   }
+}
+
+export interface VerificationResult {
+  readonly valid: boolean;
+  readonly eventCount: number;
+  readonly signatureValid: boolean;
+  readonly anchorMatch: boolean;
+  readonly errors: readonly string[];
+}
+
+/**
+ * Offline verifier. Operates entirely on an exported bundle + optional anchor
+ * content + optional public key. No database access.
+ */
+export function verifyBundle(
+  bundleJson: string,
+  options: { anchorContent?: string; publicKey?: KeyObject } = {},
+): VerificationResult {
+  const errors: string[] = [];
+  let parsed: { algorithm?: string; genesis?: string; events?: SecurityEvent[]; head?: string };
+  try {
+    parsed = JSON.parse(bundleJson) as typeof parsed;
+  } catch (e) {
+    return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: [`bundle is not valid JSON: ${(e as Error).message}`] };
+  }
+  const events = parsed.events ?? [];
+  if (events.length === 0) {
+    return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: ['bundle contains no events'] };
+  }
+
+  let prev = parsed.genesis ?? GENESIS_HASH;
+  let signatureValid = true;
+  let signatureChecked = options.publicKey !== undefined;
+  for (const e of events) {
+    if (e.previousEventHash !== prev) {
+      errors.push(`seq ${e.seq}: previousEventHash does not match expected predecessor`);
+      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors };
+    }
+    const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
+      seq: e.seq,
+      timestamp: e.timestamp,
+      tenantId: e.tenantId,
+      principal: e.principal,
+      actor: e.actor,
+      actorKind: e.actorKind,
+      action: e.action,
+      resourceId: e.resourceId,
+      decision: e.decision,
+      denyReason: e.denyReason,
+      policyId: e.policyId,
+      capabilityId: e.capabilityId,
+      result: e.result,
+      metadata: e.metadata,
+      previousEventHash: e.previousEventHash,
+    };
+    const recomputed = eventHash(body);
+    if (recomputed !== e.eventHash) {
+      errors.push(`seq ${e.seq}: eventHash recomputation mismatch`);
+      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors };
+    }
+    if (options.publicKey) {
+      if (!e.signature || !verifyEventSignature(e, options.publicKey)) {
+        signatureValid = false;
+        errors.push(`seq ${e.seq}: signature verification failed`);
+      }
+    }
+    prev = e.eventHash;
+  }
+
+  const last = events.at(-1)!;
+  if (parsed.head !== undefined && parsed.head !== last.eventHash) {
+    errors.push(`bundle head ${parsed.head} does not match last event hash ${last.eventHash}: tail truncation suspected`);
+    return { valid: false, eventCount: events.length, signatureValid: signatureChecked ? signatureValid : true, anchorMatch: false, errors };
+  }
+
+  let anchorMatch = true;
+  if (options.anchorContent !== undefined) {
+    if (!options.anchorContent.includes(`${last.seq}:${last.eventHash}`)) {
+      anchorMatch = false;
+      errors.push(`head hash ${last.seq}:${last.eventHash} not present in anchor content`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    eventCount: events.length,
+    signatureValid: signatureChecked ? signatureValid : true,
+    anchorMatch,
+    errors,
+  };
 }

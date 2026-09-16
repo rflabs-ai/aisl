@@ -119,28 +119,35 @@ back to HIGH when Docker is unavailable.
 
 ---
 
-## Claim 5 — Expired and consumed capabilities are refused
+## Claim 5 — Expired, consumed, and revoked capabilities are refused
 
-**Claim:** A capability whose expiry has passed, or whose single-use has been
-consumed, fails verification and cannot authorize an action.
+**Claim:** A capability whose expiry has passed, whose single-use has been
+consumed, or whose id appears in the revocation set, fails verification and
+cannot authorize an action.
 
 **Mechanism:** `verifyCapability` expiry and `usedAt` checks; `markUsed` after a
-successful execution; issuance refuses an expiry in the past.
+successful execution; issuance refuses an expiry in the past; `AuthorizationService.revoke`
+adds the capability id to an in-memory revocation set, checked before signature
+verification in the authorization path.
 
 **Threat model:** TM-001 (replay), TM-003.
 
 **Assumptions:** a monotonic clock. A clock that runs backwards extends capability life.
+Revocation is in-process — multi-node deployments require broadcast (future work).
 
-**Evidence:** invariant 5 tests.
+**Evidence:** invariant 5 tests; `tests/authorization-lifecycle.test.ts`
+revocation suite.
 
 **Test:** `tests/invariants.test.ts` invariant 5; `tests/capability.test.ts`
-single-use case.
+single-use case; `tests/authorization-lifecycle.test.ts` revocation tests.
 
 **Known limitations:** clock is in-process and not authenticated; no replay cache
-across processes; multi-node consumption is not atomic.
+across processes; multi-node consumption is not atomic; revocation set is
+in-process — a revoked capability on node A is still usable on node B until
+broadcast lands.
 
 **Residual risk:** clock manipulation by an operator; race in a future
-distributed deployment.
+distributed deployment; multi-node revocation propagation delay.
 
 ---
 
@@ -151,6 +158,8 @@ resources, actions, classification ceiling, and expiry.
 
 **Mechanism:** `findOverreach` attenuation check at `src/capability.ts:190`;
 issuers other than the authorization root must present their own authority.
+Revocation is checked in `AuthorizationService.evaluate()` before attenuation,
+so a revoked capability fails before signature or scope verification.
 
 **Threat model:** TM-001, TM-003.
 
@@ -195,30 +204,51 @@ action and the event, and no external anchoring.
 
 ---
 
-## Claim 8 — The audit log is tamper-evident
+## Claim 8 — The audit log is tamper-evident and externally anchored (M3)
 
-**Claim:** Modifying any recorded event, or breaking the hash linkage, is detected by
-`EventLog.verify()`.
+**Claim:** Modifying, deleting, reordering, or appending events is detected.
+Tail truncation (removing the newest events) is detected when the bundle is
+reconciled against the head hash recorded in the anchor file. Each event is
+signed with an Ed25519 key separate from the HMAC capability signing key, and
+the verifier works offline against the exported bundle.
 
-**Mechanism:** SHA-256 over canonical JSON of each event including the previous
-event's hash (`src/events.ts:45`).
+**Mechanism:** SHA-256 hash chain over canonical JSON of each event including
+the previous event's hash (`src/events.ts:96`); Ed25519 signature per event
+covering the same body (`src/events.ts:140`); append-only SQLite with
+`BEFORE UPDATE/DELETE` triggers that raise `security_events is append-only`
+(`src/events.ts:205`); head-hash anchor file (`<seq>:<eventHash>\n`,
+`src/events.ts:251`); standalone `verifyBundle()` verifier that operates
+entirely on an exported bundle plus optional public key and anchor content
+(`src/events.ts:392`).
 
-**Threat model:** TM-004.
+**Threat model:** TM-004 (evidence store as a target).
 
-**Assumptions:** the verifier runs against a log the attacker has not fully
-rewritten with recomputed hashes.
+**Assumptions:** the anchor file path is on a medium the attacker cannot
+silently rewrite (filesystem ACLs, WORM storage, or a customer-held witness).
+The signing key is kept separate from the evidence store.
 
-**Evidence:** invariant 8 tests; benchmark `hashChainValid`.
+**Evidence:** invariant 8 tests; M3 tests (`tests/m3-evidence-hardening.test.ts`,
+13 cases including signature tamper, tail truncation, anchor tampering,
+offline verify, and the structural check that EventLog has no update or
+delete method); benchmark `hashChainValid`.
 
-**Test:** `tests/invariants.test.ts` invariant 8.
+**Test:** `tests/invariants.test.ts` invariant 8;
+`tests/m3-evidence-hardening.test.ts`.
 
-**Known limitations:** detection, not prevention. No digital signatures per
-event, no external timestamping, no append-only storage. Tail truncation
-(deleting the newest N events) leaves a valid chain and is not detected. An
-attacker with write access can recompute the whole chain.
+**Known limitations:** an attacker with host access can rewrite both the
+event store and the anchor file *consistently* if they hold the signing key —
+that is the residual risk and the reason the anchor is meant to live on a
+witness the attacker does not control (a customer-held WORM bucket, a
+transparency log, or a separate storage tier). Verification without the
+public key still detects modification and tail truncation via the hash chain;
+signature verification is what proves *who* signed each event. Rotation of
+the signing key is not implemented — a key compromise requires re-signing
+history (a migration, not a flag), same caveat as ADR-013.
 
-**Residual risk:** high for an adversary with host access. Signatures and
-anchoring are VERY HARD stage items.
+**Residual risk:** MEDIUM when the anchor file is on attacker-accessible
+storage; LOW when the anchor is on a witness outside the runtime's trust
+domain. Hardware-backed key custody (HSM/TPM) and external transparency-log
+publication are HARD-stage items that close the residual.
 
 ---
 
@@ -388,6 +418,44 @@ file and the master key, reads everything a cleared reviewer can. Closing that
 requires hardware-backed keys and separation between key custody and data
 custody (H2, ADR-008, ADR-013 migration path).
 
+## Claim 19 — Per-event Ed25519 signatures prove who wrote each event (M3)
+
+**Claim:** Every event appended to the evidence log is signed with an Ed25519
+key pair generated by the runtime. The signature covers the canonical JSON of
+the event body (every field except `eventHash` and `signature`). `EventLog.verify()`
+checks the signature when a public key is supplied, and the standalone
+`verifyBundle()` does the same offline.
+
+**Mechanism:** `node:crypto` `generateKeyPairSync('ed25519')` (`src/events.ts:117`);
+`sign` / `verify` over the canonical body (`src/events.ts:151`); the signing key
+is independent of the HMAC capability signing key (ADR-002, ADR-004); the
+public key is exported via `eventPublicKey()` and serializes to PEM for
+distribution (`src/events.ts:138`).
+
+**Threat model:** TM-004 (repudiation).
+
+**Assumptions:** the runtime process holds the private signing key for the
+duration of an append. In a multi-node deployment the key is shared via KMS
+or HSM (future work); today the key is in process memory and is not durable
+across restarts unless `EVENT_SIGNING_PRIVATE_KEY_PEM` is set.
+
+**Evidence:** M3 test suite — `tampering with an event field breaks the signature`,
+`a signature produced by the wrong key is rejected`, `a bundle with a forged
+signature is rejected`, `an exported bundle verifies offline against the public key`.
+
+**Test:** `tests/m3-evidence-hardening.test.ts`.
+
+**Known limitations:** today the runtime generates an ephemeral key per process
+unless `EVENT_SIGNING_PRIVATE_KEY_PEM` and `EVENT_SIGNING_PUBLIC_KEY_PEM` are
+supplied. This means the public key must be exported and held by the
+verification side; an event signed by yesterday's process cannot be
+verified today without the matching PEM. KMS-backed key custody, key
+rotation, and signed-key bundles are HARD-stage items.
+
+**Residual risk:** key loss or compromise. A signing key in process memory
+without hardware backing is exposed to any attacker with host access at the
+moment of signing. Production: HSM/TPM (HARD stage).
+
 ---
 
 # What this platform does NOT claim
@@ -551,3 +619,38 @@ during outage. Rate limiting is left to the deployment.
 
 **Residual risk:** request amplification during IdP outage; availability
 impact from fail-closed.
+
+---
+
+## Claim 19 — Revoked capabilities are denied immediately (M4)
+
+**Claim:** Once a capability id is added to the revocation set, the next
+`AuthorizationService.authorize` call referencing it returns `deny` with
+`denyReason: 'capability-revoked'` — regardless of signature, scope, or
+classification validity. Propagation is in-process and synchronous: the
+revocation takes effect on the very next decision.
+
+**Mechanism:** `AuthorizationService.revoke(capabilityId, reason)` adds to an
+in-memory `RevokedCapability` record; the revocation set is consulted before
+`verifyCapability` in `src/pdp.ts:evaluate()`; a revocation event is appended
+to the event log so the withdrawal is auditable.
+
+**Threat model:** TM-001 (compromised model or tool with a stale capability),
+TM-003 (separation of duties — offboarded principals).
+
+**Assumptions:** the PDP process is the single decision point; revocation
+propagates synchronously in-process. Multi-node deployments require broadcast
+(future work, documented in ROADMAP H13).
+
+**Evidence:** `tests/authorization-lifecycle.test.ts` — revocation suite:
+issue/use/revoke/deny cycle, immediate propagation, event log entry, and the
+end-to-end request-approval-minting-revoke-deny chain.
+
+**Test:** `tests/authorization-lifecycle.test.ts` M4 revocation tests.
+
+**Known limitations:** in-process revocation only. A capability revoked on node
+A is still usable on node B until broadcast lands. There is no
+distributed-coordination mechanism yet — this is H13.
+
+**Residual risk:** revocation window in multi-node deployments until broadcast
+is implemented.

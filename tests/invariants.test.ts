@@ -419,15 +419,42 @@ describe('invariant 8: security-relevant events are tamper-evident', () => {
     rmSync(path, { force: true });
   });
 
-  test('a tampered store is refused on open instead of being extended', () => {
+  test('a tampered store is refused: the append-only trigger blocks UPDATE/DELETE', () => {
     const path = `${process.env.TEMP ?? '.'}\\ai-security-layer-test-tamper-${Date.now()}.db`;
     const log = new EventLog(path);
     log.append({ tenantId: 't', principal: 'p', actor: 'p', actorKind: 'agent', action: 'read', result: 'success' });
     log.close();
 
     const db = new DatabaseSync(path);
-    db.exec("UPDATE security_events SET event = REPLACE(event, '\"action\":\"read\"', '\"action\":\"delete\"')");
+    assert.throws(
+      () => db.exec("UPDATE security_events SET event = REPLACE(event, '\"action\":\"read\"', '\"action\":\"delete\"')"),
+      /append-only/,
+    );
+    assert.throws(
+      () => db.exec('DELETE FROM security_events WHERE seq = 0'),
+      /append-only/,
+    );
     db.close();
+    rmSync(path, { force: true });
+  });
+
+  test('an open refuses to extend a chain whose head has been tampered with at the file level', () => {
+    const path = `${process.env.TEMP ?? '.'}\\ai-security-layer-test-tamper-chain-${Date.now()}.db`;
+    const log = new EventLog(path);
+    log.append({ tenantId: 't', principal: 'p', actor: 'p', actorKind: 'agent', action: 'read', result: 'success' });
+    const original = log.all()[0]!.eventHash;
+    log.close();
+
+    const db = new DatabaseSync(path);
+    db.prepare('INSERT INTO security_events (seq, tenant_id, timestamp, event_hash, event) VALUES (?, ?, ?, ?, ?)').run(
+      1,
+      't',
+      Date.now(),
+      'a'.repeat(64),
+      JSON.stringify({ seq: 1, tenantId: 't', principal: 'p', actor: 'p', actorKind: 'agent', action: 'read', result: 'success', previousEventHash: 'b'.repeat(64), eventHash: 'a'.repeat(64) }),
+    );
+    db.close();
+    void original;
 
     assert.throws(() => new EventLog(path), /refusing to append/);
     rmSync(path, { force: true });

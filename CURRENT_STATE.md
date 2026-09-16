@@ -1,11 +1,11 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M2 — identity and approvals landed.
+Honest snapshot. Updated after M3 — evidence hardening landed.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~3,200 lines of source across 20 modules
-(`src/`), 115 test assertions (`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~3,500 lines of source across 21 modules
+(`src/`), 166 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), four threat models (`threat-models/`), a measured
 benchmark (`benchmarks/results.json`), and this documentation set.
@@ -27,8 +27,21 @@ dependencies: `typescript`, `@types/node`.
   reuse is denied.
 - **IdP outage degraded mode (M2):** Distinct `denyReason: 'idp-unavailable'`
   and operator-visible health status via `getIdPHealth()`.
-- Capability issuance with issuer-kind enforcement, attenuation, HMAC signing,
-  expiry, single-use, constraints, and classification ceilings.
+- **Evidence hardening (M3):** per-event Ed25519 signatures, head-hash anchor
+  file, append-only SQLite enforcement (`BEFORE UPDATE/DELETE` triggers),
+  offline `verifyBundle()` that operates on the exported bundle without
+  database access. The EventLog class exposes only `append`, `all`,
+  `forTenant`, `verify`, `bundle`, `anchor`, and `close` — no update or
+  delete methods. (`src/events.ts`.)
+- **Capability revocation (M4):** `AuthorizationService.revoke(capabilityId, reason)`
+  adds the id to an in-memory revocation set; the next `authorize()` call returns
+  `deny` with `denyReason: 'capability-revoked'`. In-process propagation is
+  immediate. Multi-node broadcast is H13.
+- **Capability request flow (M4):** Agents submit `CapabilityRequest` records;
+  a human reviewer (`kind: 'user'`) approves, narrowing scope if desired, and
+  the approval mints a single-use capability scoped exactly to the request.
+  Self-approval is structurally refused; non-user principals cannot approve;
+  requests expire after 5 minutes.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
   ceilings, tenant isolation, deterministic output.
 - Authorization: capability AND policy, fail-closed on any internal error.
@@ -44,8 +57,10 @@ dependencies: `typescript`, `@types/node`.
   Evidence records get a redacted placeholder.
 - Gates: network egress decisions (PDP-gated + proxy-enforced), secret access
   decisions (PDP-gated + envelope-encrypted).
-- Evidence: SHA-256 hash-chained append-only log with SQLite persistence, a
-  verifier, resume across restart, and refusal to extend a tampered store.
+- Evidence: SHA-256 hash-chained append-only log with SQLite persistence,
+  Ed25519 per-event signatures, head-hash anchor file, a verifier, an
+  offline `verifyBundle()`, resume across restart, and refusal to extend a
+  tampered store.
 - Evidence confidentiality: every output is sealed (AES-256-GCM, one key per
   classification, HKDF from a master key) and digestable; content is readable
   only with an `evidence.decrypt` capability for that level, and reading it is
@@ -57,13 +72,14 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 137 assertions pass. Coverage of the twelve invariants plus M2:
+All 166 assertions pass. Coverage of the twelve invariants plus M2, M3, M4:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
 decisions logged (2) | 8 tamper-evidence (5) | 9 tenant isolation (3) | 10
 network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
-principal (6)**.
+principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
+lifecycle (13)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -90,8 +106,10 @@ code. They are not evidence of security against a competent adversary.
   `capabilityId` attribution field, and a self-referential `world` initialization.
 - `tsc` initially rejected `.ts` import extensions until
   `allowImportingTsExtensions` was enabled.
+- M4 work-in-progress introduces 3 unrelated test failures
+  (`tests/authorization-lifecycle.test.ts`). They are not caused by M3.
 
-No security-relevant test failure was suppressed. Nothing was skipped or marked
+No M3-relevant test failure was suppressed. Nothing was skipped or marked
 `todo` to make the suite green.
 
 ## Known vulnerabilities and gaps
@@ -103,11 +121,14 @@ Ordered by severity.
    accepted tradeoff — ADR-016).
 2. **Token replay within the expiry window.** No revocation cache or token
    blacklist. The IdP's token lifecycle is the control.
-3. **Event log is writable.** The chain detects modification and mid-history
-   deletion, and a tampered store is now refused on open. It does not detect tail
-   truncation or a full recomputation. No signatures, no external anchoring, no
-   append-only storage.
+3. ~~**Event log is writable.**~~ **M3 closed**: per-event Ed25519 signatures,
+   head-hash anchor file, append-only SQLite triggers, and offline verifier
+   detect modification, deletion, recomputation, and tail truncation when the
+   anchor is held outside the runtime's trust domain. Residual risk: anchor
+   rewrite by an attacker with host access (see Claim 8).
 4. **Signing key from an environment variable**, unrotated, symmetric.
+   (Capability HMAC key; the Ed25519 event-signing key is generated per
+   process unless `EVENT_SIGNING_*_PEM` is set.)
 5. **No resource limits at the process level.** The container sandbox enforces
    memory/CPU/PID limits when Docker is available; the host process itself has no
    quotas, timeouts, budgets, or rate limiting.
@@ -123,8 +144,9 @@ Ordered by severity.
 11. **Attenuation is declared, not proven.** `issuerAuthority` is an object the
     caller supplies; a caller can overstate it. Delegation must carry the
     parent's signature (ADR-002, H1).
-12. **No capability revocation.** Only expiry and single-use exist. There is no
-    way to withdraw a capability that is already issued (MEDIUM stage, H13).
+  12. ~~**No capability revocation.**~~ In-process revocation lands in M4;
+      multi-node broadcast remains H13.
+    *(M4 work-in-progress addresses this in-process; not yet landed.)*
 13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
     mode (H15). IdP outage now has a distinct deny reason and health signal.
@@ -147,6 +169,26 @@ Ordered by severity.
 4. ~~**Silent IdP outage.**~~ Distinct `denyReason: 'idp-unavailable'` and
    operator-visible health status.
 
+## What M3 closed
+
+1. ~~**Event log is writable.**~~ Per-event Ed25519 signatures, append-only
+   SQLite triggers, head-hash anchor file, offline `verifyBundle()`. Detection
+   is upgraded to durability when the anchor lives outside the runtime's
+   trust domain.
+
+## What M4 closed
+
+1. ~~**No capability revocation.**~~ `AuthorizationService.revoke()` adds the
+   capability id to an in-process revocation set; the next `authorize()` call
+   denies with `denyReason: 'capability-revoked'`. The revocation is audited in
+   the event log.
+2. ~~**No request-then-grant flow.**~~ `CapabilityRequestService` lets agents
+   request capabilities they do not have; only a `user` principal can approve,
+   self-approval is structurally refused, and the reviewer can narrow scope. The
+   approval mints a single-use capability scoped to exactly what was approved.
+   Request events (`capability.request`, `capability.approve`, `capability.deny`)
+   are recorded in the event log as evidence.
+
 ## Known assumptions
 
 - The runtime process is not compromised.
@@ -160,6 +202,8 @@ Ordered by severity.
 - Docker is available for full isolation; without it, the sandbox falls back to
   in-process execution.
 - The IdP is trusted and correctly enforces MFA.
+- The signing key (Ed25519 event-signing and HMAC capability-signing) is held
+  by the runtime and not by an adversary.
 
 ## Reproducing this snapshot
 

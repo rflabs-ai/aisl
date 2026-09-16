@@ -450,7 +450,7 @@ of that equation defensible and testable.
 - **Tests required:** authn bypass suite, session fixation/replay, MFA enforcement.
 - **Evidence produced:** authentication events in the chain, approval records.
 
-### M3 — Evidence hardening **[NEXT]**
+### M3 — Evidence hardening **[DONE]**
 
 - **Purpose:** make evidence survive an attacker who controls the host.
 - **Why it matters:** today the chain detects editing but not rewrite or deletion.
@@ -464,3 +464,14 @@ of that equation defensible and testable.
 - **Threats mitigated:** log rewrite, selective deletion, repudiation.
 - **Tests required:** rewrite detection, anchor reconciliation, offline verify.
 - **Evidence produced:** signed bundles, anchor receipts.
+
+Implementation: per-event Ed25519 signatures, append-only SQLite
+(`BEFORE UPDATE/DELETE` triggers), head-hash anchor file (one line per append:
+`<seq>:<eventHash>`), and a standalone `verifyBundle()` that operates on the
+exported bundle without database access. The EventLog class exposes only
+`append`, `all`, `forTenant`, `verify`, `bundle`, `anchor`, and `close` — a
+structural test asserts the absence of `update()` / `delete()`. The 13 M3
+tests cover tamper, tail truncation, anchor reconciliation, offline
+verification, signature forgery, and the structural API check. Residual risk
+remains (anchor rewrite by an attacker with host access) — see Claim 8 and
+ADR-004.

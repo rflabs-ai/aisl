@@ -38,7 +38,14 @@ export interface AuthorizeInput {
   readonly approvals?: readonly Approval[];
 }
 
+export interface RevokedCapability {
+  readonly capabilityId: string;
+  readonly revokedAt: number;
+  readonly reason: string;
+}
+
 const REASON_PRIORITY: readonly DenyReason[] = [
+  'capability-revoked',
   'capability-expired',
   'capability-consumed',
   'capability-signature-invalid',
@@ -49,6 +56,7 @@ const REASON_PRIORITY: readonly DenyReason[] = [
 
 export class AuthorizationService {
   private readonly capabilities = new Map<string, Capability>();
+  private readonly revoked = new Map<string, RevokedCapability>();
   private readonly registry: ResourceRegistry;
   private readonly engine: PolicyEngine;
   private readonly eventLog: EventLog;
@@ -114,6 +122,38 @@ export class AuthorizationService {
     const cap = this.capabilities.get(capabilityId);
     if (!cap || !cap.singleUse) return;
     this.capabilities.set(capabilityId, markUsed(cap, this.now()));
+  }
+
+  /** Revoke a capability. Immediate propagation — next authorize() call sees it. */
+  revoke(capabilityId: string, reason: string): void {
+    const revoked: RevokedCapability = {
+      capabilityId,
+      revokedAt: this.now(),
+      reason,
+    };
+    this.revoked.set(capabilityId, revoked);
+    this.eventLog.append({
+      tenantId: this.capabilities.get(capabilityId)?.tenantId ?? '',
+      principal: 'system',
+      actor: 'system',
+      actorKind: 'authorization',
+      action: 'capability.revoke',
+      resourceId: capabilityId,
+      decision: 'allow',
+      capabilityId,
+      result: 'success',
+      metadata: { phase: 'capability-revocation', reason },
+    });
+  }
+
+  /** Check if a capability has been revoked. */
+  isRevoked(capabilityId: string): boolean {
+    return this.revoked.has(capabilityId);
+  }
+
+  /** Get all revoked capabilities. */
+  revokedCapabilities(): readonly RevokedCapability[] {
+    return [...this.revoked.values()];
   }
 
   authorize(input: AuthorizeInput): AuthorizationDecision {
@@ -259,6 +299,10 @@ export class AuthorizationService {
 
       const failures: { reason: DenyReason; detail: string }[] = [];
       for (const cap of candidates) {
+        if (this.revoked.has(cap.id)) {
+          failures.push({ reason: 'capability-revoked', detail: `capability ${cap.id} has been revoked` });
+          continue;
+        }
         const check = verifyCapability(cap, {
           subject: principal.id,
           tenantId: resource.tenantId,

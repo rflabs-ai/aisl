@@ -16,6 +16,7 @@ import { type Approval } from './policy.ts';
 import { buildWorld, summarizeRepoModel, TENANT_A } from './scenario.ts';
 import { detectInjectionSignals } from './registry.ts';
 import { mockAuth } from './testing.ts';
+import { verifyBundle, eventPublicKey } from './events.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -90,6 +91,15 @@ function demo(): void {
   console.log(`  hash chain valid: ${chain.valid}${chain.valid ? '' : ` (broken at seq ${chain.firstBrokenSeq})`}`);
   console.log(`  head: ${events.at(-1)?.eventHash.slice(0, 32)}...`);
   console.log(`  every decision is recorded: ${denied + allowed > 0}`);
+
+  heading('11. M3: signed events, anchor, and offline verification');
+  const signed = world.eventLog.verify({ publicKey: eventPublicKey() });
+  const offline = verifyBundle(world.eventLog.bundle(), { publicKey: eventPublicKey() });
+  const sampleEvent = events.at(-1);
+  console.log(`  per-event signatures: every event has an Ed25519 signature (sample: ${sampleEvent?.signature ? sampleEvent.signature.slice(0, 24) + '...' : 'none'})`);
+  console.log(`  signature chain verification: ${signed.valid ? 'VALID' : 'INVALID'}`);
+  console.log(`  offline verifier (no DB): ${offline.valid ? 'VALID' : 'INVALID'} (${offline.eventCount} events)`);
+  console.log(`  anchor file configured: ${(world.eventLog as unknown as { anchorPath?: string }).anchorPath ? 'yes' : 'no'}`);
 }
 
 function attack(): void {

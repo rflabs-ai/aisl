@@ -102,30 +102,57 @@ kernel and attested boot.
 
 ---
 
-## ADR-004: Event integrity — hash chain now, signatures later
+## ADR-004: Event integrity — hash chain, per-event Ed25519 signatures, head-hash anchor [superseded by M3]
 
-**Context:** Evidence must be tamper-evident.
+**Context:** Evidence must be tamper-evident, and ideally tamper-resilient
+against an attacker with host access.
 
-**Decision:** Each event carries `previousEventHash` and `eventHash = SHA-256(
-canonical JSON of the event including the previous hash )`. `verify()` recomputes.
+**Decision (M0):** Each event carries `previousEventHash` and
+`eventHash = SHA-256( canonical JSON of the event including the previous hash )`.
+`verify()` recomputes.
 
-**Alternatives:** per-event digital signatures; Merkle tree with an anchored root;
-external append-only log; blockchain (no).
+**Decision (M3 — supersedes the M0 partial position):** Each event also carries
+an Ed25519 signature over the canonical body (everything except `eventHash` and
+`signature`). The SQLite store is protected by `BEFORE UPDATE/DELETE` triggers
+that raise `security_events is append-only`, and a head-hash anchor file
+receives one `<seq>:<eventHash>` line per append. A standalone `verifyBundle()`
+verifier parses an exported bundle and checks the hash chain, the signatures
+(when a public key is provided), and the head against the anchor content —
+no database access required.
 
-**Reasoning:** Detects the realistic failure — someone edits or removes a record —
-at the cost of one hash per event. Signatures would additionally prove *who*
-wrote an event, but there is no key infrastructure to hold them yet, and
-fabricating a signature infrastructure prematurely is exactly the kind of
-fake assurance this project must avoid.
+**Alternatives:** per-event digital signatures only (no anchor — still
+vulnerable to a complete rewrite); Merkle tree with an anchored root
+(heavier, same property); external append-only log only (single point of
+failure); blockchain (no).
 
-**Security implications:** Modification and reordering are detected. Deletion of
-the whole log, or a full recomputation by an attacker with write access, is not.
+**Reasoning:** Ed25519 gives per-event non-repudiation with one signer key
+and zero dependencies (`node:crypto`). The anchor file is the simplest
+external witness: any attacker who rewrites the chain must also rewrite the
+anchor consistently, which raises the bar from "edit one row" to "edit one
+row and one file in lock-step". Append-only triggers are belt-and-braces
+against direct SQL tampering.
 
-**Tradeoffs:** Integrity is internal-consistency only. No non-repudiation.
+**Security implications:** modification, deletion, reordering, recomputation,
+and tail truncation (when the bundle is reconciled against the anchor) are
+detected. Per-event signatures prove who wrote each event. An attacker with
+host access to both the SQLite store *and* the anchor file can still rewrite
+both consistently; this is why the anchor is meant to live on a witness the
+runtime does not control (customer WORM bucket, transparency log, separate
+storage tier). See Claim 8 for the residual risk.
 
-**Future migration path:** Per-event Ed25519 signatures chained to a signed head,
-periodic publication of the head hash to an external anchor (WORM storage,
-transparency log, or customer-held witness), and append-only storage.
+**Tradeoffs:** The Ed25519 key is held in process memory unless
+`EVENT_SIGNING_PRIVATE_KEY_PEM` is supplied. Key rotation requires
+re-signing history (a migration, not a flag), same caveat as ADR-013's
+sealing master key. The anchor file is just a flat text file — no
+tamper-proofing on its own; tamper-proofing comes from it living on a
+different trust domain than the SQLite store.
+
+**Future migration path:** HSM/TPM-backed key custody with envelope
+encryption of the signing key at rest; periodic publication of the head
+hash to an external transparency log (Certificate Transparency, sigstore,
+or a customer-held WORM bucket); signed-key bundles for cross-process
+verification; offline verifier that takes a public-key bundle and anchor
+content from a customer-controlled store.
 
 ---
 

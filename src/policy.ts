@@ -72,6 +72,8 @@ export interface Approval {
   readonly expiresAt: number;
   /** Session id this approval is bound to (empty for unbound) */
   readonly sessionId?: string;
+  /** Link to the originating capability request */
+  readonly capabilityRequestId?: string;
 }
 
 export interface EvaluationContext {

@@ -27,7 +27,7 @@ import { type EventLog, type SecurityEvent } from './events.ts';
 import { type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
-import { hasMfa } from './identity.ts';
+import { hasMfa, type IdPHealth } from './identity.ts';
 
 export interface AuthorizeInput {
   readonly principal: Principal;
@@ -53,17 +53,20 @@ export class AuthorizationService {
   private readonly engine: PolicyEngine;
   private readonly eventLog: EventLog;
   private readonly now: () => number;
+  private readonly idpHealth?: () => IdPHealth;
 
   constructor(
     registry: ResourceRegistry,
     engine: PolicyEngine,
     eventLog: EventLog,
     now: () => number = Date.now,
+    idpHealth?: () => IdPHealth,
   ) {
     this.registry = registry;
     this.engine = engine;
     this.eventLog = eventLog;
     this.now = now;
+    this.idpHealth = idpHealth;
   }
 
   issue(
@@ -121,11 +124,15 @@ export class AuthorizationService {
     // System principals (kind: 'authorization') are internal bootstrap and bypass
     // this check. All human, agent, and service principals must carry valid auth.
     if (principal.kind !== 'authorization' && !isAuthenticated(principal, at)) {
+      // Distinguish IdP outage from bad credentials: if the IdP is unreachable,
+      // emit 'idp-unavailable' so operators can see the degraded state.
+      const idpDown = this.idpHealth?.().status === 'unreachable';
+      const denyReason: DenyReason = idpDown ? 'idp-unavailable' : 'unauthenticated-principal';
       const decision = deny(
         principal.id,
         action,
         resourceId,
-        'unauthenticated-principal',
+        denyReason,
         `principal ${principal.id} has no valid authentication context`,
         at,
       );
@@ -138,7 +145,7 @@ export class AuthorizationService {
           action,
           resourceId,
           decision: 'deny',
-          denyReason: 'unauthenticated-principal',
+          denyReason,
           result: 'denied',
           metadata: { phase: 'decision', reason: decision.reason, authCheck: 'failed' },
         });

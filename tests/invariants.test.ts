@@ -689,6 +689,74 @@ describe('invariant 13: no path to a principal without authentication', () => {
     assert.notEqual(decision.denyReason, 'no-capability');
     assert.equal(decision.denyReason, 'unauthenticated-principal');
   });
+
+  test('IdP outage produces idp-unavailable deny, not unauthenticated-principal', () => {
+    const world = testWorld();
+    world.setIdPHealth({ status: 'unreachable', lastChecked: Date.now(), lastError: 'connection refused' });
+    const unauth = unauthPrincipal('agent:idp-down');
+    const decision = world.authorization.authorize({
+      principal: unauth,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'idp-unavailable');
+  });
+
+  test('IdP healthy + unauthenticated = unauthenticated-principal (not idp-unavailable)', () => {
+    const world = testWorld();
+    world.setIdPHealth({ status: 'healthy', lastChecked: Date.now() });
+    const unauth = unauthPrincipal('agent:idp-ok');
+    const decision = world.authorization.authorize({
+      principal: unauth,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    assert.equal(decision.denyReason, 'unauthenticated-principal');
+  });
+
+  test('approval without MFA is filtered out by the PDP — approval-gated action denied', () => {
+    const world = testWorld({
+      policies: [{
+        id: 'allow-with-approval',
+        effect: 'allow',
+        principals: { kinds: ['agent'] },
+        actions: ['read'],
+        resources: {},
+        requiresApproval: true,
+      }],
+    });
+    // Give the agent a capability for a confidential doc
+    world.authorization.issue(world.root, {
+      subject: world.agent.id,
+      tenantId: 'acme',
+      resourceIds: [world.resources.confidentialDoc!],
+      actions: ['read'],
+      maxClassification: 'confidential',
+      expiresAt: world.clock.now() + 60_000,
+      provenance: { source: 'session-bootstrap' },
+    });
+    // Approval from a user WITHOUT MFA
+    const noMfaAuth = mockAuth({ subject: 'user:no-mfa-approver', amr: ['pwd'] });
+    const approval: Approval = {
+      id: 'ap-no-mfa-pdp',
+      approvedBy: 'user:no-mfa-approver',
+      reviewerAuth: noMfaAuth,
+      principalId: world.agent.id,
+      action: 'read',
+      resourceId: world.resources.confidentialDoc!,
+      expiresAt: world.clock.now() + 60_000,
+    };
+    const decision = world.authorization.authorize({
+      principal: world.agent,
+      action: 'read',
+      resourceId: world.resources.confidentialDoc!,
+      approvals: [approval],
+    });
+    // PDP should deny — the approval is filtered out because reviewer lacks MFA
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'policy-deny');
+  });
 });
 
 describe('OIDC verification: real JWT through jose', () => {

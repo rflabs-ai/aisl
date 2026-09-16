@@ -16,6 +16,7 @@ import { ResourceRegistry, defineResource, ingestDocument } from './registry.ts'
 import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from './runtime.ts';
 import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
+import { type IdPHealth } from './identity.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -73,6 +74,8 @@ export interface World {
   readonly foreignAgent: Principal;
   readonly clock: Clock;
   readonly resources: Readonly<Record<string, string>>;
+  /** Set IdP health status for degraded-mode testing */
+  setIdPHealth(status: IdPHealth): void;
   session(model: ModelPort, overrides?: Partial<SessionOverrides>): AgentSession;
 }
 
@@ -132,7 +135,12 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
   registry.add(defineResource({ id: RESOURCE_IDS.foreignDoc, type: 'document', tenantId: TENANT_B, classification: 'confidential' }));
 
   const policy = createPolicyEngine([...BASELINE_POLICY, ...(options.policies ?? [EGRESS_ALLOWLIST_RULE])]);
-  const authorization = new AuthorizationService(registry, policy, eventLog, clock.now);
+
+  // Default IdP health: healthy. Tests can override via the returned idpHealth setter.
+  let idpHealthStatus: IdPHealth = { status: 'healthy', lastChecked: 0 };
+  const idpHealth = () => idpHealthStatus;
+
+  const authorization = new AuthorizationService(registry, policy, eventLog, clock.now, idpHealth);
   const masterKey = Buffer.from(process.env.SECRET_MASTER_KEY ?? 'dev-master-key-not-for-production-32b!', 'utf8');
   const secrets = new EnvelopeSecretBroker(masterKey, authorization, eventLog, registry);
   const network = new NetworkGateway(registry, authorization, eventLog);
@@ -229,6 +237,9 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
     foreignAgent,
     clock,
     resources: RESOURCE_IDS,
+    setIdPHealth(status) {
+      idpHealthStatus = status;
+    },
     session(model, overrides) {
       return new AgentSession({
         principal: agent,

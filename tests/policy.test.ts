@@ -96,4 +96,50 @@ describe('policy engine', () => {
     const ctx = { principal: agent, resource: doc('d', 'public'), action: 'read' as const, now: NOW };
     assert.deepEqual(engine.evaluate(ctx), engine.evaluate(ctx));
   });
+
+  test('an approval without MFA in reviewerAuth is filtered out by the PDP', () => {
+    // The policy engine itself doesn't check MFA — the PDP does.
+    // But the engine should still deny if no valid approval matches.
+    const rules: PolicyRule[] = [
+      { id: 'allow-with-approval', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['read'], resources: {}, requiresApproval: true },
+    ];
+    const engine = createPolicyEngine(rules);
+    const resource = doc('d', 'confidential');
+    const noMfaAuth = mockAuth({ subject: 'user:no-mfa', amr: ['pwd'] }); // no MFA
+    const approval: Approval = {
+      id: 'ap-no-mfa',
+      approvedBy: 'user:no-mfa',
+      reviewerAuth: noMfaAuth,
+      principalId: agent.id,
+      action: 'read',
+      resourceId: 'd',
+      expiresAt: NOW + 60_000,
+    };
+    // The engine itself doesn't filter — it sees the approval.
+    // But the PDP filters before passing to the engine.
+    // Here we test the engine sees it; the PDP test (invariant 13) tests filtering.
+    const result = engine.evaluate({ principal: agent, resource, action: 'read', now: NOW, approvals: [approval] });
+    assert.equal(result.effect, 'allow', 'engine sees the approval; PDP filters it');
+  });
+
+  test('an approval for principal A cannot be used by principal B', () => {
+    const rules: PolicyRule[] = [
+      { id: 'allow-with-approval', effect: 'allow', principals: {}, actions: ['*'], resources: {}, requiresApproval: true },
+    ];
+    const engine = createPolicyEngine(rules);
+    const resource = doc('d', 'confidential');
+    const approval: Approval = {
+      id: 'ap-wrong-principal',
+      approvedBy: user.id,
+      reviewerAuth: userAuth,
+      principalId: 'agent:a', // approval is for agent:a
+      action: 'read',
+      resourceId: 'd',
+      expiresAt: NOW + 60_000,
+    };
+    // agent:b tries to use an approval meant for agent:a — should deny
+    const otherAgent: Principal = { id: 'agent:b', kind: 'agent', tenantId: 'acme', roles: [], attributes: {} };
+    const result = engine.evaluate({ principal: otherAgent, resource, action: 'read', now: NOW, approvals: [approval] });
+    assert.equal(result.effect, 'deny', 'approval for agent:a must not work for agent:b');
+  });
 });

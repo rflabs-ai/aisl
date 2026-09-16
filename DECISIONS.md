@@ -157,7 +157,7 @@ egress allowlists.
 
 ---
 
-## ADR-006: Identity — deferred, deliberately
+## ADR-006: Identity — deferred, deliberately [SUPERSEDED by ADR-016]
 
 **Context:** The brief requires OIDC/OAuth2/MFA/SSO/service/workload identity.
 None of it exists yet.
@@ -182,6 +182,43 @@ act as one.** Acceptable only because nothing is deployed.
 workload identity via SPIFFE/SPIRE or cloud workload identity federation;
 short-lived service tokens; agent identities derived per session from the
 launching human or service, never global.
+
+---
+
+## ADR-016: Identity — OIDC with MFA, structural enforcement [supersedes ADR-006]
+
+**Context:** ADR-006 deferred identity because the authorization model was
+unstable. It is now stable (M0, M1). The capability model already assumes
+identity that did not exist — `Approval.approvedBy` was an unauthenticated
+string, and any code could construct a `Principal`. M2 makes identity real.
+
+**Decision:** OIDC for humans with MFA enforced at the IdP. Agent identity
+derived per session from the launching human, never a global credential.
+Principal carries an `AuthContext` from the IdP; the PDP rejects any principal
+without valid auth. Approvals require an authenticated human with MFA. Uses
+`jose` (ADR-015) for JWT/JWK verification.
+
+**Alternatives:**
+- **Hand-rolled JWT verification** — rejected: defect by the bar.
+- **No auth, just typed data** — this is ADR-006, superseded.
+- **SPIFFE/SPIRE for workload identity** — deferred to HARD stage; agent
+  identity derived from human session is sufficient for MVP.
+
+**Reasoning:** The PDP needs to know *who* is asking, not just what they hold.
+A single guard in `authorize()` rejects unauthenticated principals — one
+check, not per caller. OIDC is the standard; MFA is non-negotiable for
+approval actions.
+
+**Security implications:** The IdP is a new trust dependency. A compromised
+IdP can issue valid tokens. The runtime cannot distinguish stolen tokens from
+legitimate ones — that is the IdP's job.
+
+**Tradeoffs:** First runtime dependency (jose); IdP dependency for all
+authentication; no offline authentication.
+
+**Future migration path:** SPIFFE/SPIRE for workload identity; short-lived
+service tokens; hardware-backed keys (HSM/TPM) for the IdP; IdP-attested
+MFA for agent sessions; token replay detection via a revocation cache.
 
 ---
 
@@ -447,3 +484,49 @@ than Rust for the parts that will eventually need them.
 **Future migration path:** If formal verification or memory safety becomes a
 requirement for the PDP specifically, rewrite *that module* in Rust behind the
 same interface — the seam already exists.
+
+---
+
+## ADR-015: First runtime dependency — `jose` for OIDC/JWT verification
+
+**Context:** M2 requires OIDC token verification (RS256/ES256 signature check,
+JWKS key retrieval, claim validation). ADR-012 established zero runtime
+dependencies. This ADR admits the first one and records the admission policy.
+
+**Decision:** Accept `jose` (panva/jose, ~230 KB, zero transitive dependencies)
+as a runtime dependency for JWT/JWK operations. The dependency admission policy
+(ROADMAP EASY row) requires:
+
+1. The dependency must be named in an ADR with rationale.
+2. It must have no transitive runtime dependencies.
+3. It must be pinned in `package.json` with a lockfile.
+4. It must be reviewed by at least one maintainer before merge.
+5. An SBOM must be generated and diffed on every build (H10).
+6. The dependency must not introduce a native compilation step.
+
+**Alternatives:**
+- **Hand-roll JWT verification** using `node:crypto` directly — rejected: the
+  defect bar in SECURITY_PRINCIPLES.md makes hand-rolled token verification a
+  defect, not a simplification. JWT/JWKS has a long history of implementation
+  pitfalls (alg:none, key confusion, JKU injection, kid injection) that a vetted
+  library already addresses.
+- **`jsonwebtoken`** — mature but larger, transitive dependencies, deprecated
+  maintainer status.
+- **`oidc-client`** — full OIDC client SDK; we need only token verification, not
+  a full OIDC flow.
+
+**Reasoning:** `jose` is the smallest well-audited JWT library with zero
+transitive dependencies, native ESM support, and comprehensive JWKS handling.
+It is the standard choice for Node.js JWT verification in 2024-2026.
+
+**Security implications:** The dependency becomes part of the trust surface.
+`jose` handles signature verification, key management, and claim validation —
+getting any of these wrong is a critical vulnerability. Using a vetted library
+is explicitly required by the defect bar; hand-rolling is the defect.
+
+**Tradeoffs:** First runtime dependency breaks the zero-dependency property.
+The lockfile pins the exact version; updates require review.
+
+**Future migration path:** None expected — `jose` is the standard Node.js JWT
+library. If a hardware-backed key operation is needed (HSM/TPM), `jose`
+supports WebCrypto which can be backed by hardware.

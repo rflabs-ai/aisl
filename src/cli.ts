@@ -15,6 +15,7 @@ import { runAttackCorpus } from './attacks.ts';
 import { type Approval } from './policy.ts';
 import { buildWorld, summarizeRepoModel, TENANT_A } from './scenario.ts';
 import { detectInjectionSignals } from './registry.ts';
+import { mockAuth } from './testing.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -51,9 +52,11 @@ function demo(): void {
   }
 
   heading('8. Human approval issues a narrow, single-use capability');
+  const demoUserAuth = mockAuth({ subject: world.user.id, amr: ['pwd', 'mfa'] });
   const approval: Approval = {
     id: 'approval-1',
     approvedBy: world.user.id,
+    reviewerAuth: demoUserAuth,
     principalId: world.agent.id,
     action: 'read',
     resourceId: r.confidentialDoc!,

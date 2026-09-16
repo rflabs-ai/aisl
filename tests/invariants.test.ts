@@ -16,7 +16,11 @@ import { EventLog } from '../src/events.ts';
 import { createPolicyEngine, type Approval } from '../src/policy.ts';
 import { ResourceRegistry, defineResource } from '../src/registry.ts';
 import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from '../src/runtime.ts';
-import { testWorld } from '../src/testing.ts';
+import { testWorld, mockAuth, unauthPrincipal, createMockIdP } from '../src/testing.ts';
+import { IdentityProvider } from '../src/identity.ts';
+
+const agentAuth = mockAuth({ subject: 'agent:summarizer-1' });
+const agentXAuth = mockAuth({ subject: 'agent:x' });
 
 describe('invariant 1: an agent cannot perform an action without a valid capability', () => {
   test('a principal with no capability is denied and nothing executes', () => {
@@ -27,6 +31,7 @@ describe('invariant 1: an agent cannot perform an action without a valid capabil
       tenantId: 'acme',
       roles: [],
       attributes: {},
+      auth: mockAuth({ subject: 'agent:no-capability' }),
     };
     const decision = world.authorization.authorize({
       principal: stranger,
@@ -431,7 +436,7 @@ describe('invariant 8: security-relevant events are tamper-evident', () => {
   test('a decision that cannot be recorded is denied, not thrown', () => {
     const registry = new ResourceRegistry();
     registry.add(defineResource({ id: 'r1', type: 'document', tenantId: 'acme', classification: 'internal' }));
-    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {} };
+    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {}, auth: agentXAuth };
     const brokenLog = new EventLog();
     brokenLog.append = () => {
       throw new Error('disk full');
@@ -536,9 +541,11 @@ describe('invariant 11: the agent cannot access secrets unless explicitly author
 
   test('an explicit break-glass capability plus approval yields the value', () => {
     const world = testWorld({ policies: [breakGlassRule('agent:summarizer-1')] });
+    const userAuthCtx = mockAuth({ subject: world.user.id, amr: ['pwd', 'mfa'] });
     const approval: Approval = {
       id: 'approval-secret',
       approvedBy: world.user.id,
+      reviewerAuth: userAuthCtx,
       principalId: world.agent.id,
       action: 'secret.use',
       resourceId: world.resources.secretApiKey!,
@@ -571,7 +578,7 @@ describe('invariant 12: security policy failure defaults toward denial', () => {
       log,
       () => 1_000,
     );
-    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {} };
+    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {}, auth: agentXAuth };
     authz.issue(
       { id: 'authz-root:acme', kind: 'authorization', tenantId: 'acme', roles: [], attributes: {} },
       {
@@ -594,7 +601,7 @@ describe('invariant 12: security policy failure defaults toward denial', () => {
     const registry = new ResourceRegistry();
     registry.add(defineResource({ id: 'r1', type: 'document', tenantId: 'acme', classification: 'internal' }));
     const authz = new AuthorizationService(registry, createPolicyEngine([]), new EventLog(), () => 1_000);
-    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {} };
+    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {}, auth: agentXAuth };
     authz.issue(
       { id: 'authz-root:acme', kind: 'authorization', tenantId: 'acme', roles: [], attributes: {} },
       {
@@ -619,6 +626,167 @@ describe('invariant 12: security policy failure defaults toward denial', () => {
     });
     assert.equal(decision.decision, 'deny');
     assert.equal(decision.denyReason, 'unknown-resource');
+  });
+});
+
+describe('invariant 13: no path to a principal without authentication', () => {
+  test('an unauthenticated principal is denied at the PDP entry point', () => {
+    const world = testWorld();
+    const unauth = unauthPrincipal('agent:no-auth');
+    const decision = world.authorization.authorize({
+      principal: unauth,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'unauthenticated-principal');
+  });
+
+  test('an expired auth context is treated as unauthenticated', () => {
+    const world = testWorld();
+    const expired: Principal = {
+      id: 'agent:expired-auth',
+      kind: 'agent',
+      tenantId: 'acme',
+      roles: [],
+      attributes: {},
+      auth: mockAuth({ subject: 'agent:expired-auth', expiresAt: world.clock.now() - 1 }),
+    };
+    const decision = world.authorization.authorize({
+      principal: expired,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'unauthenticated-principal');
+  });
+
+  test('authorization root (system principal) bypasses auth check', () => {
+    const world = testWorld();
+    // Root is kind: 'authorization', which bypasses the auth check.
+    // Issuing a capability via root should succeed.
+    const cap = world.authorization.issue(world.root, {
+      subject: world.agent.id,
+      tenantId: 'acme',
+      resourceIds: [world.resources.repoA!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: world.clock.now() + 60_000,
+      provenance: { source: 'policy-grant' },
+    });
+    assert.ok(cap.id);
+  });
+
+  test('unauthenticated principal is denied, not a no-capability deny', () => {
+    const world = testWorld();
+    const unauth = unauthPrincipal('agent:unauth-no-cap');
+    const decision = world.authorization.authorize({
+      principal: unauth,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    // Must NOT be no-capability — the auth check fires first
+    assert.notEqual(decision.denyReason, 'no-capability');
+    assert.equal(decision.denyReason, 'unauthenticated-principal');
+  });
+});
+
+describe('OIDC verification: real JWT through jose', () => {
+  test('a valid signed JWT produces a valid AuthContext that passes the PDP', async () => {
+    const idp = await createMockIdP();
+    const verifier = await idp.createIdP();
+    const jwt = await idp.signJWT({ sub: 'user:oidc-alice', amr: ['pwd', 'mfa'] });
+    const auth = await verifier.verifyToken(jwt);
+    assert.ok(auth, 'token should verify');
+    assert.equal(auth.subject, 'user:oidc-alice');
+    assert.ok(auth.expiresAt > 0);
+
+    // Build a principal with this verified auth and use it with the PDP
+    const principal = IdentityProvider.authenticatedPrincipal(auth, 'acme', ['reviewer']);
+    const world = testWorld();
+    const decision = world.authorization.authorize({
+      principal,
+      action: 'read',
+      resourceId: world.resources.repoA!,
+    });
+    // No capability, so denied — but NOT for unauthenticated
+    assert.equal(decision.decision, 'deny');
+    assert.notEqual(decision.denyReason, 'unauthenticated-principal');
+    assert.equal(decision.denyReason, 'no-capability');
+  });
+
+  test('a tampered JWT fails verification', async () => {
+    const idp = await createMockIdP();
+    const verifier = await idp.createIdP();
+    const jwt = await idp.signJWT({ sub: 'user:bad' });
+    const tampered = jwt.slice(0, -10) + 'XXXXXXXXXX';
+    const auth = await verifier.verifyToken(tampered);
+    assert.equal(auth, undefined, 'tampered token must be rejected');
+  });
+
+  test('a token signed with wrong algorithm is rejected', async () => {
+    const idp = await createMockIdP();
+    const verifier = await idp.createIdP();
+    // Sign with ES256 but the IdP only accepts RS256
+    const { privateKey } = await import('jose').then(m => m.generateKeyPair('ES256'));
+    const jwt = await new (await import('jose')).SignJWT({
+      sub: 'user:wrong-alg',
+      iss: 'https://idp.test.example.com',
+      aud: 'test-audience',
+    })
+      .setProtectedHeader({ alg: 'ES256' })
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(privateKey);
+    const auth = await verifier.verifyToken(jwt);
+    assert.equal(auth, undefined, 'wrong algorithm must be rejected');
+  });
+
+  test('expired token is rejected', async () => {
+    const idp = await createMockIdP();
+    const verifier = await idp.createIdP();
+    const jwt = await idp.signJWT({ sub: 'user:expired', exp: Date.now() - 10_000 });
+    const auth = await verifier.verifyToken(jwt);
+    assert.equal(auth, undefined, 'expired token must be rejected');
+  });
+
+  test('wrong audience is rejected', async () => {
+    const idp = await createMockIdP('https://idp.test.example.com', 'correct-audience');
+    const verifier = await idp.createIdP();
+    const jwt = await idp.signJWT({ sub: 'user:wrong-aud', aud: 'wrong-audience' } as never);
+    const auth = await verifier.verifyToken(jwt);
+    assert.equal(auth, undefined, 'wrong audience must be rejected');
+  });
+
+  test('token revocation: a revoked token id is rejected even if otherwise valid', async () => {
+    const idp = await createMockIdP();
+    const verifier = await idp.createIdP();
+    const jwt = await idp.signJWT({ sub: 'user:revoke-me', jti: 'revoke-this-token' });
+    // Should verify before revocation
+    const auth1 = await verifier.verifyToken(jwt);
+    assert.ok(auth1, 'token should verify before revocation');
+    // Revoke it
+    verifier.revokeToken('revoke-this-token');
+    assert.equal(verifier.isTokenRevoked('revoke-this-token'), true);
+    // Should fail after revocation
+    const auth2 = await verifier.verifyToken(jwt);
+    assert.equal(auth2, undefined, 'revoked token must be rejected');
+  });
+
+  test('circuit breaker opens after repeated JWKS fetch failures', async () => {
+    const failingFetch: typeof globalThis.fetch = async () => new Response('Service Unavailable', { status: 503 });
+    const verifier = new IdentityProvider(
+      { issuer: 'https://idp.offline.example.com', audience: 'test', jwksUri: 'https://idp.offline.example.com/jwks' },
+      failingFetch,
+      { circuitBreakerThreshold: 3, circuitBreakerCooldownMs: 60_000 },
+    );
+    // First 3 failures should open the circuit
+    await verifier.verifyToken('some-token');
+    await verifier.verifyToken('some-token');
+    await verifier.verifyToken('some-token');
+    const health = verifier.getIdPHealth();
+    assert.equal(health.status, 'unreachable');
+    assert.ok(health.lastError?.includes('circuit breaker'));
   });
 });
 

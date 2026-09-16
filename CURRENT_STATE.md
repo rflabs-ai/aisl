@@ -1,19 +1,32 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M1 — real enforcement boundaries landed.
+Honest snapshot. Updated after M2 — identity and approvals landed.
 
 ## What exists
 
-Zero-dependency TypeScript foundation on Node 24, ~2,400 lines of source across
-17 modules (`src/`), 101 test assertions (`tests/`, `security-tests/`), a 10-case
-attack corpus (`security-attacks/`), legitimate-task fixtures and a document
-corpus (`security-fixtures/`), four threat models (`threat-models/`), a measured
+TypeScript foundation on Node 24, ~2,800 lines of source across 20 modules
+(`src/`), 115 test assertions (`tests/`, `security-tests/`), a 12-case attack
+corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
+(`security-fixtures/`), four threat models (`threat-models/`), a measured
 benchmark (`benchmarks/results.json`), and this documentation set.
 
-Runtime dependencies: **none**. Dev dependencies: `typescript`, `@types/node`.
+Runtime dependencies: **1** (`jose` — JWT/JWK verification, ADR-015). Dev
+dependencies: `typescript`, `@types/node`.
 
 ## What works
 
+- **Identity and authentication (M2):** OIDC token verification via `jose`
+  (`src/identity.ts`). Principals carry an `AuthContext` from the IdP. The PDP
+  rejects any principal without valid auth (invariant 13). MFA enforced for
+  approvals and session creation.
+- **Session binding (M2):** Sessions bind capabilities and approvals to an
+  authenticated human (`src/session-manager.ts`). Revoking a session
+  invalidates bound capabilities and approvals.
+- **Approval with authenticated reviewer (M2):** `Approval.reviewerAuth` is
+  required and must include MFA. Cross-tenant and cross-principal approval
+  reuse is denied.
+- **IdP outage degraded mode (M2):** Distinct `denyReason: 'idp-unavailable'`
+  and operator-visible health status via `getIdPHealth()`.
 - Capability issuance with issuer-kind enforcement, attenuation, HMAC signing,
   expiry, single-use, constraints, and classification ceilings.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
@@ -44,27 +57,28 @@ Runtime dependencies: **none**. Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 101 assertions pass. Coverage of the twelve invariants:
+All 115 assertions pass. Coverage of the twelve invariants plus M2:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
 decisions logged (2) | 8 tamper-evidence (5) | 9 tenant isolation (3) | 10
-network (3) | 11 secrets (2) | 12 fail closed (3).
+network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
+principal (4)**.
 
 Plus: policy semantics (8), capability integrity (5), evidence sealing (6),
-model output parsing (2), full attack corpus (10 + 3 aggregate), legitimate
-workload (2), ten hostile-model behaviours, **21 M1 enforcement tests**
-(container sandbox, egress proxy, envelope secrets, canary exfiltration,
+model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
+workload (2), ten hostile-model behaviours, 21 M1 enforcement tests (container
+sandbox, egress proxy, envelope secrets, canary exfiltration,
 secret-unreachable-from-sandbox, attack corpus with real backends).
 
 Measured this run (`benchmarks/results.json`):
 
-- 10/10 attack cases behaved as required; 15/15 adversarial requests denied.
+- 12/12 attack cases behaved as required; 20/20 adversarial requests denied.
 - Prompt-injection-driven requests: 4; successes: 0.
 - Legitimate tasks: 2/2 allowed; false-denial rate 0.
-- Audit completeness: 17/17 decisions recorded; hash chain valid.
+- Audit completeness: 22/22 decisions recorded; hash chain valid.
 
-These numbers describe a 10-case corpus written by the same person who wrote the
+These numbers describe a 12-case corpus written by the same person who wrote the
 code. They are not evidence of security against a competent adversary.
 
 ## What failed
@@ -83,54 +97,54 @@ No security-relevant test failure was suppressed. Nothing was skipped or marked
 
 Ordered by severity.
 
-1. **No authentication.** Any code that can build a `Principal` can act as one.
-2. **Event log is writable.** The chain detects modification and mid-history
+1. **IdP is a trust dependency.** A compromised IdP can issue valid tokens.
+   The runtime cannot distinguish stolen tokens from legitimate ones (M2
+   accepted tradeoff — ADR-016).
+2. **Token replay within the expiry window.** No revocation cache or token
+   blacklist. The IdP's token lifecycle is the control.
+3. **Event log is writable.** The chain detects modification and mid-history
    deletion, and a tampered store is now refused on open. It does not detect tail
    truncation or a full recomputation. No signatures, no external anchoring, no
    append-only storage.
-3. **Signing key from an environment variable**, unrotated, symmetric.
-4. **No resource limits at the process level.** The container sandbox enforces
+4. **Signing key from an environment variable**, unrotated, symmetric.
+5. **No resource limits at the process level.** The container sandbox enforces
    memory/CPU/PID limits when Docker is available; the host process itself has no
    quotas, timeouts, budgets, or rate limiting.
-5. **Policy is code.** Anyone who can edit the repository can edit the security
+6. **Policy is code.** Anyone who can edit the repository can edit the security
    boundary. No signature, versioning, review gate, or attribution.
-6. **Shared process for all tenants.** Logical isolation only; one memory-safety
+7. **Shared process for all tenants.** Logical isolation only; one memory-safety
    bug crosses every boundary. Container sandbox isolates per-task when Docker is
    available.
-7. **No transport security** because there is no transport.
-8. **Detector risk.** `detectInjectionSignals` could be mistaken for a control by
+8. **No transport security** because there is no transport.
+9. **Detector risk.** `detectInjectionSignals` could be mistaken for a control by
    a future maintainer. It is telemetry.
-9. **Unknown-unknowns in the corpus.** 10 cases is a start, not coverage.
-10. **Attenuation is declared, not proven.** `issuerAuthority` is an object the
+10. **Unknown-unknowns in the corpus.** 12 cases is a start, not coverage.
+11. **Attenuation is declared, not proven.** `issuerAuthority` is an object the
     caller supplies; a caller can overstate it. Delegation must carry the
     parent's signature (ADR-002, H1).
-11. **No capability revocation.** Only expiry and single-use exist. There is no
+12. **No capability revocation.** Only expiry and single-use exist. There is no
     way to withdraw a capability that is already issued (MEDIUM stage, H13).
-12. **Fail-closed is incompressible.** A broken engine, full disk, or closed
+13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
-    mode (H15).
-13. **Policy cannot express resource hierarchy.** Matching is exact id, type, or
+    mode (H15). IdP outage now has a distinct deny reason and health signal.
+14. **Policy cannot express resource hierarchy.** Matching is exact id, type, or
     classification ceiling — no prefixes or globs, so "all docs under project X"
     is inexpressible (MEDIUM stage).
-14. **Zero runtime dependencies is temporary.** It ends at M2 (OIDC, drivers,
-    HTTP). The admission policy must land before the first runtime dep, not
-    after.
-15. **Structural invariants are maintenance-dependent.** "No path from text to
-    authority" holds only while nobody adds one. It is enforced by tests over
-    today's paths, not by a lint rule.
+15. **No IdP circuit breaker.** Every request attempts JWKS fetch during outage.
+    Rate limiting is left to the deployment.
 
-## What M1 closed
+## What M2 closed
 
-1. ~~**No isolation.**~~ `ContainerSandbox` provides Docker-backed isolation
-   (non-root, read-only rootfs, no network, seccomp, resource limits) when
-   Docker is available. Falls back to `LocalSandbox` with the ceiling documented
-   in the `kind` string.
-2. ~~**No egress enforcement.**~~ `EgressProxy` intercepts HTTP traffic, blocks
-   IP literals, and routes through the PDP. Sandbox `--network none` ensures no
-   bypass path when Docker is available.
-3. ~~**Secrets in plaintext.~~ `EnvelopeSecretBroker` stores secrets encrypted
-   with AES-256-GCM. Evidence records contain `[decrypted-withheld]`, not
-   plaintext values.
+1. ~~**No authentication.**~~ Principals carry `AuthContext` from OIDC IdP.
+   The PDP rejects any principal without valid auth (invariant 13). MFA enforced
+   for approvals and session creation.
+2. ~~**Unauthenticated approvals.**~~ `Approval.reviewerAuth` is required and
+   must include MFA. Cross-tenant and cross-principal approval reuse is denied.
+3. ~~**Agent identity as a global credential.**~~ Agent identity is derived per
+   session from the launching human. Session binding connects capabilities and
+   approvals to the authenticated human.
+4. ~~**Silent IdP outage.**~~ Distinct `denyReason: 'idp-unavailable'` and
+   operator-visible health status.
 
 ## Known assumptions
 
@@ -144,6 +158,7 @@ Ordered by severity.
   cannot constrain judgment.
 - Docker is available for full isolation; without it, the sandbox falls back to
   in-process execution.
+- The IdP is trusted and correctly enforces MFA.
 
 ## Reproducing this snapshot
 

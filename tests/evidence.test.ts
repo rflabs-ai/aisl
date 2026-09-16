@@ -13,14 +13,16 @@ import { type Principal } from '../src/domain.ts';
 import { type PolicyRule } from '../src/policy.ts';
 import { keyIdFor, open, type Sealed } from '../src/seal.ts';
 import { TENANT_A } from '../src/scenario.ts';
-import { testWorld } from '../src/testing.ts';
+import { testWorld, mockAuth } from '../src/testing.ts';
 
+const auditorAuth = mockAuth({ subject: 'user:auditor', amr: ['pwd', 'mfa'] });
 const AUDITOR: Principal = {
   id: 'user:auditor',
   kind: 'user',
   tenantId: TENANT_A,
   roles: ['auditor'],
   attributes: {},
+  auth: auditorAuth,
 };
 
 const EVIDENCE_RULE: PolicyRule = {

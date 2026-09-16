@@ -394,7 +394,6 @@ custody (H2, ADR-008, ADR-013 migration path).
 
 - It does not claim the system is secure, compliant, or certified.
 - It does not claim isolation. `LocalSandbox` is in-process execution.
-- It does not claim authentication. No user is authenticated anywhere.
 - It does not claim prompt-injection *prevention*. It claims injection cannot
   create authority.
 - It does not claim the event log cannot be destroyed — only that tampering with
@@ -403,3 +402,152 @@ custody (H2, ADR-008, ADR-013 migration path).
   administrator, or a malicious hardware/firmware supply chain.
 - It does not claim HIPAA, SOC 2, ISO 27001, or any government authorization.
   See COMPLIANCE.md.
+
+---
+
+## Claim 14 — No path to a principal without authentication (M2)
+
+**Claim:** Every principal that reaches `AuthorizationService.authorize` carries
+a valid, non-expired `AuthContext` issued by a trusted OIDC IdP, except system
+principals (`kind: 'authorization'`). Unauthenticated or expired-auth principals
+are denied with `denyReason: 'unauthenticated-principal'` before any capability
+or policy check.
+
+**Mechanism:** `isAuthenticated(principal, now)` guard at `src/pdp.ts:155`,
+enforced once in the shared `authorize()` function — not per caller. The
+`AuthContext` is produced only by `IdentityProvider.verifyToken` (`src/identity.ts`)
+using `jose` for JWT/JWK signature verification (ADR-015). Hand-rolled token
+verification is a defect by the bar in SECURITY_PRINCIPLES.md.
+
+**Threat model:** TM-001 (impersonation), TM-003 (cross-tenant).
+
+**Assumptions:** the IdP is trusted; the signing keys are distributed securely;
+the runtime process is not compromised.
+
+**Evidence:** invariant 13 tests (4 cases: unauthenticated denied, expired auth
+denied, root bypass works, no-auth fires before no-capability).
+
+**Test:** `tests/invariants.test.ts` invariant 13.
+
+**Known limitations:** the IdP is an external trust dependency. A compromised
+IdP can issue valid tokens. The runtime cannot distinguish a stolen token from
+a legitimate one — that is the IdP's responsibility.
+
+**Residual risk:** IdP compromise; token theft before expiry; IdP clock skew
+extending token life (mitigated by clock tolerance).
+
+---
+
+## Claim 15 — Approvals require an authenticated human with MFA (M2)
+
+**Claim:** An approval record (`Approval`) cannot be created without a
+`reviewerAuth` field containing a valid, non-expired `AuthContext` whose AMR
+(Authentication Methods References) includes MFA. The PDP filters out approvals
+whose reviewer lacks MFA or whose auth has expired, before passing approvals
+to the policy engine.
+
+**Mechanism:** `Approval.reviewerAuth` field (required, `src/policy.ts:63`);
+`hasMfa(a.reviewerAuth)` check in `src/pdp.ts:283` before policy evaluation.
+Session creation (`src/session-manager.ts:66`) also requires MFA.
+
+**Threat model:** TM-001 (impersonation), TM-003 (separation of duties bypass).
+
+**Assumptions:** the IdP enforces MFA and accurately reports it in the AMR claim.
+
+**Evidence:** invariant 13 tests; policy engine approval tests; MFA enforcement
+in session creation.
+
+**Test:** `tests/invariants.test.ts` invariant 13;
+`tests/policy.test.ts` approval tests.
+
+**Known limitations:** MFA enforcement depends on the IdP correctly populating
+the AMR claim. A malicious or misconfigured IdP could omit MFA from the AMR.
+
+**Residual risk:** IdP misconfiguration; AMR claim manipulation by the IdP.
+
+---
+
+## Claim 16 — Cross-tenant and cross-principal approval reuse is denied (M2)
+
+**Claim:** An approval issued for principal A on resource R cannot be used by
+principal B, and an approval for tenant A cannot authorize actions in tenant B.
+The policy engine's `approvalApplies` function matches on `principalId`,
+`action`, `resourceId`, and expiry — all four must match.
+
+**Mechanism:** `approvalApplies` in `src/policy.ts:106`; tenant equality check
+in `src/policy.ts:142`; PDP tenant guard in `src/pdp.ts:225`.
+
+**Threat model:** TM-003 (cross-tenant), TM-001 (approval theft).
+
+**Assumptions:** the approval record is created correctly.
+
+**Evidence:** policy engine tests (approval for one resource does not carry to
+another; cross-tenant denied).
+
+**Test:** `tests/policy.test.ts` approval tests.
+
+**Known limitations:** approvals are in-memory; no persistence or revocation
+mechanism yet.
+
+**Residual risk:** approval reuse within the same session (bounded by expiry).
+
+---
+
+## Claim 17 — Token replay and signature-stripped tokens are rejected (M2)
+
+**Claim:** JWT tokens with invalid signatures, expired claims, wrong audience,
+wrong issuer, or `alg: none` are rejected by `IdentityProvider.verifyToken`.
+The `jose` library performs full JWT verification including algorithm
+whitelisting.
+
+**Mechanism:** `jwtVerify` from `jose` with `algorithms: ['RS256', 'ES256']`
+(default), `issuer` and `audience` checks, clock tolerance. Token expiry is
+checked both by `jose` and by `isAuthenticated` at the PDP.
+
+**Threat model:** TM-001 (token forgery, replay), TM-005 (algorithm confusion).
+
+**Assumptions:** the IdP's signing keys are secure; the JWKS endpoint is
+accessible.
+
+**Evidence:** invariant 13 tests (expired auth rejected); `jose` library's own
+test suite covers signature verification, alg:none rejection, etc.
+
+**Test:** `tests/invariants.test.ts` invariant 13 (expired auth case).
+
+**Known limitations:** token replay within the expiry window is not detected
+by the runtime — the IdP's token lifecycle and revocation are the control.
+
+**Residual risk:** stolen valid tokens; IdP token lifetime exceeding the
+session lifetime.
+
+---
+
+## Claim 18 — IdP outage produces operator-visible degraded state (M2)
+
+**Claim:** When the IdP is unreachable or returns errors, the system denies
+all unauthenticated requests with `denyReason: 'idp-unavailable'` (distinct
+from 'unauthenticated-principal'). The IdP health status is exposed via
+`IdentityProvider.getIdPHealth()` for operator monitoring. This is NOT silent
+universal denial — the deny reason is distinct and the health signal is
+emitted.
+
+**Mechanism:** `IdentityProvider.health` field updated on each JWKS fetch;
+`IDP_UNAVAILABLE_DENY` constant; `getSigningKeys()` returns `undefined` on
+fetch failure, causing `verifyToken` to return `undefined`, causing
+`isAuthenticated` to fail.
+
+**Threat model:** H15 (fail-closed availability engineering).
+
+**Assumptions:** the operator monitors the health endpoint; fail-closed is
+the correct default.
+
+**Evidence:** IdP health tracking in `src/identity.ts`; distinct deny reason
+for IdP unavailability.
+
+**Test:** `src/identity.ts` IdP health tracking.
+
+**Known limitations:** no circuit breaker — every request attempts JWKS fetch
+during outage. Rate limiting is left to the deployment.
+
+**Residual risk:** request amplification during IdP outage; availability
+impact from fail-closed.

@@ -25,12 +25,54 @@ export const CAPABILITY_ISSUER_KINDS: readonly PrincipalKind[] = [
 /** Principals that may act but may never mint authority. */
 export const NON_AUTHORITY_KINDS: readonly PrincipalKind[] = ['model', 'tool', 'agent'];
 
+/**
+ * Authentication context: proof that this principal authenticated via a trusted
+ * IdP. Produced ONLY by IdentityProvider.verifyToken (src/identity.ts).
+ * M2 structural guarantee: the PDP rejects any principal whose auth field is
+ * undefined.
+ */
+export interface AuthContext {
+  /** OIDC issuer URL */
+  readonly issuer: string;
+  /** Subject identifier from the IdP (sub claim) */
+  readonly subject: string;
+  /** Expected audience */
+  readonly audience: string;
+  /** Token expiry as epoch milliseconds */
+  readonly expiresAt: number;
+  /** Token issuance time as epoch milliseconds */
+  readonly issuedAt: number;
+  /** Unique token identifier (jti claim) */
+  readonly tokenId: string;
+  /** Time the user authenticated (auth_time claim) */
+  readonly authTime: number;
+  /** Authentication Methods References — must include MFA for approvals */
+  readonly amr: readonly string[];
+  /** Authentication Context Class Reference */
+  readonly acr?: string;
+  /** Full JWT payload for extensibility */
+  readonly claims: Readonly<Record<string, unknown>>;
+  /** When this token was verified by the runtime */
+  readonly verifiedAt: number;
+}
+
 export interface Principal {
   readonly id: string;
   readonly kind: PrincipalKind;
   readonly tenantId: string;
   readonly roles: readonly string[];
   readonly attributes: Readonly<Record<string, string | number | boolean>>;
+  /**
+   * M2: authentication context from the IdP. Undefined means unauthenticated.
+   * The PDP MUST reject principals where auth is undefined — this is enforced
+   * in pdp.ts authorize() as a single guard, not per-caller.
+   */
+  readonly auth?: AuthContext;
+}
+
+/** Type guard: principal carries a valid, non-expired AuthContext. */
+export function isAuthenticated(p: Principal, now: number): p is Principal & { readonly auth: AuthContext } {
+  return p.auth !== undefined && p.auth.expiresAt > now;
 }
 
 export type KnownClassification =
@@ -130,7 +172,12 @@ export type DenyReason =
   | 'evidence-write-failure'
   | 'issuer-not-permitted'
   | 'issuer-insufficient-authority'
-  | 'unknown-resource';
+  | 'unknown-resource'
+  | 'unauthenticated-principal'
+  | 'idp-unavailable'
+  | 'session-revoked'
+  | 'approval-mfa-required'
+  | 'approval-session-bound';
 
 export interface AuthorizationDecision {
   readonly decision: Decision;

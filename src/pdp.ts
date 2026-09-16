@@ -21,11 +21,13 @@ import {
   type Principal,
   allow,
   deny,
+  isAuthenticated,
 } from './domain.ts';
 import { type EventLog, type SecurityEvent } from './events.ts';
 import { type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
+import { hasMfa } from './identity.ts';
 
 export interface AuthorizeInput {
   readonly principal: Principal;
@@ -114,6 +116,38 @@ export class AuthorizationService {
   authorize(input: AuthorizeInput): AuthorizationDecision {
     const at = this.now();
     const { principal, action, resourceId } = input;
+
+    // M2: single guard — no unauthenticated principal reaches the PDP.
+    // System principals (kind: 'authorization') are internal bootstrap and bypass
+    // this check. All human, agent, and service principals must carry valid auth.
+    if (principal.kind !== 'authorization' && !isAuthenticated(principal, at)) {
+      const decision = deny(
+        principal.id,
+        action,
+        resourceId,
+        'unauthenticated-principal',
+        `principal ${principal.id} has no valid authentication context`,
+        at,
+      );
+      try {
+        this.eventLog.append({
+          tenantId: principal.tenantId,
+          principal: principal.id,
+          actor: principal.id,
+          actorKind: principal.kind,
+          action,
+          resourceId,
+          decision: 'deny',
+          denyReason: 'unauthenticated-principal',
+          result: 'denied',
+          metadata: { phase: 'decision', reason: decision.reason, authCheck: 'failed' },
+        });
+      } catch {
+        // Evidence write failure on an auth check — still deny
+      }
+      return decision;
+    }
+
     const decision = this.evaluate(input, at);
     try {
       this.eventLog.append({
@@ -239,7 +273,18 @@ export class AuthorizationService {
           action,
           now: at,
           params,
-          approvals,
+          approvals: approvals?.filter((a) => {
+            // M2: every approval must come from an authenticated human with MFA.
+            // Reject approvals where the reviewer lacks valid auth or MFA.
+            if (!hasMfa(a.reviewerAuth)) {
+              return false;
+            }
+            // Reject expired reviewer auth
+            if (a.reviewerAuth.expiresAt <= at) {
+              return false;
+            }
+            return true;
+          }),
           networkHost,
         });
 

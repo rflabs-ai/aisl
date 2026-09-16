@@ -5,7 +5,7 @@
  * three cannot drift.
  */
 
-import { type Action, type ActionRequest, type Principal } from './domain.ts';
+import { type Action, type ActionRequest, type AuthContext, type Principal } from './domain.ts';
 import { EventLog } from './events.ts';
 import { NetworkGateway } from './gates.ts';
 import { EnvelopeSecretBroker } from './envelope-secrets.ts';
@@ -19,6 +19,24 @@ import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
+
+/** Mock AuthContext for scenario principals — M2 test infrastructure. */
+function scenarioAuth(subject: string, overrides: Partial<AuthContext> = {}): AuthContext {
+  return {
+    issuer: 'https://idp.test.example.com',
+    subject,
+    audience: 'test-audience',
+    expiresAt: Date.now() + 86_400_000,
+    issuedAt: Date.now(),
+    tokenId: `tok-${subject.replace(/[:/]/g, '-')}`,
+    authTime: Date.now(),
+    amr: ['pwd', 'mfa'],
+    acr: 'urn:mace:incommon:iap:silver',
+    claims: {},
+    verifiedAt: Date.now(),
+    ...overrides,
+  };
+}
 
 export interface Clock {
   now(): number;
@@ -148,9 +166,30 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
   tools.register(exportTool);
 
   const root = authorizationRoot(TENANT_A);
-  const agent: Principal = { id: 'agent:summarizer-1', kind: 'agent', tenantId: TENANT_A, roles: ['worker'], attributes: {} };
-  const user: Principal = { id: 'user:alice', kind: 'user', tenantId: TENANT_A, roles: ['reviewer'], attributes: {} };
-  const foreignAgent: Principal = { id: 'agent:globex-1', kind: 'agent', tenantId: TENANT_B, roles: ['worker'], attributes: {} };
+  const agent: Principal = {
+    id: 'agent:summarizer-1',
+    kind: 'agent',
+    tenantId: TENANT_A,
+    roles: ['worker'],
+    attributes: {},
+    auth: scenarioAuth('agent:summarizer-1'),
+  };
+  const user: Principal = {
+    id: 'user:alice',
+    kind: 'user',
+    tenantId: TENANT_A,
+    roles: ['reviewer'],
+    attributes: {},
+    auth: scenarioAuth('user:alice'),
+  };
+  const foreignAgent: Principal = {
+    id: 'agent:globex-1',
+    kind: 'agent',
+    tenantId: TENANT_B,
+    roles: ['worker'],
+    attributes: {},
+    auth: scenarioAuth('agent:globex-1'),
+  };
 
   // Narrow bootstrap capability: read only, internal and below, one hour.
   authorization.issue(root, {

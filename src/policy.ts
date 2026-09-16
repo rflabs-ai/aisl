@@ -10,6 +10,7 @@
 
 import {
   type Action,
+  type AuthContext,
   type Classification,
   type Principal,
   type PrincipalKind,
@@ -53,13 +54,24 @@ export interface PolicyRule {
   readonly requiresApproval?: boolean;
 }
 
+/**
+ * M2 Approval: an approval is a non-repudiable record bound to an authenticated
+ * human who passed MFA. The reviewerAuth field is required — an approval without
+ * an authenticated reviewer is structurally invalid.
+ */
 export interface Approval {
   readonly id: string;
+  /** Principal id of the human who approved */
   readonly approvedBy: string;
+  /** The authenticated human's AuthContext — proves identity and MFA */
+  readonly reviewerAuth: AuthContext;
+  /** Principal that is being approved to act */
   readonly principalId: string;
   readonly action: Action;
   readonly resourceId: string;
   readonly expiresAt: number;
+  /** Session id this approval is bound to (empty for unbound) */
+  readonly sessionId?: string;
 }
 
 export interface EvaluationContext {

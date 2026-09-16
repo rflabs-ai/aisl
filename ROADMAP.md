@@ -39,7 +39,7 @@ where it exists today.
 | Minimal UI (task + evidence view) | operator usability | REST API | M | P | **[ ]** |
 | Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[ ]** |
 | Trust-boundary parser tests | model output is hostile input to a parser | model gateway | S | MVP | **[DONE]** |
-| Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[NEXT]** |
+| Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[DONE]** |
 | Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[NEXT]** |
 
 Nothing above is inflated to look hard. It is a foundation, not a product.
@@ -325,10 +325,10 @@ publish instead is one target per control, each with a measurement.
 
 | # | Property | Target | Measured by | Today |
 |---|---|---|---|---|
-| 1 | Unauthorized action denial | 100% of corpus requests | `unauthorizedActionDenialRate` | 15/15 |
+| 1 | Unauthorized action denial | 100% of corpus requests | `unauthorizedActionDenialRate` | 20/20 |
 | 2 | Cross-tenant denial | 100% | invariant 9, ATK-003 | 3/3 |
 | 3 | Injection becoming authority | 0 successes | `promptInjectionSuccesses` | 0/4 |
-| 4 | Decision audit completeness | 100% | `auditCompleteness` | 17/17 |
+| 4 | Decision audit completeness | 100% | `auditCompleteness` | 22/22 |
 | 5 | Evidence chain integrity | valid on every run | `hashChainValid` | true |
 | 6 | Secret values at rest in the store | 0 occurrences | store scan | 0 |
 | 7 | False denial of legitimate work | <= 1% | `falseDenialRate` | 0/2 (corpus far too small to mean it) |
@@ -337,6 +337,10 @@ publish instead is one target per control, each with a measurement.
 | 10 | Recovery from evidence-store failure | defined degraded mode | not implemented | denies everything silently |
 | 11 | Independence of the security core from any single model | structural, by construction | model swap test | met |
 | 12 | Unknown future vulnerability | **not measurable** | IMPOSSIBLE+ | — |
+| **13** | **Unauthenticated principals reaching the PDP** | **0** | **invariant 13** | **0** |
+| **14** | **Approvals with verified MFA** | **100%** | **invariant 13, MFA check** | **100%** |
+| **15** | **Approval replay acceptance** | **0** | **single-use + expiry** | **0** |
+| **16** | **Session revocation propagation** | **<= 5 s** | **SessionManager.revoke** | **immediate (in-memory)** |
 
 Read row 1 honestly: 15/15 on a corpus written by the same person who wrote the
 code is not evidence of a 10^-6 failure rate. Reaching a defensible

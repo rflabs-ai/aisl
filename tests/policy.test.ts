@@ -4,9 +4,12 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPolicyEngine, type Approval, type PolicyRule } from '../src/policy.ts';
 import { classificationRank, type Principal, type Resource } from '../src/domain.ts';
+import { mockAuth } from '../src/testing.ts';
 
-const agent: Principal = { id: 'agent:a', kind: 'agent', tenantId: 'acme', roles: ['worker'], attributes: {} };
-const user: Principal = { id: 'user:a', kind: 'user', tenantId: 'acme', roles: ['reviewer'], attributes: {} };
+const agentAuth = mockAuth({ subject: 'agent:a' });
+const userAuth = mockAuth({ subject: 'user:a', amr: ['pwd', 'mfa'] });
+const agent: Principal = { id: 'agent:a', kind: 'agent', tenantId: 'acme', roles: ['worker'], attributes: {}, auth: agentAuth };
+const user: Principal = { id: 'user:a', kind: 'user', tenantId: 'acme', roles: ['reviewer'], attributes: {}, auth: userAuth };
 
 function doc(id: string, classification: string, tenantId = 'acme'): Resource {
   return { id, type: 'document', tenantId, classification, attributes: {} };
@@ -60,6 +63,7 @@ describe('policy engine', () => {
     const approval: Approval = {
       id: 'ap-1',
       approvedBy: user.id,
+      reviewerAuth: userAuth,
       principalId: agent.id,
       action: 'read',
       resourceId: 'd',
@@ -75,7 +79,7 @@ describe('policy engine', () => {
       { id: 'allow-with-approval', effect: 'allow', principals: {}, actions: ['*'], resources: {}, requiresApproval: true },
     ];
     const engine = createPolicyEngine(rules);
-    const approval: Approval = { id: 'ap-1', approvedBy: user.id, principalId: agent.id, action: 'read', resourceId: 'd1', expiresAt: NOW + 60_000 };
+    const approval: Approval = { id: 'ap-1', approvedBy: user.id, reviewerAuth: userAuth, principalId: agent.id, action: 'read', resourceId: 'd1', expiresAt: NOW + 60_000 };
     assert.equal(engine.evaluate({ principal: agent, resource: doc('d1', 'confidential'), action: 'read', now: NOW, approvals: [approval] }).effect, 'allow');
     assert.equal(engine.evaluate({ principal: agent, resource: doc('d2', 'confidential'), action: 'read', now: NOW, approvals: [approval] }).effect, 'deny');
   });

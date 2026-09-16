@@ -12,12 +12,11 @@ import {
   type Action,
   type ActionRequest,
   type AuthorizationDecision,
-  type Classification,
   type Principal,
   type ResourceType,
   canonicalJson,
-  classificationRank,
 } from './domain.ts';
+import { seal } from './seal.ts';
 import { type EventLog } from './events.ts';
 import { type Approval } from './policy.ts';
 import { type AuthorizationService } from './pdp.ts';
@@ -115,21 +114,6 @@ export interface SessionConfig {
   readonly approvals?: readonly Approval[];
   readonly now?: () => number;
   readonly sessionId?: string;
-  /** Registered secret values. Output containing any of them is never written to evidence. */
-  readonly sensitiveValues?: readonly string[];
-}
-
-/**
- * Evidence content policy. Output is always provenanced by digest; content is
- * inlined only for resources at or below this ceiling, so sensitive data is not
- * duplicated into a store that is weaker than the data it came from.
- *
- * ponytail: in-memory ceiling per deployment. Raise once the evidence store is
- * encrypted at rest, tenant-partitioned, and append-only; move above-ceiling
- * content to a content-addressed artifact store (H9) instead of raising this.
- */
-export function evidenceInlineCeiling(): Classification {
-  return (process.env.EVIDENCE_INLINE_CEILING as Classification) ?? 'internal';
 }
 
 export class AgentSession {
@@ -285,17 +269,8 @@ export class AgentSession {
   ): void {
     const rendered = output === undefined ? null : typeof output === 'string' ? output : canonicalJson(output);
     const digest = rendered === null ? null : createHash('sha256').update(rendered).digest('hex');
-    const verifications = extra.verifications as readonly Verification[] | undefined;
-    const clean = verifications === undefined || verifications.every((v) => v.result === 'pass');
     const classification = this.cfg.registry.get(request.resourceId)?.classification ?? 'x-unknown-resource';
-    const leaksSecret =
-      rendered !== null &&
-      (this.cfg.sensitiveValues ?? []).some((v) => v.length > 0 && rendered.includes(v));
-    const inlined =
-      rendered !== null &&
-      clean &&
-      !leaksSecret &&
-      classificationRank(classification) <= classificationRank(evidenceInlineCeiling());
+    const sealed = rendered === null ? null : seal(rendered, classification);
 
     this.cfg.eventLog.append({
       tenantId: this.cfg.principal.tenantId,
@@ -313,9 +288,7 @@ export class AgentSession {
         sessionId: this.sessionId,
         error: error ?? null,
         outputDigest: digest,
-        output: inlined ? output : null,
-        outputWithheld:
-          rendered === null ? null : inlined ? null : leaksSecret ? 'secret-value' : 'classification-ceiling',
+        sealed,
         ...extra,
       },
     });

@@ -201,7 +201,6 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
         content,
         approvals: overrides?.approvals,
         checks: overrides?.checks ?? [secretLeakCheck(secretValues)],
-        sensitiveValues: secretValues,
         now: clock.now,
       });
     },

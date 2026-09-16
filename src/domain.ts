@@ -98,7 +98,8 @@ export type KnownAction =
   | 'network.egress'
   | 'secret.use'
   | 'capability.issue'
-  | 'task.approve';
+  | 'task.approve'
+  | 'evidence.decrypt';
 
 export type Action = KnownAction | (string & {});
 

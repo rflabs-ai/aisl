@@ -22,9 +22,10 @@ import {
   allow,
   deny,
 } from './domain.ts';
-import { type EventLog } from './events.ts';
+import { type EventLog, type SecurityEvent } from './events.ts';
 import { type Approval, type PolicyEngine } from './policy.ts';
-import { type ResourceRegistry, UnknownResourceError } from './registry.ts';
+import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
+import { type Sealed, classificationFromKeyId, open } from './seal.ts';
 
 export interface AuthorizeInput {
   readonly principal: Principal;
@@ -141,6 +142,38 @@ export class AuthorizationService {
       );
     }
     return decision;
+  }
+
+  /**
+   * Decrypt sealed evidence content. Requires `evidence.decrypt` authority on the
+   * classification key resource. The attempt is authorized and audited like any
+   * other action, so reading the evidence is itself part of the evidence.
+   */
+  revealEvidence(principal: Principal, event: SecurityEvent, approvals?: readonly Approval[]): string | undefined {
+    const sealed = (event.metadata as { sealed?: Sealed } | undefined)?.sealed;
+    if (!sealed) return undefined;
+
+    const classification = classificationFromKeyId(sealed.keyId);
+    if (!this.registry.get(sealed.keyId)) {
+      this.registry.add(
+        defineResource({
+          id: sealed.keyId,
+          type: 'system',
+          tenantId: principal.tenantId,
+          classification,
+          attributes: { purpose: 'evidence-decryption-key' },
+        }),
+      );
+    }
+
+    const decision = this.authorize({
+      principal,
+      action: 'evidence.decrypt',
+      resourceId: sealed.keyId,
+      approvals,
+    });
+    if (decision.decision !== 'allow') return undefined;
+    return open(sealed);
   }
 
   private evaluate(input: AuthorizeInput, at: number): AuthorizationDecision {

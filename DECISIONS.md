@@ -328,6 +328,49 @@ the benchmark as a usability metric, never as a security metric.
 
 ---
 
+## ADR-013: Evidence confidentiality — seal at rest, decrypt by clearance
+
+**Context:** Evidence must be reconstructable by a cleared reviewer, but the
+evidence store is an unencrypted SQLite file that anyone with the file can read.
+Two earlier options were both wrong: writing content in the clear (secrets
+concentrated in the weakest store) and dropping content above a ceiling
+(evidence could not answer "what was accessed").
+
+**Decision:** Always seal output content before it is written, with one AES-256-GCM
+key per classification level derived by HKDF from a master key (`src/seal.ts`).
+Store the plaintext digest so anyone can verify integrity. Decryption is an
+ordinary authorization: `evidence.decrypt` on a synthetic key resource
+(`evidence-key:<classification>`), granted by capability and audited like any
+other decision.
+
+**Alternatives:** one key for everything (simpler, but no granularity between
+reviewers); per-tenant keys now (needs KMS we do not have); application-level
+access control on the store only (protects the file, not backups and copies);
+drop content above a ceiling (loses reconstructability).
+
+**Reasoning:** The requirement is "cleared reviewer can, attacker with a copy
+cannot". Sealing satisfies both without inventing a second authorization system —
+clearance is just a capability, so it is issued, scoped, expires, and is audited
+by the machinery that already exists. Reading the evidence becomes evidence.
+
+**Security implications:** An attacker who obtains the evidence file — or a
+backup of it — gets ciphertext and digests. A reviewer needs a capability for
+that specific level; the attempt is denied and logged otherwise. Because
+`authorize()` fails closed, an unavailable evidence store denies reveals too.
+
+**Tradeoffs:** The master key is an environment variable with no rotation, no
+HSM, and no separation from the host. **A master key stored next to the database
+degrades this to obfuscation** — it defends against a copied or stolen file, not
+against an adversary who owns the host. Rotation is not implemented: re-sealing
+history is a migration, not a flag.
+
+**Future migration path:** KMS/HSM-held master key with envelope encryption,
+per-tenant data keys, key rotation with re-seal tooling, and — for the
+high-assurance tier — hardware-backed keys so the runtime never holds the master
+key at all.
+
+---
+
 ## ADR-012: Language and runtime — TypeScript on Node, zero runtime dependencies
 
 **Context:** The control plane should be strongly typed; the project must stay

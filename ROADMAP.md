@@ -351,10 +351,11 @@ of that equation defensible and testable.
 - **Acceptance criteria:** tool execution happens inside a container with no
   network except the proxy; the proxy denies everything not allowlisted; secrets
   are never present in the sandbox; the existing attack corpus still passes.
-- **Evidence rule:** output is provenanced by digest always; content is inlined
-  only below `EVIDENCE_INLINE_CEILING` and never when it contains a registered
-  secret. The evidence store must **not** be mounted into the sandbox — an
-  escape must not hand over the audit trail.
+- **Evidence rule:** output is always sealed with a per-classification key and
+  always digestable; content is readable only with an `evidence.decrypt`
+  capability for that level, and the read is audited. The evidence store must
+  **not** be mounted into the sandbox — an escape must not hand over the audit
+  trail. The sealing master key must not live on the same host as the store.
 - **Threats introduced:** container escape surface, proxy bypass, secret leakage
   into the sandbox, new operational complexity.
 - **Threats mitigated:** malicious tool code, direct-socket exfiltration,

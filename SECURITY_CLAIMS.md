@@ -316,6 +316,47 @@ legitimate work — availability is traded for safety, deliberately.
 
 ---
 
+## Claim 13 — Outputs are provenanced; sensitive content is not duplicated
+
+**Claim:** Every executed action is recorded with a SHA-256 digest of its output.
+Output content is written to the evidence store only when the resource's
+classification is at or below `EVIDENCE_INLINE_CEILING` (default `internal`) and
+the output contains no registered secret value.
+
+**Mechanism:** `AgentSession.record` (`src/runtime.ts`) computes the digest over
+the output, resolves the resource classification from the registry (unknown
+resources rank at the ceiling, so they are never inlined), and refuses to inline
+when a registered secret value appears or when a verification failed.
+
+**Threat model:** TM-004 (evidence store as a target), TM-001 (agent used to
+surface secrets), TM-003 (one store holding many tenants).
+
+**Assumptions:** secret values are registered with the session
+(`SessionConfig.sensitiveValues`); the ceiling is set appropriately for the
+deployment; the digest input is the raw string for string outputs.
+
+**Evidence:** `tests/evidence.test.ts` — four cases, including an end-to-end
+assertion that no event in a serialized bundle contains a known secret value.
+
+**Test:** digest verifies for internal output; above-ceiling output is
+digest-only; secret-bearing output is never written; lowering the ceiling
+suppresses inlining.
+
+**Known limitations:** this controls what the platform *writes*. It says nothing
+about the store itself, which is an unencrypted, world-readable SQLite file
+containing all tenants. Content below the ceiling — including `internal` and
+`confidential`-lite material — is stored in the clear. A secret that is not
+registered with the session, or one that is transformed (encoded, hashed,
+chunked) before appearing in output, is not detected.
+
+**Residual risk:** an adversary who can read the evidence file can read every
+inlined output and every decision record. Setting
+`EVIDENCE_INLINE_CEILING=public` reduces that to decisions and digests only, at
+the cost of reconstructability. Closing it properly requires encryption at
+rest, per-tenant stores, and MAC-then-encrypt on event payloads (M3/H8).
+
+---
+
 # What this platform does NOT claim
 
 - It does not claim the system is secure, compliant, or certified.

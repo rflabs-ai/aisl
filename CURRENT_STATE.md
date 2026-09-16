@@ -21,8 +21,11 @@ Runtime dependencies: **none**. Dev dependencies: `typescript`, `@types/node`.
 - Authorization: capability AND policy, fail-closed on any internal error.
 - Enforcement: one path (`AgentSession.attempt`) for every agent action.
 - Gates: network egress decisions, secret access decisions.
-- Evidence: SHA-256 hash-chained append-only log with SQLite persistence and a
-  verifier.
+- Evidence: SHA-256 hash-chained append-only log with SQLite persistence, a
+  verifier, resume across restart, and refusal to extend a tampered store.
+- Evidence content policy: output digest always; content inlined only below
+  `EVIDENCE_INLINE_CEILING` (default `internal`) and never when the output
+  contains a registered secret value.
 - Verification plane: post-execution checks with recorded results.
 - Demo (`npm run demo`), attack harness (`npm run attack`), benchmark
   (`npm run benchmark`).
@@ -30,7 +33,7 @@ Runtime dependencies: **none**. Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 72 assertions pass. Coverage of the twelve invariants:
+All 76 assertions pass. Coverage of the twelve invariants:
 
 1 no capability -> deny (3 cases) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7

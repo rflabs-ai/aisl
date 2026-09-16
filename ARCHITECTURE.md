@@ -48,6 +48,8 @@ component is a stub, it says so.
         +----------------------------------------------+
         |              EVIDENCE PLANE                  |
         |  events.ts  hash-chained append-only log     |
+        |  digest always; content below ceiling only  |
+        |  never a registered secret value            |
         +----------------------------------------------+
 ```
 

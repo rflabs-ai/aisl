@@ -4,7 +4,7 @@ Honest snapshot. Updated after M2 — identity and approvals landed.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~2,800 lines of source across 20 modules
+TypeScript foundation on Node 24, ~3,200 lines of source across 20 modules
 (`src/`), 115 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), four threat models (`threat-models/`), a measured
@@ -57,19 +57,20 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 115 assertions pass. Coverage of the twelve invariants plus M2:
+All 137 assertions pass. Coverage of the twelve invariants plus M2:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
 decisions logged (2) | 8 tamper-evidence (5) | 9 tenant isolation (3) | 10
 network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
-principal (4)**.
+principal (6)**.
 
-Plus: policy semantics (8), capability integrity (5), evidence sealing (6),
+Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
-workload (2), ten hostile-model behaviours, 21 M1 enforcement tests (container
-sandbox, egress proxy, envelope secrets, canary exfiltration,
-secret-unreachable-from-sandbox, attack corpus with real backends).
+workload (2), hostile-model behaviours, 29 M1 enforcement tests (container
+sandbox, egress proxy, DNS pinning, envelope secrets, brokered injection,
+canary exfiltration, secret-unreachable-from-sandbox, attack corpus with real
+backends), session lifecycle (7), approval binding (3), capability binding (1).
 
 Measured this run (`benchmarks/results.json`):
 

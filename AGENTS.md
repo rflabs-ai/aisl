@@ -39,6 +39,14 @@ Every non-trivial change follows this ritual. No exceptions.
    new code actually close the limitation you claim? If not, update the claim
    or don't ship.
 
+8. **Update docs if stale.** If the change affects:
+   - ROADMAP status markers → update them
+   - CURRENT_STATE test counts / metrics → update them
+   - SECURITY_CLAIMS → update claims and limitations
+   - DECISIONS → add or reference an ADR
+   - AGENT-SESSION.md → add a session entry
+   Docs that drift from code rot into lies. Fix them in the same commit.
+
 ### After the milestone
 
 8. **Update CURRENT_STATE.md.** Move items off known-vulnerabilities only when

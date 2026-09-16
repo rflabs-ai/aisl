@@ -55,9 +55,9 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Approval workflow | separation of duties as a first-class object | identity, policy | M | MVP | **[ ]** |
 | Capability request flow | agent asks, human grants, narrow | approval, PDP | M | MVP | **[ ]** |
 | Classification propagation | labels flow to derived artifacts | registry, ingestion | L | P | **[ ]** |
-| Secrets brokerage (real backend) | KMS-backed, dynamic, audited | ADR-008 | L | E | **[ ]** |
-| Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[ ]** |
-| Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[NEXT]** |
+| Secrets brokerage (real backend) | KMS-backed, dynamic, audited | ADR-008 | L | E | **[DONE]** |
+| Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[DONE]** |
+| Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[DONE]** |
 | Sandbox lifecycle management | create, limit, destroy, attest | container | M | P | **[ ]** |
 | Tenant isolation hardening | RLS, per-tenant keys | Postgres | L | E | **[ ]** |
 | Model provider adapters | real providers behind the port | ADR-005 | M | P | **[ ]** |
@@ -409,7 +409,7 @@ of that equation defensible and testable.
 - **Tests required:** `tests/`, `security-tests/`, `security-attacks/`.
 - **Evidence produced:** test output, demo output, benchmark JSON, this doc set.
 
-### M1 — Real enforcement boundaries **[NEXT]**
+### M1 — Real enforcement boundaries (done)
 
 - **Purpose:** replace the three stubs that decide but do not enforce: sandbox,
   network, secrets.
@@ -434,7 +434,7 @@ of that equation defensible and testable.
 - **Tests required:** escape corpus, egress canaries, secret-in-sandbox probes.
 - **Evidence produced:** sandbox configuration, proxy logs, corpus results.
 
-### M2 — Identity and approvals
+### M2 — Identity and approvals (done)
 
 - **Purpose:** real humans, real authentication, real separation of duties.
 - **Why it matters:** today a principal is a struct; approvals are objects with no
@@ -450,7 +450,7 @@ of that equation defensible and testable.
 - **Tests required:** authn bypass suite, session fixation/replay, MFA enforcement.
 - **Evidence produced:** authentication events in the chain, approval records.
 
-### M3 — Evidence hardening
+### M3 — Evidence hardening **[NEXT]**
 
 - **Purpose:** make evidence survive an attacker who controls the host.
 - **Why it matters:** today the chain detects editing but not rewrite or deletion.

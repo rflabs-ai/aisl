@@ -61,36 +61,36 @@ describe('container sandbox', () => {
 // ── Egress proxy ─────────────────────────────────────────────────────────────
 
 describe('egress proxy enforcement', () => {
-  test('IP literals are blocked at the proxy layer', () => {
+  test('IP literals are blocked at the proxy layer', async () => {
     const world = testWorld();
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
-    const result = proxy.check('192.168.1.1');
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    const result = await proxy.check('192.168.1.1');
     assert.equal(result.allowed, false);
     assert.ok(result.reason.includes('IP literal'));
   });
 
-  test('non-allowlisted host is denied by PDP', () => {
+  test('non-allowlisted host is denied by PDP', async () => {
     const world = testWorld();
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
-    assert.equal(proxy.check('evil.example.com').allowed, false);
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    assert.equal((await proxy.check('evil.example.com')).allowed, false);
   });
 
-  test('allowlisted host is permitted', () => {
+  test('allowlisted host is permitted', async () => {
     const world = testWorld();
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
-    assert.equal(proxy.check('api.internal.example.com').allowed, true);
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    assert.equal((await proxy.check('api.internal.example.com')).allowed, true);
   });
 
-  test('host normalization does not bypass', () => {
+  test('host normalization does not bypass', async () => {
     const world = testWorld();
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
-    assert.equal(proxy.check('EVIL.example.com').allowed, false);
-    assert.equal(proxy.check('evil.example.com.').allowed, false);
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    assert.equal((await proxy.check('EVIL.example.com')).allowed, false);
+    assert.equal((await proxy.check('evil.example.com.')).allowed, false);
   });
 
   test('client-supplied identity headers cannot change the principal', async () => {
     const world = testWorld();
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
     const port = await proxy.start();
 
     const status = await new Promise<number>((resolve, reject) => {
@@ -127,17 +127,54 @@ describe('egress proxy enforcement', () => {
 
   test('proxyEnv returns HTTP_PROXY configuration', () => {
     const world = testWorld();
-    const env = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog).proxyEnv();
+    const env = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false }).proxyEnv();
     assert.ok(env.HTTP_PROXY);
     assert.ok(env.HTTPS_PROXY);
     assert.ok(env.NO_PROXY);
   });
 });
 
+// ── DNS pinning ─────────────────────────────────────────────────────────────
+
+describe('DNS pinning: private/reserved IPs are blocked', () => {
+  test('hostname resolving to private IP is denied when dnsPin is true', async () => {
+    const world = testWorld();
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: true });
+    // localhost resolves to 127.0.0.1 (private) — should be blocked by DNS pinning.
+    const result = await proxy.check('localhost');
+    assert.equal(result.allowed, false);
+    assert.ok(result.reason.includes('private/reserved'));
+  });
+
+  test('IP literal 169.254.169.254 (cloud metadata) is blocked', async () => {
+    const world = testWorld();
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: true });
+    const result = await proxy.check('169.254.169.254');
+    assert.equal(result.allowed, false);
+    assert.ok(result.reason.includes('IP literal'));
+  });
+
+  test('DNS resolution failure is denied when dnsPin is true', async () => {
+    const world = testWorld();
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: true });
+    const result = await proxy.check('this-host-does-not-exist-12345.invalid');
+    assert.equal(result.allowed, false);
+    assert.ok(result.reason.includes('DNS'));
+  });
+
+  test('DNS resolution skipped when dnsPin is false', async () => {
+    const world = testWorld();
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    const result = await proxy.check('nonexistent-host.invalid');
+    assert.equal(result.allowed, false);
+    assert.ok(!result.reason.includes('DNS'), 'should not fail on DNS when dnsPin is false');
+  });
+});
+
 // ── Canary exfiltration ─────────────────────────────────────────────────────
 
 describe('canary exfiltration: unique tokens never leak at egress', () => {
-  test('canary tokens do not appear in any egress check result', () => {
+  test('canary tokens do not appear in any egress check result', async () => {
     const world = testWorld();
     const canaries = {
       internal: `CANARY-INTERNAL-${randomUUID()}`,
@@ -145,13 +182,37 @@ describe('canary exfiltration: unique tokens never leak at egress', () => {
       phi: `CANARY-PHI-${randomUUID()}`,
     };
 
-    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog);
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
     for (const host of ['api.internal.example.com', 'evil.example.com', '10.0.0.1']) {
-      const resultStr = JSON.stringify(proxy.check(host));
+      const resultStr = JSON.stringify(await proxy.check(host));
       for (const [level, token] of Object.entries(canaries)) {
         assert.ok(!resultStr.includes(token), `canary ${level} leaked to egress for ${host}`);
       }
     }
+  });
+
+  test('canary token does not appear in HTTP response body through proxy', async () => {
+    const world = testWorld();
+    const canary = `CANARY-WIRE-${randomUUID()}`;
+    const proxy = new EgressProxy(world.agent, world.authorization, world.registry, world.eventLog, { dnsPin: false });
+    const port = await proxy.start();
+
+    const body = await new Promise<string>((resolve, reject) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port, method: 'GET', path: '/', headers: { host: `evil.example.com?canary=${canary}` } },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => resolve(data));
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    proxy.stop();
+
+    assert.ok(!body.includes(canary), `canary leaked through HTTP response: ${body.slice(0, 100)}`);
+    assert.ok(body.includes('denied'), `expected denial in response: ${body.slice(0, 100)}`);
   });
 
   test('event log never contains raw secret values', () => {
@@ -284,6 +345,82 @@ describe('envelope encryption for secrets', () => {
     );
     broker.register({ id: 'sec-x', tenantId: 'acme', value: 'v', label: 'x' });
     assert.equal(broker.request({ principal: world.foreignAgent, secretId: 'sec-x' }).allowed, false);
+  });
+});
+
+// ── Brokered injection ──────────────────────────────────────────────────────
+
+describe('brokered injection: agent never sees the secret value', () => {
+  test('inject() puts decrypted value into params without exposing to caller', () => {
+    const world = testWorld({
+      policies: [{
+        id: 'allow-secret-inject',
+        effect: 'allow',
+        principals: { ids: ['agent:summarizer-1'] },
+        actions: ['secret.use'],
+        resources: { types: ['secret'] },
+        requiresApproval: true,
+        conditions: [{ kind: 'after', iso: '2020-01-01T00:00:00Z' }],
+      }],
+    });
+    const broker = new EnvelopeSecretBroker(
+      Buffer.from('test-master-key-for-envelope-encryption-32b!', 'utf8'),
+      world.authorization, world.eventLog, world.registry,
+    );
+    const secretVal = `INJECT-${randomUUID()}`;
+    broker.register({ id: 'sec-inj', tenantId: 'acme', value: secretVal, label: 'inj' });
+
+    world.authorization.issue(world.root, {
+      subject: world.agent.id, tenantId: 'acme',
+      resourceIds: ['sec-inj'], actions: ['secret.use'],
+      maxClassification: 'restricted',
+      expiresAt: world.clock.now() + 60_000, singleUse: true,
+      provenance: { source: 'human-approval', approvedBy: world.user.id },
+    });
+
+    const approval = {
+      id: 'a-inj', approvedBy: world.user.id, principalId: world.agent.id,
+      action: 'secret.use' as const, resourceId: 'sec-inj',
+      expiresAt: world.clock.now() + 60_000,
+    };
+
+    const targetParams: Record<string, unknown> = { url: 'https://api.example.com' };
+    const result = broker.inject({
+      principal: world.agent,
+      secretId: 'sec-inj',
+      targetParams,
+      paramKey: 'Authorization',
+      approvals: [approval],
+    });
+
+    assert.equal(result.allowed, true);
+    assert.equal(result.params.Authorization, secretVal);
+    assert.equal(targetParams.Authorization, undefined, 'original params must not be mutated');
+    // The secret value does not appear in the event log.
+    const events = world.eventLog.all().filter((e) => e.resourceId === 'sec-inj');
+    const eventStr = JSON.stringify(events);
+    assert.ok(!eventStr.includes(secretVal), 'secret must not appear in event log');
+    assert.ok(eventStr.includes('[brokered-injection]'), 'event should record injection');
+  });
+
+  test('inject() denied: params returned unchanged, no value leaked', () => {
+    const world = testWorld();
+    const broker = new EnvelopeSecretBroker(
+      Buffer.from('test-master-key-for-envelope-encryption-32b!', 'utf8'),
+      world.authorization, world.eventLog, world.registry,
+    );
+    broker.register({ id: 'sec-no', tenantId: 'acme', value: 'classified', label: 'no' });
+
+    const targetParams: Record<string, unknown> = { key: 'value' };
+    const result = broker.inject({
+      principal: world.agent,
+      secretId: 'sec-no',
+      targetParams,
+      paramKey: 'Authorization',
+    });
+
+    assert.equal(result.allowed, false);
+    assert.deepEqual(result.params, { key: 'value' });
   });
 });
 

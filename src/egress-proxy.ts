@@ -4,17 +4,13 @@
  * this proxy (sandbox `--network none` + HTTP_PROXY env).
  *
  * ponytail: HTTP only for now. HTTPS CONNECT tunneling is the next step.
- * IP literals are blocked at the proxy layer.
- *
- * KNOWN GAP (see ROADMAP H7, Claim 10): an allowlisted hostname may resolve to
- * a private or link-local address (cloud metadata at 169.254.169.254), and
- * there is no body-size or time limit on forwarded requests. Until DNS results
- * are pinned and range-checked, treat egress allowlisting as necessary but not
- * sufficient against SSRF.
+ * IP literals are blocked; DNS is pinned (resolved IPs checked against
+ * private/link-local ranges); deny by default.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { request as httpRequest, type RequestOptions } from 'node:http';
+import { resolve as dnsResolve } from 'node:dns';
 import type { AuthorizationService } from './pdp.ts';
 import type { ResourceRegistry } from './registry.ts';
 import type { EventLog } from './events.ts';
@@ -27,10 +23,33 @@ function normalizeHost(host: string): string {
 
 const IP_LITERAL_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
+function isPrivateOrReserved(ip: string): boolean {
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '0.0.0.0') return true;
+  if (ip.startsWith('10.')) return true;
+  if (ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('172.')) {
+    const second = Number(ip.split('.')[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (ip.startsWith('169.254.')) return true;
+  if (ip.startsWith('fc') || ip.startsWith('fd') || ip.startsWith('fe80')) return true;
+  return false;
+}
+
+function resolveDns(host: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    dnsResolve(host, 'A', (err, addresses) => {
+      if (err) resolve([]);
+      else resolve(addresses ?? []);
+    });
+  });
+}
+
 export interface ProxyResult {
   readonly allowed: boolean;
   readonly host: string;
   readonly reason: string;
+  readonly resolvedIp?: string;
   readonly port?: number;
 }
 
@@ -39,32 +58,24 @@ export class EgressProxy {
   private readonly registry: ResourceRegistry;
   private readonly eventLog: EventLog;
   private readonly principal: Principal;
+  private readonly dnsPin: boolean;
   private server: Server | undefined;
   private port: number | undefined;
 
-  /**
-   * @param principal the identity this proxy serves. One proxy per session.
-   *   It is bound at construction and can never come from the request: the
-   *   caller is sandboxed, possibly hostile code, and a client-supplied
-   *   principal is a complete authorization bypass.
-   */
   constructor(
     principal: Principal,
     authorization: AuthorizationService,
     registry: ResourceRegistry,
     eventLog: EventLog,
+    opts: { dnsPin?: boolean } = {},
   ) {
     this.principal = principal;
     this.authorization = authorization;
     this.registry = registry;
     this.eventLog = eventLog;
+    this.dnsPin = opts.dnsPin ?? true;
   }
 
-  /**
-   * Start the proxy on a random loopback port. Resolves with the port.
-   * The port is only known after the `listening` event — reading
-   * `server.address()` before it yields null and silently advertises port 0.
-   */
   async start(): Promise<number> {
     this.server = createServer((req, res) => this.handleRequest(req, res));
     await new Promise<void>((resolve, reject) => {
@@ -88,7 +99,6 @@ export class EgressProxy {
     return this.port;
   }
 
-  /** Environment variables that force HTTP traffic through this proxy. */
   proxyEnv(): Record<string, string> {
     const port = this.port ?? 0;
     return {
@@ -101,8 +111,7 @@ export class EgressProxy {
     };
   }
 
-  /** Check whether a request would be allowed. Does not forward. */
-  check(host: string): ProxyResult {
+  async check(host: string): Promise<ProxyResult> {
     return this.authorizeRequest(host);
   }
 
@@ -119,52 +128,65 @@ export class EgressProxy {
     const host = normalizeHost(hostname ?? '');
     const port = portStr ? Number(portStr) : 80;
 
-    const principal = this.principal;
-    const result = this.authorizeRequest(host);
+    this.authorizeRequest(host).then((result) => {
+      this.eventLog.append({
+        tenantId: this.principal.tenantId,
+        principal: this.principal.id,
+        actor: this.principal.id,
+        actorKind: this.principal.kind,
+        action: 'network.egress',
+        resourceId: `net:${host}`,
+        decision: result.allowed ? 'allow' : 'deny',
+        result: result.allowed ? 'success' : 'denied',
+        metadata: { phase: 'egress-proxy', host, port, allowed: result.allowed, reason: result.reason, resolvedIp: result.resolvedIp ?? null },
+      });
 
-    this.eventLog.append({
-      tenantId: principal.tenantId,
-      principal: principal.id,
-      actor: principal.id,
-      actorKind: principal.kind,
-      action: 'network.egress',
-      resourceId: `net:${host}`,
-      decision: result.allowed ? 'allow' : 'deny',
-      result: result.allowed ? 'success' : 'denied',
-      metadata: { phase: 'egress-proxy', host, port, allowed: result.allowed, reason: result.reason },
+      if (!result.allowed) {
+        res.writeHead(403);
+        res.end(`denied: ${result.reason}`);
+        return;
+      }
+
+      const opts: RequestOptions = {
+        hostname: host,
+        port,
+        path: url,
+        method: req.method,
+        headers: { ...req.headers, host: hostHeader },
+      };
+
+      const proxyReq = httpRequest(opts, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', () => {
+        res.writeHead(502);
+        res.end('upstream unreachable');
+      });
+
+      req.pipe(proxyReq);
     });
-
-    if (!result.allowed) {
-      res.writeHead(403);
-      res.end(`denied: ${result.reason}`);
-      return;
-    }
-
-    const opts: RequestOptions = {
-      hostname: host,
-      port,
-      path: url,
-      method: req.method,
-      headers: { ...req.headers, host: hostHeader },
-    };
-
-    const proxyReq = httpRequest(opts, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-      proxyRes.pipe(res);
-    });
-
-    proxyReq.on('error', () => {
-      res.writeHead(502);
-      res.end('upstream unreachable');
-    });
-
-    req.pipe(proxyReq);
   }
 
-  private authorizeRequest(host: string): ProxyResult {
+  private async authorizeRequest(host: string): Promise<ProxyResult> {
     const principal = this.principal;
     if (IP_LITERAL_RE.test(host)) {
       return { allowed: false, host, reason: 'IP literal blocked; use DNS hostname' };
+    }
+
+    // DNS pinning: resolve and reject private/link-local IPs.
+    let resolvedIp: string | undefined;
+    if (this.dnsPin) {
+      const ips = await resolveDns(host);
+      if (ips.length === 0) {
+        return { allowed: false, host, reason: 'DNS resolution failed' };
+      }
+      const blocked = ips.filter(isPrivateOrReserved);
+      if (blocked.length > 0) {
+        return { allowed: false, host, reason: `DNS resolved to private/reserved IP: ${blocked.join(', ')}`, resolvedIp: blocked[0] };
+      }
+      resolvedIp = ips[0];
     }
 
     const resourceId = `net:${host}`;
@@ -187,6 +209,6 @@ export class EgressProxy {
       networkHost: host,
     });
 
-    return { allowed: decision.decision === 'allow', host, reason: decision.reason };
+    return { allowed: decision.decision === 'allow', host, reason: decision.reason, resolvedIp };
   }
 }

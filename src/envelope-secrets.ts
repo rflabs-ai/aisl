@@ -136,6 +136,58 @@ export class EnvelopeSecretBroker {
       : { allowed: false, reason: decision.reason };
   }
 
+  /**
+   * Brokered injection: decrypt a secret and inject it into a tool context
+   * without the agent ever seeing the plaintext value. The agent sees only
+   * a reference; the tool receives the value in its params.
+   */
+  inject(req: {
+    principal: Principal;
+    secretId: string;
+    targetParams: Record<string, unknown>;
+    paramKey: string;
+    approvals?: readonly Approval[];
+  }): { allowed: boolean; params: Record<string, unknown>; reason: string } {
+    const secret = this.secrets.get(req.secretId);
+    if (!secret || secret.tenantId !== req.principal.tenantId) {
+      return { allowed: false, params: req.targetParams, reason: 'unknown secret' };
+    }
+
+    const decision = this.authorization.authorize({
+      principal: req.principal,
+      action: 'secret.use',
+      resourceId: secret.id,
+      approvals: req.approvals,
+    });
+
+    this.eventLog.append({
+      tenantId: req.principal.tenantId,
+      principal: req.principal.id,
+      actor: req.principal.id,
+      actorKind: req.principal.kind,
+      action: 'secret.use',
+      resourceId: secret.id,
+      decision: decision.decision,
+      denyReason: decision.denyReason,
+      result: decision.decision === 'deny' ? 'denied' : 'success',
+      metadata: {
+        phase: 'secret-broker-inject',
+        label: secret.label,
+        encrypted: true,
+        injected: decision.decision === 'allow',
+        value: '[brokered-injection]',
+      },
+    });
+
+    if (decision.decision !== 'allow') {
+      return { allowed: false, params: req.targetParams, reason: decision.reason };
+    }
+
+    const value = decryptSecret(secret.encrypted, this.masterKey);
+    const params = { ...req.targetParams, [req.paramKey]: value };
+    return { allowed: true, params, reason: decision.reason };
+  }
+
   /** Redact a secret value for evidence logging. Never call on the authorization path. */
   static redact(value: string): string {
     if (value.length <= 4) return '****';

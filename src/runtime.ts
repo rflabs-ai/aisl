@@ -64,6 +64,7 @@ export class ToolRegistry {
 export interface Sandbox {
   readonly kind: string;
   run<T>(fn: () => T): T;
+  runTool(tool: Tool, ctx: ExecutionContext): ToolResult;
 }
 
 /**
@@ -75,6 +76,9 @@ export class LocalSandbox implements Sandbox {
   readonly kind = 'in-process/no-isolation';
   run<T>(fn: () => T): T {
     return fn();
+  }
+  runTool(tool: Tool, ctx: ExecutionContext): ToolResult {
+    return tool.invoke(ctx);
   }
 }
 
@@ -167,7 +171,7 @@ export class AgentSession {
 
     let output: unknown;
     try {
-      output = this.cfg.sandbox.run(() => tool.invoke(ctx)).output;
+      output = this.cfg.sandbox.runTool(tool, ctx).output;
     } catch (error) {
       const message = (error as Error).message;
       this.record('error', request, decision, message);

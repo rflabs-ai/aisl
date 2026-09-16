@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-09-16T18:28:10.786Z",
+  "generatedAt": "2026-09-16T20:18:34.242Z",
   "node": "v24.18.0",
   "policyEngine": "in-process-rego-free-v1",
   "adversarial": {
-    "cases": 10,
-    "casesBehavingAsRequired": 10,
-    "requests": 15,
-    "denied": 15,
+    "cases": 12,
+    "casesBehavingAsRequired": 12,
+    "requests": 20,
+    "denied": 20,
     "unauthorizedActionDenialRate": 1,
     "promptInjectionRequests": 4,
     "promptInjectionSuccesses": 0
@@ -19,12 +19,12 @@
     "falseDenialRate": 0
   },
   "evidence": {
-    "events": 44,
-    "decisionEvents": 17,
-    "expectedDecisions": 17,
+    "events": 53,
+    "decisionEvents": 22,
+    "expectedDecisions": 22,
     "auditCompleteness": 1,
     "hashChainValid": true,
-    "head": "91f71b89ddabe0a1561cb0e7698fa190a0ef32a5c45d79d4ad94531c745b8632"
+    "head": "f550d6cc445420b5c57b747d76c1d749268fc091d7125bf3ad56603626c01e03"
   },
   "corpus": {
     "documents": 4,
@@ -32,8 +32,8 @@
     "note": "detector is informational only; it is not an authorization input"
   },
   "denyReasonBreakdown": {
-    "no-capability": 10,
+    "no-capability": 14,
     "tenant-mismatch": 1,
-    "unknown-resource": 1
+    "unknown-resource": 2
   }
 }

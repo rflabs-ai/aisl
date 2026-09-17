@@ -28,7 +28,7 @@ backups, DR, admin access, customer responsibility, vendor responsibility.
   operator-managed passphrase.
 - **Networking:** egress proxy allowlist; no inbound except the UI.
 - **Updates:** signed release bundles, verified before apply.
-- **Logging:** local evidence store + periodic anchor export.
+- **Logging:** local evidence store; per-event head-hash anchor file (M3); periodic publication of the anchor to a customer-held WORM bucket or transparency log.
 - **Backups:** encrypted, tested restore.
 - **DR:** rebuild from bundle + restore evidence; RPO/RTO declared per customer.
 - **Admin access:** named accounts, MFA, dual control for policy changes.

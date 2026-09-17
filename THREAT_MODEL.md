@@ -47,7 +47,7 @@ at this stage.
 | Destructive action | no write/delete capability issued | **mitigated** | depends on issued scope |
 | Resource exhaustion | none | **open** | no quotas, timeouts, or rate limits |
 | Sandbox escape | none — `LocalSandbox` is not isolation | **open** | arbitrary code runs in-process |
-| Evidence tampering | hash chain | **detected** | no external anchoring; a full rewrite is possible with DB access |
+| Evidence tampering | hash chain + per-event Ed25519 + head-hash anchor + append-only triggers | **detected**; durable when anchor lives outside runtime trust domain | anchor rewrite by an attacker with host access to both the SQLite store and the anchor; key compromise |
 | Policy tampering (operator) | none | **open** | B10 |
 | Supply chain | none | **open** | no pinning, signing, or SBOM |
 | Model provider compromise | no provider is wired in | **not applicable yet** | becomes critical at provider integration |

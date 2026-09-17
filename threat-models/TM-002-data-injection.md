@@ -31,7 +31,7 @@ to infrastructure.
 
 - **Structural**: there is no function that converts text into a capability.
   `IngestedData.authority` is the literal string `'none'`
-  (`src/registry.ts:70`), and nothing reads it as authority.
+  (`src/registry.ts:61`), and nothing reads it as authority.
 - **Type-level**: `ActionRequest` has no authority field.
 - **Whitelist**: untrusted provider/tool JSON is reconstructed field by field.
 - **Telemetry**: `detectInjectionSignals` (`src/registry.ts:95`) flags attempts

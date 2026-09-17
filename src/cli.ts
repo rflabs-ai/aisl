@@ -94,12 +94,16 @@ function demo(): void {
 
   heading('11. M3: signed events, anchor, and offline verification');
   const signed = world.eventLog.verify({ publicKey: eventPublicKey() });
-  const offline = verifyBundle(world.eventLog.bundle(), { publicKey: eventPublicKey() });
+  const anchorContent = world.eventLog.anchor();
+  const offline = verifyBundle(world.eventLog.bundle(), {
+    publicKey: eventPublicKey(),
+    ...(anchorContent ? { anchorContent } : {}),
+  });
   const sampleEvent = events.at(-1);
   console.log(`  per-event signatures: every event has an Ed25519 signature (sample: ${sampleEvent?.signature ? sampleEvent.signature.slice(0, 24) + '...' : 'none'})`);
   console.log(`  signature chain verification: ${signed.valid ? 'VALID' : 'INVALID'}`);
   console.log(`  offline verifier (no DB): ${offline.valid ? 'VALID' : 'INVALID'} (${offline.eventCount} events)`);
-  console.log(`  anchor file configured: ${(world.eventLog as unknown as { anchorPath?: string }).anchorPath ? 'yes' : 'no'}`);
+  console.log(`  anchor file: ${anchorContent ? `${anchorContent.trim().split('\n').length} lines, head match: ${offline.anchorMatch ? 'yes' : 'NO'}` : 'not configured (set EVENT_ANCHOR_PATH to enable external witness)'}`);
 }
 
 function attack(): void {

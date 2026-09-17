@@ -19,7 +19,7 @@ implementation needed / external validation needed.
 | PR-AA-01 least privilege | capabilities | implemented | operator scope discipline | capability issuance events | approval workflow | yes |
 | PR-AA-05 separation of duties | Approvals | implemented | no authenticated approver | approval records | M2 | yes |
 | PR-DS-01 confidentiality at rest | none | **absent** | no encryption at rest | encryption config | envelope encryption + KMS | yes |
-| PR-DS-02 integrity | capability signatures, event chain | partial | events unsigned, DB unencrypted | verify() output | M3 | yes |
+| PR-DS-02 integrity | capability signatures, event chain + per-event Ed25519 + anchor | partial | DB at-rest unencrypted; key rotation not implemented | verify() + verifyBundle() output | M3 done, key rotation HARD | yes |
 | PR-PS-06 secure disposal | none | absent | no retention or deletion policy | retention records | retention lifecycle | yes |
 | DE-AE-03 event correlation | EventLog | partial | no shipping, no alerting | queryable evidence | OTel + SIEM export | no |
 | DE-AE-06 deletion/destruction alerts | none | absent | no detection for destructive actions | alert records | verification plane + alerting | no |
@@ -35,8 +35,8 @@ implementation needed / external validation needed.
 | AC-4 information flow | capability scope, egress | partial | no real egress enforcement | gateway decisions | M1, H7 | yes |
 | AC-6 least privilege | capabilities | implemented | — | issuance events | — | yes |
 | AC-17 remote access | none | absent | no product surface yet | — | future | yes |
-| AU-2/3/12 audit events | EventLog | implemented | unsigned, not anchored | chain verification | M3 | yes |
-| AU-9 protection of audit info | none | **absent** | DB is writable | — | append-only + anchoring | yes |
+| AU-2/3/12 audit events | EventLog | implemented | signed (M3), anchored when configured | chain verification + signature verification | M3 | yes |
+| AU-9 protection of audit info | EventLog + append-only triggers | partial | anchor lives on attacker-accessible storage by default; SQLite is not WORM | — | anchor on WORM/witness storage is HARD stage | yes |
 | CM-3 configuration change | none | absent | no change control | — | change management | yes |
 | IA-2/IA-5 authentication | none | absent | no authn | — | M2 | yes |
 | SC-7 boundary protection | NetworkGateway | design only | no enforcement | — | M1 | yes |

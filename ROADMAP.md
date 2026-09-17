@@ -52,8 +52,8 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | --- | --- | --- | --- | --- | --- |
 | Granular RBAC | roles compose with capabilities | identity | M | MVP | **[ ]** |
 | Policy testing framework | unit-test rules, simulate and diff changes | policy | M | MVP | **[NEXT]** |
-| Approval workflow | separation of duties as a first-class object | identity, policy | M | MVP | **[ ]** |
-| Capability request flow | agent asks, human grants, narrow | approval, PDP | M | MVP | **[ ]** |
+| Approval workflow | separation of duties as a first-class object | identity, policy | M | MVP | **[DONE]** |
+| Capability request flow | agent asks, human grants, narrow | approval, PDP | M | MVP | **[DONE]** |
 | Classification propagation | labels flow to derived artifacts | registry, ingestion | L | P | **[ ]** |
 | Secrets brokerage (real backend) | KMS-backed, dynamic, audited | ADR-008 | L | E | **[DONE]** |
 | Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[DONE]** |
@@ -68,7 +68,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[ ]** |
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[ ]** |
-| Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[ ]** |
+| Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
 
 ---
 
@@ -332,7 +332,7 @@ publish instead is one target per control, each with a measurement.
 | 5 | Evidence chain integrity | valid on every run | `hashChainValid` | true |
 | 6 | Secret values at rest in the store | 0 occurrences | store scan | 0 |
 | 7 | False denial of legitimate work | <= 1% | `falseDenialRate` | 0/2 (corpus far too small to mean it) |
-| 8 | Capability revocation propagation | <= 5 s | not implemented | — |
+| 8 | Capability revocation propagation | <= 5 s | in-process revoke + immediate next-decision deny | immediate (in-process); multi-node = H13 |
 | 9 | Decision latency p99 | <= 10 ms | not measured | — |
 | 10 | Recovery from evidence-store failure | defined degraded mode | not implemented | denies everything silently |
 | 11 | Independence of the security core from any single model | structural, by construction | model swap test | met |

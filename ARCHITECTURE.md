@@ -10,7 +10,7 @@ component is a stub, it says so.
 ```text
                      HUMAN / SYSTEM
                            |
-                    identity (OIDC/OAuth2/MFA — NOT YET IMPLEMENTED, see ADR-006)
+                    identity (OIDC/OAuth2/MFA — see ADR-016)
                            |
                            v
         +----------------------------------------------+
@@ -59,7 +59,7 @@ Two types, never convertible:
 
 | Type | Meaning | Who may produce it |
 | --- | --- | --- |
-| `ActionRequest` (`src/domain.ts:109`) | intent — "I want to do X" | a model, a document, a tool |
+| `ActionRequest` (`src/domain.ts:152`) | intent — "I want to do X" | a model, a document, a tool |
 | `Capability` (`src/capability.ts:39`) | authority — "I may do X" | `issueCapability` only (`src/capability.ts:128`) |
 
 `ActionRequest` has exactly three fields: `action`, `resourceId`, optional
@@ -76,17 +76,17 @@ authority to attack.
 ```text
 model output (untrusted JSON)
    -> parseModelOutput            src/model.ts:42    whitelist; unknown keys dropped
-   -> AgentSession.attempt        src/runtime.ts:133
-        -> AuthorizationService.authorize   src/pdp.ts:113
+   -> AgentSession.attempt        src/runtime.ts:139
+         -> AuthorizationService.authorize   src/pdp.ts:159
              1. resource must exist                     (unknown -> deny)
-             2. tenant must match                       (mismatch -> deny, src/pdp.ts:147)
+              2. tenant must match                       (mismatch -> deny, src/pdp.ts:273)
              3. a capability must cover resource+action (none -> deny)
              4. verifyCapability: signature, subject, tenant, expiry,
                 single-use, scope, classification ceiling, constraints
                                                         src/capability.ts:217
              5. policy evaluate: default deny, deny-overrides
-                                                        src/policy.ts:137
-             6. event appended, always                  src/pdp.ts:113
+                                                        src/policy.ts:176
+              6. event appended, always                  src/pdp.ts:159
         -> deny: return, nothing executes
         -> allow: sandbox.run(tool.invoke(scoped ctx))
              -> verification checks                     src/verification.ts
@@ -106,10 +106,10 @@ inside one `try`; any thrown error becomes a deny with reason
 | B2 | Document/tool output -> runtime | Same as B1; `IngestedData.authority === 'none'` | closed |
 | B3 | Agent -> resources | `AgentSession.attempt` is the only path | closed |
 | B4 | Issuer -> capability | `CAPABILITY_ISSUER_KINDS` allowlist + attenuation | closed |
-| B5 | Tenant -> tenant | `src/pdp.ts:147`, plus `@tenant-isolation` in the engine | closed |
+| B5 | Tenant -> tenant | `src/pdp.ts:273`, plus `@tenant-isolation` in the engine | closed |
 | B6 | Session -> network | `NetworkGateway` (decision only, no socket) | closed |
 | B7 | Session -> secrets | `SecretBroker` (no rule allows it by default) | closed |
-| B8 | Process -> evidence store | Hash chain; tampering breaks `verify()` | detected |
+| B8 | Process -> evidence store | Hash chain + per-event Ed25519 + append-only SQLite + head-hash anchor (`src/events.ts`) | detected (durable when anchor is on a different trust domain) |
 | B9 | Tool -> authority | `ExecutionContext` has no issuance handle (test asserts it) | closed |
 | B10 | Operator -> policy | Policy is data in code, not yet signed/attested | **open** |
 
@@ -121,10 +121,10 @@ ADR-012 and the HARD/VERY HARD roadmap stages.
 
 | Component | Status | Reality |
 | --- | --- | --- |
-| Identity / MFA / SSO | **absent** | Principals are constructed in code. No authentication exists. |
-| `LocalSandbox` (`src/runtime.ts:72`) | stub | Runs in-process. Provides **zero** isolation. |
-| `NetworkGateway` | stub | Decides, never connects. Safer than a proxy that can be bypassed. |
-| `SecretBroker` | stub | Static in-memory values; no envelope encryption, no KMS. |
+| Identity / MFA / SSO | implemented (M2) | OIDC via `jose`; MFA enforced at the IdP and re-checked by the PDP. No SPIFFE/workload identity yet (HARD). |
+| `LocalSandbox` (`src/runtime.ts:75`) | stub | Runs in-process. Provides **zero** isolation. `ContainerSandbox` is the real backend when Docker is available. |
+| `NetworkGateway` | stub | Decides, never connects. The `EgressProxy` is the real backend. |
+| `SecretBroker` | implemented (M1) | `EnvelopeSecretBroker`: AES-256-GCM + HKDF-derived per-secret DEKs. KMS/HSM backing is HARD. |
 | Policy distribution | stub | Rules are TypeScript objects; no signature, no versioning. |
 | Model provider | stub | Scripted models only. No network call to any provider. |
 | Storage | minimal | SQLite for events; everything else in memory. |
@@ -151,11 +151,11 @@ The brief's plane diagram was sound. Four changes, all recorded in DECISIONS.md:
 
 Each seam is an interface with one trivial implementation today:
 
-- `PolicyEngine` (`src/policy.ts:81`) — swap in Cedar or OPA without touching callers.
+- `PolicyEngine` (`src/policy.ts:95`) — swap in Cedar or OPA without touching callers.
 - `ModelPort` (`src/model.ts:26`) — any provider, any local model.
-- `Sandbox` (`src/runtime.ts:62`) — container today, microVM later.
+- `Sandbox` (`src/runtime.ts:64`) — container today, microVM later.
 - `Check` (`src/verification.ts:30`) — arbitrary post-execution verification.
-- `EventLog` storage — SQLite now, append-only WORM/object storage later.
+- `EventLog` storage — SQLite now (with append-only triggers and per-event signatures), head-hash anchor file, append-only WORM/object storage later.
 
 ## 8. Deployment shapes (architected, not yet built)
 

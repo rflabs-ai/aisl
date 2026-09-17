@@ -1,10 +1,10 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M3 — evidence hardening landed.
+Honest snapshot. Updated after M4 — authorization lifecycle landed.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~3,500 lines of source across 21 modules
+TypeScript foundation on Node 24, ~3,500 lines of source across 22 modules
 (`src/`), 166 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), four threat models (`threat-models/`), a measured
@@ -106,8 +106,6 @@ code. They are not evidence of security against a competent adversary.
   `capabilityId` attribution field, and a self-referential `world` initialization.
 - `tsc` initially rejected `.ts` import extensions until
   `allowImportingTsExtensions` was enabled.
-- M4 work-in-progress introduces 3 unrelated test failures
-  (`tests/authorization-lifecycle.test.ts`). They are not caused by M3.
 
 No M3-relevant test failure was suppressed. Nothing was skipped or marked
 `todo` to make the suite green.
@@ -144,9 +142,8 @@ Ordered by severity.
 11. **Attenuation is declared, not proven.** `issuerAuthority` is an object the
     caller supplies; a caller can overstate it. Delegation must carry the
     parent's signature (ADR-002, H1).
-  12. ~~**No capability revocation.**~~ In-process revocation lands in M4;
-      multi-node broadcast remains H13.
-    *(M4 work-in-progress addresses this in-process; not yet landed.)*
+12. **No multi-node capability revocation broadcast.** In-process revocation is
+    immediate; a multi-node deployment needs a revocation channel (H13).
 13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
     mode (H15). IdP outage now has a distinct deny reason and health signal.

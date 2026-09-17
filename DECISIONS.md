@@ -79,7 +79,7 @@ cryptographically provable rather than declared.
 **Context:** Agent-generated and tool code must eventually run isolated. Today
 there is no isolation and pretending otherwise is worse than admitting it.
 
-**Decision:** `Sandbox` interface (`src/runtime.ts:62`) with `LocalSandbox`,
+**Decision:** `Sandbox` interface (`src/runtime.ts:64`) with `LocalSandbox`,
 which executes in-process and is documented as providing **zero** isolation.
 
 **Alternatives:** start with Docker (present on this machine) or gVisor/Firecracker

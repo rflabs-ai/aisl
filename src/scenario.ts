@@ -123,7 +123,7 @@ export const EGRESS_ALLOWLIST_RULE: PolicyRule = {
 export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
-  const eventLog = new EventLog(options.sqlitePath);
+  const eventLog = new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
 
   registry.add(defineResource({ id: RESOURCE_IDS.repoA, type: 'repository', tenantId: TENANT_A, classification: 'internal' }));
   registry.add(defineResource({ id: RESOURCE_IDS.internalDoc, type: 'document', tenantId: TENANT_A, classification: 'internal' }));

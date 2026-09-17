@@ -492,6 +492,8 @@ auditable for a decade.
 **Decision:** TypeScript executed directly by Node 24's type stripping, `node:test`
 for tests, `node:sqlite` and `node:crypto` for storage and hashing. No runtime
 dependencies; `typescript` and `@types/node` are dev-only.
+*(Amended by ADR-015: `jose` admitted as the first runtime dependency for
+JWT/JWK verification, under the dependency-admission policy.)*
 
 **Alternatives:** Go or Rust (stronger guarantees, slower to evolve, would
 marginalize the control-plane ecosystem); Python (weaker typing at the

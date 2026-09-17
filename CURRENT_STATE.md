@@ -6,7 +6,7 @@ denominator widened to 100 honest sessions.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~4,600 lines of source across 28 modules
+TypeScript foundation on Node 24, ~5,500 lines of source across 27 modules
 (`src/`), 283 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five

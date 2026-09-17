@@ -57,12 +57,18 @@ was left, and what the next session should pick up.
   but never fails; the real benchmark exits 0 with the pinned `slo` block shape
   and catalog ids (`execFileSync` throwing on nonzero exit IS the gate test).
 - Docs: ROADMAP (Stage-0 row [DONE], "Planned milestone prompts" note,
-  assurance section), CURRENT_STATE (283 tests / 28 modules, "What M10 closed",
+  assurance section), CURRENT_STATE (283 tests / 27 modules, "What M10 closed",
   watch-item #2 struck, measured-this-run + SLO line), RELIABILITY §8
   (widened denominator replaces the M9 caveat; stale "assurance target 7/9"
   number refs → control names, since the catalog renumbered), SECURITY_CLAIMS
   Claim 23 evidence/limitations (denominator meaning changed; the claim's
   "falseClaimRate = 0" remains true).
+- Post-commit drift sweep (before M11/M13 kickoff): fixed CURRENT_STATE source
+  counts (27 modules / ~5,500 lines — the pre-M10 "27 modules" figure was
+  already one off, and the line count had drifted), resynced PROJECT_CONTEXT.md
+  (M0-era 14-module file map → the full 27-module map; 10 → 12 attack cases;
+  "zero runtime deps" → jose/ADR-015; Docker now M1-used; counts delegated to
+  CURRENT_STATE as the live snapshot), and added a stage note to its non-goals.
 
 **Left:**
 - Nothing in flight. Skipped by design (M10 §7): benchmark history/time-series,

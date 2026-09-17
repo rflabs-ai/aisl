@@ -20,8 +20,8 @@ tenant, expiry, single-use, scope, classification ceiling, constraints.
 **Assumptions:** the runtime process is not compromised; the policy set is what
 the operator intended; the signing key is secret.
 
-**Evidence:** `npm test` — 70 assertions; `benchmarks/results.json` reports
-`unauthorizedActionDenialRate`.
+**Evidence:** `npm test` (full suite; counts per milestone in CURRENT_STATE.md);
+`benchmarks/results.json` reports `unauthorizedActionDenialRate`.
 
 **Test:** `tests/invariants.test.ts` invariant 1 (three cases, including
 "capability alone is not enough").

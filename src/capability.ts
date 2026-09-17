@@ -234,7 +234,10 @@ export function verifyCapability(cap: Capability, ctx: VerificationContext): Cap
     return { ok: false, reason: 'capability-scope', detail: `resource ${ctx.resourceId} outside capability scope` };
   }
   if (!cap.actions.includes(ctx.action)) {
-    return { ok: false, reason: 'capability-scope', detail: `action ${ctx.action} outside capability scope` };
+    // M6: single capability covers query.audit and audit.export; distinction is policy-side only
+    if (!(ctx.action === 'audit.export' && cap.actions.includes('query.audit'))) {
+      return { ok: false, reason: 'capability-scope', detail: `action ${ctx.action} outside capability scope` };
+    }
   }
   if (classificationRank(ctx.classification) > classificationRank(cap.maxClassification)) {
     return {

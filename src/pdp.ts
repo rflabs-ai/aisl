@@ -23,7 +23,7 @@ import {
   deny,
   isAuthenticated,
 } from './domain.ts';
-import { type EventLog, type SecurityEvent } from './events.ts';
+import { type EventLog, type SecurityEvent, type AuditFilters } from './events.ts';
 import { type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
@@ -257,9 +257,121 @@ export class AuthorizationService {
     return open(sealed);
   }
 
+  /**
+   * M6: Authorize audit query or export for a tenant. Reuses the revealEvidence
+   * pattern: auth check -> tenant check -> capability match -> policy evaluate ->
+   * event log append. Default deny on every failure.
+   */
+  queryAudit(input: AuthorizeInput, filters: AuditFilters): AuthorizationDecision {
+    const at = this.now();
+    const { principal } = input;
+    const action = input.action || 'query.audit';
+    const derivedResourceId = `audit-log:${principal.tenantId}`;
+
+    // 1. Auth check fires first (mirrors authorize / revealEvidence)
+    if (principal.kind !== 'authorization' && !isAuthenticated(principal, at)) {
+      const idpDown = this.idpHealth?.().status === 'unreachable';
+      const denyReason: DenyReason = idpDown ? 'idp-unavailable' : 'unauthenticated-principal';
+      const decision = deny(
+        principal.id,
+        action,
+        derivedResourceId,
+        denyReason,
+        `principal ${principal.id} has no valid authentication context`,
+        at,
+      );
+      try {
+        this.eventLog.append({
+          tenantId: principal.tenantId,
+          principal: principal.id,
+          actor: principal.id,
+          actorKind: principal.kind,
+          action,
+          resourceId: derivedResourceId,
+          decision: 'deny',
+          denyReason,
+          result: 'denied',
+          metadata: { phase: 'decision', reason: decision.reason, authCheck: 'failed' },
+        });
+      } catch {
+        // Evidence write failure on auth check
+      }
+      return decision;
+    }
+
+    // 2. Tenant check on filters and caller-supplied resourceId
+    if (
+      (input.resourceId && input.resourceId !== derivedResourceId) ||
+      filters.tenantId !== principal.tenantId
+    ) {
+      const decision = deny(
+        principal.id,
+        action,
+        derivedResourceId,
+        'tenant-mismatch',
+        'cross-tenant audit query denied',
+        at,
+        '@tenant-isolation',
+      );
+      try {
+        this.eventLog.append({
+          tenantId: principal.tenantId,
+          principal: principal.id,
+          actor: principal.id,
+          actorKind: principal.kind,
+          action,
+          resourceId: derivedResourceId,
+          decision: 'deny',
+          denyReason: 'tenant-mismatch',
+          result: 'denied',
+          metadata: { phase: 'decision', reason: decision.reason },
+        });
+      } catch {
+        // Evidence write failure
+      }
+      return decision;
+    }
+
+    // 3. Ensure synthetic resource is defined in registry
+    if (!this.registry.get(derivedResourceId)) {
+      this.registry.add(
+        defineResource({
+          id: derivedResourceId,
+          type: 'audit-log',
+          tenantId: principal.tenantId,
+          classification: 'internal',
+          attributes: { purpose: 'audit-log' },
+        }),
+      );
+    }
+
+    // 4. Delegate to standard authorize pipeline
+    return this.authorize({
+      principal,
+      action,
+      resourceId: derivedResourceId,
+      params: input.params,
+      networkHost: input.networkHost,
+      approvals: input.approvals,
+    });
+  }
+
   private evaluate(input: AuthorizeInput, at: number): AuthorizationDecision {
     const { principal, action, resourceId, params, networkHost, approvals } = input;
     try {
+      if (!this.registry.get(resourceId) && resourceId.startsWith('audit-log:')) {
+        const resTenant = resourceId.slice('audit-log:'.length);
+        this.registry.add(
+          defineResource({
+            id: resourceId,
+            type: 'audit-log',
+            tenantId: resTenant,
+            classification: 'internal',
+            attributes: { purpose: 'audit-log' },
+          }),
+        );
+      }
+
       let resource;
       try {
         resource = this.registry.require(resourceId);
@@ -283,7 +395,9 @@ export class AuthorizationService {
       }
 
       const candidates = this.capabilitiesFor(principal.id).filter(
-        (c) => c.resourceIds.includes(resourceId) && c.actions.includes(action),
+        (c) =>
+          c.resourceIds.includes(resourceId) &&
+          (c.actions.includes(action) || (action === 'audit.export' && c.actions.includes('query.audit'))),
       );
 
       if (candidates.length === 0) {

@@ -50,6 +50,30 @@ export interface SecurityEvent {
   readonly signature?: string;
 }
 
+export interface AuditFilters {
+  readonly tenantId: string;          // required; tenant-scoped
+  readonly fromSeq?: number;          // inclusive
+  readonly toSeq?: number;            // inclusive
+  readonly fromTime?: number;         // ms epoch, inclusive
+  readonly toTime?: number;           // ms epoch, exclusive
+  readonly actor?: string;            // exact match
+  readonly action?: Action | '*';     // exact or '*'
+  readonly decision?: 'allow' | 'deny';
+  readonly resourceId?: string;       // exact match
+  readonly limit?: number;            // default 100, max 1000
+  readonly offset?: number;           // default 0
+}
+
+export interface AuditExport {
+  readonly tenantId: string;
+  readonly generatedAt: number;
+  readonly fromSeq: number;
+  readonly toSeq: number;
+  readonly events: readonly SecurityEvent[];  // includes signature + eventHash
+  readonly head: string;                        // eventHash of the last event in events
+  readonly previousHead: string | null;         // eventHash of the event immediately before fromSeq, or null
+}
+
 export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'eventHash' | 'timestamp' | 'signature'> & {
   readonly timestamp?: number;
 };
@@ -200,6 +224,7 @@ export class EventLog {
         event_hash TEXT NOT NULL,
         event TEXT NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS idx_security_events_tenant_seq ON security_events (tenant_id, seq);
     `);
     // M3: append-only enforcement. Any UPDATE or DELETE on security_events
     // raises — including a direct sqlite3 exec from a script. The runtime
@@ -281,6 +306,101 @@ export class EventLog {
     return this.events.filter((e) => e.tenantId === tenantId);
   }
 
+  query(filters: AuditFilters): readonly SecurityEvent[] {
+    if (!filters.tenantId || typeof filters.tenantId !== 'string' || filters.tenantId.trim() === '') {
+      throw new Error('tenantId is required for audit query');
+    }
+
+    if (this.db) {
+      const conditions: string[] = ['tenant_id = ?'];
+      const params: (string | number)[] = [filters.tenantId];
+
+      if (filters.fromSeq !== undefined) {
+        conditions.push('seq >= ?');
+        params.push(filters.fromSeq);
+      }
+      if (filters.toSeq !== undefined) {
+        conditions.push('seq <= ?');
+        params.push(filters.toSeq);
+      }
+      if (filters.fromTime !== undefined) {
+        conditions.push('timestamp >= ?');
+        params.push(filters.fromTime);
+      }
+      if (filters.toTime !== undefined) {
+        conditions.push('timestamp < ?');
+        params.push(filters.toTime);
+      }
+      if (filters.actor !== undefined) {
+        conditions.push("json_extract(event, '$.actor') = ?");
+        params.push(filters.actor);
+      }
+      if (filters.action !== undefined && filters.action !== '*') {
+        conditions.push("json_extract(event, '$.action') = ?");
+        params.push(filters.action);
+      }
+      if (filters.decision !== undefined) {
+        conditions.push("json_extract(event, '$.decision') = ?");
+        params.push(filters.decision);
+      }
+      if (filters.resourceId !== undefined) {
+        conditions.push("json_extract(event, '$.resourceId') = ?");
+        params.push(filters.resourceId);
+      }
+
+      const limit = Math.min(filters.limit ?? 100, 1000);
+      const offset = filters.offset ?? 0;
+      params.push(limit, offset);
+
+      const sql = `SELECT event FROM security_events WHERE ${conditions.join(' AND ')} ORDER BY seq ASC LIMIT ? OFFSET ?`;
+      const rows = this.db.prepare(sql).all(...params) as { event: string }[];
+      return rows.map((r) => JSON.parse(r.event) as SecurityEvent);
+    }
+
+    // In-memory fallback
+    let matches = this.events.filter((e) => e.tenantId === filters.tenantId);
+    if (filters.fromSeq !== undefined) matches = matches.filter((e) => e.seq >= filters.fromSeq!);
+    if (filters.toSeq !== undefined) matches = matches.filter((e) => e.seq <= filters.toSeq!);
+    if (filters.fromTime !== undefined) matches = matches.filter((e) => e.timestamp >= filters.fromTime!);
+    if (filters.toTime !== undefined) matches = matches.filter((e) => e.timestamp < filters.toTime!);
+    if (filters.actor !== undefined) matches = matches.filter((e) => e.actor === filters.actor);
+    if (filters.action !== undefined && filters.action !== '*') matches = matches.filter((e) => e.action === filters.action);
+    if (filters.decision !== undefined) matches = matches.filter((e) => e.decision === filters.decision);
+    if (filters.resourceId !== undefined) matches = matches.filter((e) => e.resourceId === filters.resourceId);
+    const limit = Math.min(filters.limit ?? 100, 1000);
+    const offset = filters.offset ?? 0;
+    return matches.slice(offset, offset + limit);
+  }
+
+  exportFor(filters: AuditFilters): AuditExport {
+    const events = this.query(filters);
+    const generatedAt = Date.now();
+    if (events.length === 0) {
+      return {
+        tenantId: filters.tenantId,
+        generatedAt,
+        fromSeq: filters.fromSeq ?? 0,
+        toSeq: filters.toSeq ?? 0,
+        events: [],
+        head: '',
+        previousHead: null,
+      };
+    }
+    const fromSeq = events[0]!.seq;
+    const toSeq = events.at(-1)!.seq;
+    const head = events.at(-1)!.eventHash;
+    const previousHead = events[0]!.seq === 0 ? null : events[0]!.previousEventHash;
+    return {
+      tenantId: filters.tenantId,
+      generatedAt,
+      fromSeq,
+      toSeq,
+      events,
+      head,
+      previousHead,
+    };
+  }
+
   verify(options: { publicKey?: KeyObject } = {}): ChainVerification {
     for (let i = 0; i < this.events.length; i++) {
       const e = this.events[i]!;
@@ -355,22 +475,37 @@ export interface VerificationResult {
  * content + optional public key. No database access.
  */
 export function verifyBundle(
-  bundleJson: string,
+  bundleJson: string | AuditExport | readonly SecurityEvent[],
   options: { anchorContent?: string; publicKey?: KeyObject } = {},
 ): VerificationResult {
   const errors: string[] = [];
-  let parsed: { algorithm?: string; genesis?: string; events?: SecurityEvent[]; head?: string };
-  try {
-    parsed = JSON.parse(bundleJson) as typeof parsed;
-  } catch (e) {
-    return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: [`bundle is not valid JSON: ${(e as Error).message}`] };
+  let parsed: { algorithm?: string; genesis?: string; previousHead?: string | null; events?: SecurityEvent[]; head?: string };
+  if (typeof bundleJson === 'string') {
+    try {
+      parsed = JSON.parse(bundleJson) as typeof parsed;
+    } catch (e) {
+      return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: [`bundle is not valid JSON: ${(e as Error).message}`] };
+    }
+  } else if (Array.isArray(bundleJson)) {
+    parsed = {
+      events: bundleJson as SecurityEvent[],
+      genesis: bundleJson[0]?.previousEventHash ?? GENESIS_HASH,
+      head: bundleJson.at(-1)?.eventHash,
+    };
+  } else {
+    const exp = bundleJson as AuditExport;
+    parsed = {
+      events: exp.events as SecurityEvent[],
+      genesis: exp.previousHead ?? GENESIS_HASH,
+      head: exp.head,
+    };
   }
   const events = parsed.events ?? [];
   if (events.length === 0) {
     return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: ['bundle contains no events'] };
   }
 
-  let prev = parsed.genesis ?? GENESIS_HASH;
+  let prev = parsed.genesis ?? (parsed.previousHead !== undefined && parsed.previousHead !== null ? parsed.previousHead : GENESIS_HASH);
   let signatureValid = true;
   let signatureChecked = options.publicKey !== undefined;
   for (const e of events) {

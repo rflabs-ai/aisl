@@ -120,7 +120,8 @@ export type ResourceType =
   | 'api'
   | 'secret'
   | 'network-destination'
-  | 'system';
+  | 'system'
+  | 'audit-log';
 
 export interface Resource {
   readonly id: string;
@@ -141,7 +142,9 @@ export type KnownAction =
   | 'secret.use'
   | 'capability.issue'
   | 'task.approve'
-  | 'evidence.decrypt';
+  | 'evidence.decrypt'
+  | 'query.audit'
+  | 'audit.export';
 
 export type Action = KnownAction | (string & {});
 

@@ -359,19 +359,10 @@ export class AuthorizationService {
   private evaluate(input: AuthorizeInput, at: number): AuthorizationDecision {
     const { principal, action, resourceId, params, networkHost, approvals } = input;
     try {
-      if (!this.registry.get(resourceId) && resourceId.startsWith('audit-log:')) {
-        const resTenant = resourceId.slice('audit-log:'.length);
-        this.registry.add(
-          defineResource({
-            id: resourceId,
-            type: 'audit-log',
-            tenantId: resTenant,
-            classification: 'internal',
-            attributes: { purpose: 'audit-log' },
-          }),
-        );
-      }
-
+      // The synthetic audit-log resource is registered by queryAudit() before it
+      // delegates here. A direct authorize() call on a caller-constructed
+      // audit-log:* id has no such registration and fails closed as
+      // unknown-resource.
       let resource;
       try {
         resource = this.registry.require(resourceId);

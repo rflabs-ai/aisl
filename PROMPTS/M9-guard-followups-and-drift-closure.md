@@ -8,15 +8,17 @@ Read `PROJECT_CONTEXT.md`, `ARCHITECTURE.md` (§4–§7), `SECURITY_CLAIMS.md`
 (Claims 21, 22, 23), `DECISIONS.md` (ADR-001, ADR-014), `ROADMAP.md` (Stage 1
 row "Output reliability layer" — keep `[DONE]`), `CURRENT_STATE.md` (test
 count + "What M8 closed" — the M9 results land in a new "What M9 closed"
-section), `AGENT-SESSION.md` (SESSION 8 + new SESSION 9 entry),
+section), `AGENT-SESSION.md` (SESSION 8 + new SESSION 10 entry — SESSION 9 is M6.1's
+audit-drift entry),
 `RELIABILITY.md` (§5 ladder + §6 R1–R3, §7 boundary semantics, §8 metrics —
 add `falseClaimRate` to the metrics list), `src/guard.ts`, `src/runtime.ts`,
 `src/scenario.ts`, `src/capability-request.ts`, `src/seal.ts`,
 `tests/guard.test.ts`, `security-tests/guard-invariants.test.ts`,
 `security-fixtures/`, `security-attacks/`.
 
-Goal: SESSION 8 deferred four things and the audit found five drift items.
-This milestone ships them.
+Goal: SESSION 8 deferred three things (per-session classification,
+second-pass guard, D6 hook) and the audit found six drift items. This
+milestone ships them.
 
 - **The Escalate rung wires into M4.** Today the Escalate rung produces the
   awaiting-review text and stops. M4 (`CapabilityRequestService`) is built
@@ -26,18 +28,18 @@ This milestone ships them.
   (out of band, M4's existing surface) gates delivery.
 - **Per-session classification derivation.** Today `src/runtime.ts:251`
   hardcodes `classification: 'public'` in the `GuardContext`. The
-  classification should be derived from the session's resource ceiling
-  (max of the principal's capabilities' `maxClassification`, or the
-  resource being read, whichever is tighter). This makes the Escalate
-  rung reachable in real workloads.
+  classification should be derived from the session's visible ceiling —
+  the highest (most sensitive) of the principal's capability
+  `maxClassification` fields, the ingested resources, and the requested
+  resources. The highest is the conservative choice. This makes the
+  Escalate rung reachable in real workloads.
 - **Second-pass guard after `steps` computed.** Today's guard runs once,
-  pre-execution, on the model's first-pass text. Action-claim-mismatch
-  catches claims of side effects the agent didn't actually execute; a
-  second pass over the post-`steps` text catches the converse (the agent
-  performed a side effect and then forgot to mention it — currently the
-  second case is fine). The second pass is mostly a robustness gate; it
-  must NOT double-emit `session.guard` events. Add a second event only
-  when the second pass changes the verdict.
+  before execution, with `steps: []`. Re-running the same detectors on the
+  same model text with the executed `steps` populated can change the verdict
+  — step data can clear an `action-claim-mismatch` or a numeric flag that the
+  empty-steps pass raised (and, in principle, add a `numeric-mismatch`). The
+  second pass is a robustness gate; it must NOT double-emit `session.guard`
+  events. Add a second event only when the verdict changes.
 - **Drift fixes from the audit.** The M7 prompt's wire-format spec said
   `metadata.sealed: Sealed | null` (raw object). The implementation
   JSON-stringifies it. `ladderRung` is hardcoded `null` instead of
@@ -67,47 +69,70 @@ in charge of the seam between them.
 
 Scope:
 
-1. Add an optional `capabilityRequestService?: CapabilityRequestService`
-   field to `GuardContext` (or pass it via `SessionConfig.guardOptions`).
-   The guard does not OWN the service — it receives it.
-2. When `runLadder` reaches the Escalate rung AND `capabilityRequestService`
-   is provided AND the principal is an agent (only agents should escalate,
-   not users), submit a `CapabilityRequest`:
+1. Add to `GuardContext` (`src/guard.ts:40`):
+   - `readonly principal: Principal;` — the session principal. The guard
+     needs it to decide whether escalation is allowed (agents only) and to
+     pass the requester to `submit()`. `GuardContext` carries no principal
+     today; populate it in `src/runtime.ts`.
+   - `readonly capabilityRequestService?: CapabilityRequestService;` — the
+     guard receives the service, it does not OWN it. Import the type only
+     (`import { type CapabilityRequestService } from './capability-request.ts'`)
+     so `src/guard.ts` keeps no runtime dependency on the authority plane
+     and the R3 dependency check holds.
+2. **Keep `runLadder` pure.** It returns which rung fired; it does NOT
+   submit anything. `GroundedResponseGuard.guard()` performs the Escalate
+   side effect after `runLadder` returns `ladderRung === 'escalate'`.
+3. When the Escalate rung fires AND `capabilityRequestService` is provided
+   AND `ctx.principal.kind === 'agent'` (users do not escalate), submit a
+   `CapabilityRequest` using the real positional signature
+   (`src/capability-request.ts:67`):
    ```ts
-   service.submit({
-     requester: ctx.principal,           // the agent
-     action: 'guard.review',             // synthetic action namespace
-     resourceId: '<guard>',              // synthetic resource
-     justification: `Guard Escalate: ${flags.map(f => f.reason).join(', ')}`,
-     // the existing fields the M4 service expects
-   });
+   const request = service.submit(
+     ctx.principal,          // the agent (requester)
+     ctx.sessionId,
+     ['guard.review'],       // synthetic resource id (metadata, not a KnownAction)
+     ['guard.review'],       // synthetic action; Action includes `string & {}`
+     ctx.classification,
+     `Guard Escalate: ${flags.map((f) => f.reason).join(', ')}`,
+   );
    ```
-   The returned `request.id` is included in the `escalateText` (e.g.
-   `"This response is awaiting human review (escalation required).
-   Review request: <id>."`) and in the `session.guard` event metadata.
-3. When the Escalate rung fires, also append a `capability.request` event
-   to the event log via the `EventLog` (which the session holds).
-4. If no `capabilityRequestService` is provided, the Escalate rung falls
-   back to today's behavior (text only, no queued request). This keeps
-   the unit tests simple and lets deployments without M4 still use the
-   guard.
-5. **The guard does NOT wait for approval.** Per the prompt's design,
-   escalation produces the request and returns the awaiting-review
-   text. M4's existing approval flow handles the rest out of band.
-6. **The Escalate rung fires only when `classification >= confidential`**.
+   `submit()` already appends the `capability.request` event itself
+   (`src/capability-request.ts:90`). Do NOT append a second one — the guard
+   has no `EventLog` handle by design (RELIABILITY.md §2, R3), and the
+   session's `session.guard` event carries the `requestId`.
+4. The returned `request.id` is included in the awaiting-review text (e.g.
+   `"This response is awaiting human review (escalation required). Review
+   request: <id>."`) and in the `session.guard` event metadata as
+   `requestId`. `runLadder` builds `escalateText` before the id exists, so
+   `guard()` overrides `text` after submit (build a new object; do not
+   mutate the readonly response).
+5. If no `capabilityRequestService` is provided (or the principal is not an
+   agent), the Escalate rung falls back to today's behavior (text only, no
+   queued request, no `requestId` in metadata). This keeps the unit tests
+   simple and lets deployments without M4 still use the guard.
+6. **The guard does NOT wait for approval.** Escalation produces the request
+   and returns the awaiting-review text. M4's existing approval flow handles
+   the rest out of band.
+7. **The Escalate rung fires only when `classification >= confidential`**.
    Today this gate is in `runLadder`. Keep it. With per-session
    classification (Subagent B's deliverable), the gate becomes
    meaningful in real workloads.
-7. Tests in `tests/guard.test.ts`:
+8. Tests in `tests/guard.test.ts`:
    - "escalate queues a CapabilityRequest when the service is provided"
    - "escalate falls back to text-only when no service"
    - "escalate does NOT queue a CapabilityRequest when classification < confidential"
    - "the awaiting-review text names the request id"
 
-Ponytail: do not invent a new action surface. Use a synthetic
-`guard.review` resource id; this is metadata, not a new `KnownAction`.
-The `CapabilityRequest.action` field is already typed as `Action`,
-which includes `string & {}` — extend it via the brand.
+Adding the required `GuardContext.principal` field breaks every existing
+context literal: update the builders in `tests/guard.test.ts` (`ctx()`),
+`security-tests/guard-invariants.test.ts` (`sampleGuardContext()`), and the
+`guardLatencyP99Ms` `smallInput()` in `src/cli.ts`. `src/runtime.ts` sets
+it from `this.cfg.principal`.
+
+Ponytail: do not invent a new action surface. Use the synthetic
+`'guard.review'` string for both the resource id and the requested action;
+this is metadata, not a new `KnownAction`. `CapabilityRequest.requestedActions`
+is typed `readonly Action[]`, and `Action` includes `string & {}`.
 
 Deliverable: the Escalate rung wired into M4 + tests.
 
@@ -118,10 +143,10 @@ Scope:
 1. **Classification derivation.** Today `src/runtime.ts:251` hardcodes
    `classification: 'public'`. Change it to derive from the session's
    resources:
-   - Compute `maxClassification` as the maximum of:
-     - the principal's capability `maxClassification` fields (the
-       tightest one is what the session can reach; use the loose one
-       so the guard is conservative),
+   - Compute `maxClassification` as the highest (most sensitive) of:
+     - the principal's capability `maxClassification` fields — the ceiling
+       the session could legitimately reach; the highest is the conservative
+       choice,
      - the highest classification among resources the session
        ingested (from `cfg.content` keys; each key is a resourceId;
        look up the resource in `cfg.registry`),
@@ -135,15 +160,15 @@ Scope:
    than the first, append ONE more `session.guard` event with
    `metadata.phase === 'guard-second-pass'`. If the verdict is the same
    (e.g., both delivered), no extra event.
-3. The second pass uses the SAME `GuardedResponseGuard` instance, with
-   `ctx.steps` populated from the executed steps. The `originalSealed`
-   field on the second-pass event is the SECOND-pass text (the
-   post-execution output), not the first-pass text.
+3. The second pass uses the SAME `GuardedResponseGuard` instance and the
+   SAME `modelOutput.text`, with `ctx.steps` populated from the executed
+   steps (`steps` is assigned at `src/runtime.ts:254`, after the first
+   pass). Its `originalSealed` is the sealed model text for that pass.
 4. Tests in `tests/runtime-second-pass.test.ts`:
    - "first and second pass agree → exactly one session.guard event"
-   - "second pass catches an action-claim-mismatch the first pass missed"
-     (model first says "OK" then performs delete; second pass finds
-     the post-step trace contradicts)
+   - "second pass clears a first-pass action-claim-mismatch" (model text
+     "I deleted X"; the delete executes; first pass with `steps: []` flags
+     it, second pass with the executed delete does not)
    - "classification derives from ingested resources"
    - "classification defaults to 'public' when nothing is visible"
 
@@ -164,10 +189,13 @@ Scope:
    directly. Update the `runLadder` helper to use a `Sealed`-returning
    `seal()` call (the existing `seal()` returns `Sealed`; just stop
    stringifying it).
-2. **`ladderRung` tracking.** Change `runLadder` to return which rung
-   fired (`'delivered' | 'repaired' | 'withheld'` mapped to
-   `'repair' | 'regenerate' | 'abstain' | 'escalate' | null`). The
-   caller (`GroundedResponseGuard.guard`) sets the value. Update
+2. **`ladderRung` tracking.** Add `readonly ladderRung: 'repair' |
+   'regenerate' | 'abstain' | 'escalate' | null` to `GuardedResponse` as a
+   new field (do NOT change `runLadder`'s return shape — `tests/guard.test.ts`
+   calls it directly and reads `.status`). Map: delivered → `null`; repair
+   success → `'repair'`; regenerate success → `'regenerate'`; withheld with
+   `classification >= confidential` → `'escalate'`; other withheld →
+   `'abstain'`; D5 leak withhold → `null` (the ladder is skipped). Update
    `src/runtime.ts` to thread the rung into `metadata.ladderRung`.
 3. **D4 dedup.** When a bare number is flagged, set EITHER
    `unverified-claim` (D2, when no steps) OR `numeric-mismatch` (D4,
@@ -189,14 +217,11 @@ Scope:
 6. **Tests** covering the above, in `tests/guard.test.ts` or
    `tests/runtime-drift-fixes.test.ts`.
 
-Ponytail: do not change `GuardedResponse` shape publicly — the
-`originalSealed: Sealed | null` change is INTERNAL to the wire
-format; the public type already says `string | null` per the prompt's
-old text, and the wire format is what gets recorded in the event
-log. **Decision required**: should `GuardedResponse.originalSealed`
-become `Sealed | null`? The audit recommends YES — the prompt §5 says
-it should be a `Sealed` object. Update both the type and the
-emitters.
+Decision (resolved): `GuardedResponse.originalSealed` becomes
+`Sealed | null`. Update the type in `src/guard.ts`, both emitters in
+`runLadder`/`guard()`, and the `src/runtime.ts` `metadata.sealed` write.
+This is a contract change, not a design rewrite — correct the §4
+`GuardedResponse` snippet in `RELIABILITY.md` accordingly (§10).
 
 Deliverable: drift fixes + tests + benchmark output + docs update.
 
@@ -209,18 +234,20 @@ Deliverable: drift fixes + tests + benchmark output + docs update.
 - Own the docs sweep at the end:
   - **SECURITY_CLAIMS.md** — update Claim 23's mechanism to mention the
     M4 wiring (Escalate queues a `CapabilityRequest`), the per-session
-    classification derivation, and the second-pass guard. Update the
-    Known limitations list: remove "per-session classification is a
-    future enhancement", remove "second-pass guard is a follow-up".
-    Update Evidence to reference the new tests.
+    classification derivation, the second-pass guard, and the wire-format
+    fixes (`metadata.sealed` is a raw `Sealed` object; `metadata.ladderRung`
+    records the rung that fired). Update the Known limitations list: remove
+    "per-session classification is a future enhancement", remove
+    "second-pass guard is a follow-up". Update Evidence to reference the
+    new tests.
   - **CURRENT_STATE.md** — add "What M9 closed" section (M8 follow-ups
     + drift closure + per-session classification + second-pass guard
-    + Escalate-to-M4). Update test count. Add M8's previously-listed
-    "M9 closed" items to the known-vulnerabilities list with strikethrough.
+    + Escalate-to-M4). Update test count. Those items were never on the
+    known-vulnerabilities list, so there is nothing to strike there.
   - **ROADMAP.md** — Stage 1 row "Output reliability layer" already
     `[DONE]`; add a parenthetical to the status: "(M9: Escalate wired
     to M4, classification derived per session, second-pass guard)".
-  - **AGENT-SESSION.md** — add SESSION 9 entry summarizing what the
+  - **AGENT-SESSION.md** — add SESSION 10 entry summarizing what the
     three subagents built.
   - **RELIABILITY.md** — status footer unchanged (still implemented);
     §8 metric list adds `falseClaimRate` to the benchmark description.
@@ -240,16 +267,18 @@ resource to be in the registry (verify against
 
 ## 3. Actions (M9 only)
 
-No new `KnownAction` entries. `CapabilityRequest.action` is typed as
-`Action` which includes `string & {}`. We use the synthetic string
-`'guard.review'`; this does not require a `KnownAction` change.
+No new `KnownAction` entries. `CapabilityRequest.requestedActions` is typed
+as `readonly Action[]`, and `Action` includes `string & {}`. We use the
+synthetic string `'guard.review'` for both the resource id and the action;
+this does not require a `KnownAction` change.
 
 ## 4. Authorization (no change)
 
-The guard remains read-only. Adding the capability-request call uses
-the existing `CapabilityRequestService.submit()` API; it doesn't widen
-the guard's authority (the service still enforces user-kind reviewer
-refusal and self-approval refusal).
+The guard still holds no authority. Adding the capability-request call
+uses the existing `CapabilityRequestService.submit()` API; submitting a
+request is intent, not authority, and it does not widen the guard's reach
+(the service still enforces user-kind reviewer refusal and self-approval
+refusal).
 
 ## 5. Wire format — second-pass guard event
 
@@ -281,17 +310,18 @@ reading the event log can now directly see `.ciphertext`, `.keyId`,
 ## 6. Sealing + redaction
 
 `metadata.sealed.ciphertext` remains AES-256-GCM (same path as Claim
-13). The delivered `text` is never sealed. The second-pass event
-seals the SECOND-pass text (the post-execution model output, if any
-exists; otherwise the same first-pass text).
+13). The delivered `text` is never sealed. Each `session.guard` event
+seals the model text evaluated for that pass — the same `modelOutput.text`
+both times; the second pass differs only in the populated `steps`.
 
 ## 7. Boundary semantics (M9)
 
 - `GuardContext.context` remains a `ReadonlyMap<string, string>` keyed
   by `resourceId`.
-- `GuardContext.steps` is now optionally populated by the caller
-  (the session) with the post-execution `StepRecord[]` for the
-  second pass.
+- `GuardContext.steps` is populated with `[]` on the first pass and the
+  executed `StepRecord[]` on the second pass.
+- `GuardContext.principal: Principal` — the session principal, used to gate
+  escalation to agents and as the `submit()` requester.
 - `GuardContext.capabilityRequestService?: CapabilityRequestService`
   — when provided, the Escalate rung uses it. The guard does not own
   the service. The service is still injected from the session config.
@@ -310,9 +340,9 @@ exists; otherwise the same first-pass text).
   (no request, no requestId in metadata).
 - Escalate does NOT fire when classification is `'public'` or `'internal'`,
   regardless of whether a service is provided.
-- The CapabilityRequest's `requester` is the session's principal (the
-  agent), `action: 'guard.review'`, `justification` lists the flag
-  reasons.
+- The CapabilityRequest's `principalId` is the session's agent,
+  `requestedActions` includes `'guard.review'`, and `justification` lists
+  the flag reasons.
 
 ### Classification derivation (`tests/runtime-second-pass.test.ts`)
 
@@ -325,20 +355,14 @@ exists; otherwise the same first-pass text).
 
 ### Second-pass guard (`tests/runtime-second-pass.test.ts`)
 
-- Model says "OK" then requests `delete` on a resource → first pass
-  delivers; second pass catches `I deleted X` claims missing a delete
-  step (when steps don't include a delete — there is none, but the
-  model claimed one). Adjust the test fixture so the second-pass
-  actually catches a discrepancy.
-- Actually a simpler test: model output `requests: [{action: 'delete',
-  resourceId: X}]` but `modelText: ''` (no claim). First pass delivers
-  (no claim). Second pass sees empty text and delivers (no claim).
-  No second-pass event.
-- A second-pass event IS emitted when the verdict changes between
-  passes (e.g., model output `text: 'I deleted X'` with a
-  `requests: [{action: 'read'}]` — first pass flags action-claim-
-  mismatch; second pass also flags it; same verdict, no second event).
-  Verify the count.
+- Same verdict across both passes → exactly one `session.guard` event
+  (no `guard-second-pass` event). This is the common case.
+- Verdict changes between passes → exactly one extra `session.guard`
+  event with `metadata.phase === 'guard-second-pass'`, sealing the
+  second-pass text. Construct a fixture where the post-`steps` context
+  flips the verdict (e.g., first pass sees no executed steps and delivers,
+  second pass sees steps that contradict the text), or call the per-pass
+  helper directly.
 - Skip: contrived tests that contradict themselves. Keep the
   second-pass test surface small.
 
@@ -367,9 +391,9 @@ exists; otherwise the same first-pass text).
 
 ### Existing suite green
 
-- 243 prior tests still pass. New tests ≥ 12 (estimated: 4 Escalate +
-  4 classification + 4 second-pass + 4 drift = ~16). Total target:
-  ≥255 tests.
+- 252 prior tests still pass (M6.1 added 9 audit-drift tests). New tests
+  ≥ 12 (estimated: 4 Escalate + 4 classification + 4 second-pass + 4 drift
+  = ~16). Total target: ≥264 tests.
 
 ## 9. Demo + benchmark
 
@@ -395,27 +419,34 @@ Add (Subagent C):
 
 Existing fields unchanged:
 - `unauthorizedActionDenialRate` remains 1.0 (attack corpus unchanged).
-- `auditCompleteness` may increase (second-pass guard adds events in
-  the demo and benchmark).
+- `auditCompleteness` is `decisionEvents / expectedDecisions`. Extra
+  `session.guard` events do NOT move it (`metadata.phase` is `'guard'`, not
+  `'decision'`). If `falseClaimRate` is measured by running sessions (which
+  append decision events), add that count to `expectedDecisions`
+  (`src/cli.ts:285`); measuring via direct `guard.guard()` calls (like
+  `guardLatencyP99Ms`) leaves the accounting unchanged.
 
 ## 10. Update docs
 
 - **SECURITY_CLAIMS.md** — Claim 23 mechanism: add the M4 wiring
-  (Escalate queues `CapabilityRequest`), the per-session
-  classification derivation, the second-pass guard. Update Known
-  limitations to remove the three items the prompt §14 deferred.
-  Evidence: add the new test files.
+  (Escalate queues `CapabilityRequest`), the per-session classification
+  derivation, the second-pass guard, and the wire-format fixes
+  (`metadata.sealed` is a raw `Sealed` object; `metadata.ladderRung`
+  records the rung). Update Known limitations to remove the
+  deferred-item limitations (per-session classification, second-pass
+  guard). Evidence: add the new test files.
 - **CURRENT_STATE.md** — add "What M9 closed" section. Update test
-  count. Strike the previously-listed "M9 closed" items from known-
-  vulnerabilities (they were never listed there — this is a forward
-  commitment; just add a "What M9 closed" section).
+  count. Those items were never on the known-vulnerabilities list, so
+  there is nothing to strike there.
 - **ROADMAP.md** — Stage 1 row "Output reliability layer" status
   becomes: `[DONE]` (M7/M8 baseline; M9: Escalate wired to M4,
   classification derived per session, second-pass guard).
-- **AGENT-SESSION.md** — add SESSION 9 entry.
+- **AGENT-SESSION.md** — add SESSION 10 entry.
 - **RELIABILITY.md** — status footer unchanged; §8 metric list adds
-  `falseClaimRate`. Do not edit §1–§9 design — drift fixes are
-  reflected in code, not by rewriting the design.
+  `falseClaimRate`. Correct the §4 `GuardedResponse` type snippet for the
+  two wire-format fixes (`originalSealed: Sealed | null`, add
+  `ladderRung`) — a contract, not design prose. Leave §1–§3 and §5–§9
+  unchanged.
 
 ## 11. Constraints
 
@@ -428,12 +459,12 @@ Existing fields unchanged:
 - The Escalate rung fires only when `classification >= confidential`
   AND `capabilityRequestService` is provided. Both conditions are
   required.
-- `npm run typecheck && npm test` green; 243 prior tests still pass.
+- `npm run typecheck && npm test` green; 252 prior tests still pass.
 - `auditCompleteness` does not decrease.
 
 ## 12. Acceptance
 
-- `npm run typecheck && npm test` green; 243 prior tests still pass;
+- `npm run typecheck && npm test` green; 252 prior tests still pass;
   new M9 tests pass (target: 12+ new).
 - `npm run demo` runs all 16 sections.
 - `npm run benchmark` regenerates `benchmarks/results.json` with

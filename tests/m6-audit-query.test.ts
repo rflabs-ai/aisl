@@ -17,16 +17,12 @@ import { join } from 'node:path';
 import {
   AuditQueryService,
   AuditFilterError,
-  type AuditFilters,
-  type AuditExport,
 } from '../src/audit-query.ts';
 import { EventLog, verifyBundle, eventPublicKey, type SecurityEvent } from '../src/events.ts';
-import { AuthorizationService } from '../src/pdp.ts';
-import { createPolicyEngine, type PolicyRule } from '../src/policy.ts';
-import { ResourceRegistry } from '../src/registry.ts';
-import { testWorld, mockAuth, unauthPrincipal, testUser } from '../src/testing.ts';
-import { TENANT_A, TENANT_B, buildWorld } from '../src/scenario.ts';
-import { type Principal } from '../src/domain.ts';
+import { type PolicyRule } from '../src/policy.ts';
+import { testWorld, unauthPrincipal } from '../src/testing.ts';
+import { TENANT_A, TENANT_B } from '../src/scenario.ts';
+import { type Action } from '../src/domain.ts';
 
 const AUDIT_POLICY_RULE: PolicyRule = {
   id: 'allow-user-audit',
@@ -40,14 +36,14 @@ const AUDIT_POLICY_RULE: PolicyRule = {
 function issueAuditCap(
   world: ReturnType<typeof testWorld>,
   subject: string,
-  actions: readonly ('query.audit' | 'audit.export')[] = ['query.audit', 'audit.export'],
+  actions: readonly Action[] = ['query.audit', 'audit.export'],
   tenantId = TENANT_A,
 ) {
   return world.authorization.issue(world.root, {
     subject,
     tenantId,
     resourceIds: [`audit-log:${tenantId}`],
-    actions: actions as any,
+    actions,
     maxClassification: 'internal',
     expiresAt: world.clock.now() + 3_600_000,
     provenance: { source: 'policy-grant', note: 'audit capability' },
@@ -131,6 +127,30 @@ describe('M6: Audit query authorization and tenant scoping', () => {
     assert.equal(result.decision.decision, 'deny');
     assert.equal(result.decision.denyReason, 'no-capability');
     assert.equal(result.length, 0);
+  });
+
+  test('direct authorize() on a caller-constructed audit-log id is denied (unknown-resource)', () => {
+    const { world } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']);
+    const decision = world.authorization.authorize({
+      principal: world.user,
+      action: 'query.audit',
+      resourceId: `audit-log:${TENANT_A}`,
+    });
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'unknown-resource');
+  });
+
+  test('QueryResult shape: an array of events carrying .decision and .events', () => {
+    const { world, service } = setupAuditTestWorld();
+    const userA = world.user;
+    issueAuditCap(world, userA.id, ['query.audit']);
+
+    const result = service.query(userA, { tenantId: TENANT_A });
+    assert.ok(Array.isArray(result));
+    assert.equal(result.decision.decision, 'allow');
+    assert.equal(result.length, result.events.length);
+    assert.deepEqual([...result], [...result.events]);
   });
 
   test('Capability required: capability for tenant A but no policy rule match is denied (policy-deny)', () => {
@@ -399,6 +419,31 @@ describe('M6: Audit filters and pagination', () => {
       AuditFilterError,
     );
   });
+
+  test('Single-bound time filter: { toTime } alone is rejected as unbounded', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']);
+    assert.throws(
+      () => service.query(world.user, { tenantId: TENANT_A, toTime: world.clock.now() }),
+      AuditFilterError,
+    );
+  });
+
+  test('Single-bound time filter: open-ended { fromTime } older than 90 days is rejected', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']);
+    assert.throws(
+      () => service.query(world.user, { tenantId: TENANT_A, fromTime: world.clock.now() - 91 * 86_400_000 }),
+      AuditFilterError,
+    );
+  });
+
+  test('Single-bound time filter: open-ended { fromTime } within 90 days is allowed', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']);
+    const res = service.query(world.user, { tenantId: TENANT_A, fromTime: world.clock.now() - 86_400_000 });
+    assert.equal(res.decision.decision, 'allow');
+  });
 });
 
 describe('M6: Audit export and verification', () => {
@@ -433,6 +478,59 @@ describe('M6: Audit export and verification', () => {
     assert.equal(verification.valid, true);
     assert.equal(verification.signatureValid, true);
     assert.equal(verification.eventCount, 5);
+  });
+
+  test('export success path uses the service clock for generatedAt', () => {
+    const { world, service } = setupAuditTestWorld();
+    const userA = world.user;
+    const pinned = Date.UTC(2026, 5, 1, 12, 0, 0);
+    world.clock.set(pinned);
+
+    issueAuditCap(world, userA.id, ['query.audit']);
+    world.eventLog.append({
+      tenantId: TENANT_A,
+      principal: userA.id,
+      actor: userA.id,
+      actorKind: 'user',
+      action: 'read',
+      result: 'success',
+    });
+
+    const exported = service.exportFor(userA, { tenantId: TENANT_A, fromSeq: 0, toSeq: 999_999 });
+    assert.ok(exported.events.length > 0);
+    assert.equal(exported.generatedAt, pinned);
+  });
+
+  test('audit.export is implied by query.audit in capability scope (Claim 21)', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']); // no audit.export listed
+    const exported = service.exportFor(world.user, { tenantId: TENANT_A, fromSeq: 0, toSeq: 999 });
+    assert.ok(exported.events.length > 0);
+    const last = world.eventLog.all().at(-1)!;
+    assert.equal(last.action, 'audit.export');
+    assert.equal(last.decision, 'allow');
+  });
+
+  test('a capability holding only audit.export cannot query (Claim 21, reverse direction)', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['audit.export']);
+    const result = service.query(world.user, { tenantId: TENANT_A });
+    assert.equal(result.decision.decision, 'deny');
+    assert.equal(result.decision.denyReason, 'no-capability');
+    assert.equal(result.length, 0);
+  });
+
+  test('export bounds reflect returned events, not requested filters (Claim 21)', () => {
+    const { world, service } = setupAuditTestWorld();
+    issueAuditCap(world, world.user.id, ['query.audit']);
+    const exported = service.exportFor(world.user, { tenantId: TENANT_A, fromSeq: 0, toSeq: 999_999 });
+    const all = world.eventLog.all();
+    assert.equal(exported.fromSeq, 0);
+    assert.ok(exported.toSeq < 999_999);
+    // The export's own audit.export decision event is appended before the read,
+    // so it is the last returned event.
+    assert.equal(exported.toSeq, all.at(-1)!.seq);
+    assert.equal(exported.head, all.at(-1)!.eventHash);
   });
 
   test('Chain slice: slice from seq 5 to seq 9 verifies with previousHead', () => {
@@ -563,9 +661,11 @@ describe('M6: Audit export and verification', () => {
 
     const res = service.query(userA, { tenantId: TENANT_A, action: 'read' });
     assert.equal(res.decision.decision, 'allow');
-    const matched = res.find((e: SecurityEvent) => (e.metadata as any)?.sealed !== undefined);
+    const matched = res.find((e: SecurityEvent) => (e.metadata as { sealed?: unknown } | undefined)?.sealed !== undefined);
     assert.ok(matched);
-    assert.equal((matched.metadata as any).sealed.ciphertext, 'secret-ciphertext');
-    assert.equal((matched.metadata as any).sealed.keyId, 'evidence-key:confidential');
+    const sealed = (matched.metadata as { sealed?: { ciphertext: string; keyId: string } }).sealed;
+    assert.ok(sealed);
+    assert.equal(sealed.ciphertext, 'secret-ciphertext');
+    assert.equal(sealed.keyId, 'evidence-key:confidential');
   });
 });

@@ -34,6 +34,12 @@ export class AuditFilterError extends Error {
   }
 }
 
+/**
+ * Query result: an array of matching events that also carries the authorization
+ * decision. Use it as an array (length, indexing, iteration); `.decision` reports
+ * the allow/deny outcome and `.events` is the same events as a readonly array
+ * (empty when denied).
+ */
 export interface QueryResult extends ReadonlyArray<SecurityEvent> {
   readonly decision: AuthorizationDecision;
   readonly events: readonly SecurityEvent[];
@@ -101,6 +107,15 @@ export class AuditQueryService {
       if (rangeMs > MAX_TIME_RANGE_MS) {
         throw new AuditFilterError(`time range exceeds 90 days (${rangeMs} ms > ${MAX_TIME_RANGE_MS} ms)`);
       }
+    } else if (filters.fromTime !== undefined) {
+      // Open-ended "since T" query: the effective upper bound is now.
+      const rangeMs = this.clock() - filters.fromTime;
+      if (rangeMs > MAX_TIME_RANGE_MS) {
+        throw new AuditFilterError(`time range exceeds 90 days (from ${filters.fromTime} to now)`);
+      }
+    } else if (filters.toTime !== undefined) {
+      // Unbounded lower edge: cannot be limited to 90 days.
+      throw new AuditFilterError('toTime requires fromTime: an unbounded lower edge cannot be limited to 90 days');
     }
   }
 
@@ -135,6 +150,7 @@ export class AuditQueryService {
         previousHead: null,
       };
     }
-    return this.eventLog.exportFor(filters);
+    const exported = this.eventLog.exportFor(filters);
+    return { ...exported, generatedAt: this.clock() };
   }
 }

@@ -61,16 +61,15 @@ was left, and what the next session should pick up.
 **Left:**
 - Claim 27's free-text residual (content absent from the map, like `prompt`)
   stays open until H7 content-level DLP — documented, not hidden.
-- Working tree left uncommitted for the operator (code + docs + regenerated
-  `benchmarks/results.json` + resolved audit files under untracked
-  `.scratch/`).
+- Closure sweep committed as `9c1d861`; M12 prompt refreshed for it
+  (ADR-018, M11+M13 baseline, environment note, ROADMAP markers).
 
 **Next session should:**
-- Commit this closure sweep, then start M12 Phase 0: the Postgres ADR is
-  **ADR-018** (017 is taken by the M11 role model — the M12 prompt says
-  "verify in DECISIONS.md"). Phase 0 is docs-only (driver choice, schema,
-  RLS model, per-tenant key derivation, fail-closed-on-DB-down, SQLite stays
-  default behind an EventStore port).
+- M12 Phase 0: the Postgres ADR is **ADR-018** (017 is taken by the M11 role
+  model — verified). `PROMPTS/M12-platform-shift.md` is current. Phase 0 is
+  docs-only (driver choice, schema, RLS model, per-tenant key derivation,
+  fail-closed-on-DB-down, SQLite stays default behind an EventStore port);
+  Phase 1+ needs a Postgres install or container (`DATABASE_URL`).
 
 **Evidence:**
 - `npm run typecheck` clean; `npm test` 351/351 (99 suites); `npm run demo`

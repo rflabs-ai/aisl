@@ -1,20 +1,27 @@
 # M12 — Platform shift: Postgres control plane
 
-Baseline: M11 complete (RBAC + classification propagation landed — RLS and
-per-tenant-key design build on them). This milestone introduces the **first new
-runtime dependency since `jose`** — AGENTS.md: "No runtime dependencies without
-an ADR", and the dependency-admission row ([DONE]) demands pinning + review.
-Sequence accordingly.
+Baseline: M11 and M13 both complete and verified (RBAC + classification
+propagation + bundles; model adapters + verification pipeline + telemetry).
+RLS and per-tenant-key design build on M11's surfaces. This milestone
+introduces the **first new runtime dependency since `jose`** — AGENTS.md: "No
+runtime dependencies without an ADR", and the dependency-admission row
+([DONE]) demands pinning + review. Sequence accordingly.
 
 Scope (ROADMAP rows): Postgres schema + migrations (ADR-010), Tenant isolation
 hardening (RLS, per-tenant keys), Backup + restore, plus the Stage-0 row
 Project/task/session persistence.
 
-## 0. Phase 0 — ADR + schema design (docs only; runs PARALLEL with M11/M13)
+Environment note: PostgreSQL is **not installed locally** (PROJECT_CONTEXT
+§2). Phase 0 (ADR) needs nothing; Phase 1+ needs an install or a disposable
+container — Postgres tests skip cleanly without `DATABASE_URL` either way.
 
-Zero code conflict — this is the piece that can start before M11 lands.
+## 0. Phase 0 — ADR + schema design (docs only; UNBLOCKED — M11/M13 landed)
 
-- **ADR-017** (next free number — verify in `DECISIONS.md`): Postgres as the
+The original plan had this phase run parallel with M11/M13; both are done, so
+it is the only thing standing before Phase 1.
+
+- **ADR-018** (017 was taken by M11's role model — verified in
+  `DECISIONS.md`): Postgres as the
   multi-node control plane. Must decide: driver (`pg` vs `postgres.js` — pick
   one, pin it), connection/secret handling (env + secret broker, never logged),
   fail-closed behavior when the DB is unreachable (deny with a distinct reason,
@@ -28,7 +35,7 @@ Zero code conflict — this is the piece that can start before M11 lands.
 
 ## 1. Subagents + parallelization (explicit)
 
-- **Phase 1 (after M11 + ADR): Subagent A — EventStore port + Postgres event
+- **Phase 1 (after ADR-018): Subagent A — EventStore port + Postgres event
   backend + migrations framework.** Owns the `src/events.ts` seam + new
   `src/event-store-pg.ts` + migrations. B and C **wait** — everything depends
   on the schema.
@@ -78,7 +85,7 @@ Zero code conflict — this is the piece that can start before M11 lands.
 - ROADMAP rows Postgres schema + migrations / Tenant isolation hardening /
   Backup + restore / Project-task-session persistence → `[DONE]` with
   milestone refs.
-- DECISIONS.md: ADR-017.
+- DECISIONS.md: ADR-018.
 - CURRENT_STATE: counts; runtime deps 1 → 2; known-gap #4 (env keys) and #7
   (shared process) get honest updates if this milestone changes them.
 - DEPLOYMENT.md: provisioning, RLS setup, backup cadence, restore drill.

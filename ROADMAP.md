@@ -32,7 +32,7 @@ where it exists today.
 | Attack harness + corpus | adversarial tests from day one | scenario | M | MVP | **[DONE]** |
 | Benchmark runner | measured, not claimed | harness | S | MVP | **[DONE]** |
 | Architecture / threat / claims docs | claim discipline | — | M | MVP | **[DONE]** |
-| REST API surface | real clients | PDP, session | M | P | **[NEXT]** |
+| REST API surface | real clients | PDP, session | M | P | **[ ]** |
 | Project / task / session persistence | survive restart | Postgres | M | P | **[ ]** |
 | Basic document ingestion | chunk, label, classify | registry | M | P | **[ ]** |
 | Basic Git integration | read-only repo access | sandbox | M | P | **[ ]** |
@@ -77,11 +77,13 @@ restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the row above �
 `PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
 propagation, Configuration management — **done**; A/B subagents ran in
 parallel on disjoint surfaces, C consumed A's role surface),
-`PROMPTS/M12-platform-shift.md`
-(Postgres ADR + schema/migrations + tenant isolation + backup/restore),
 `PROMPTS/M13-runtime-realism.md` (model provider adapters, verification
-pipeline, structured telemetry). M10 ran first — it set the SLO baseline
-every later milestone must not regress.
+pipeline, structured telemetry — **done**; ran concurrently with M11 on
+disjoint module surfaces, zero new runtime dependencies),
+`PROMPTS/M12-platform-shift.md`
+(Postgres ADR-018 + schema/migrations + tenant isolation + backup/restore —
+**[NEXT]**; Phase 0, the ADR, is unblocked and is the next move). M10 ran
+first — it set the SLO baseline every later milestone must not regress.
 
 ---
 

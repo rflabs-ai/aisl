@@ -614,3 +614,204 @@ Cross-validation only covers roles present in the constructed table.
 **Future migration path:** Per-tenant role tables via `RoleBundle`;
 inheritance only if a flat table measurably fails; role-based approval
 routing through the M4 request flow; signed bundles (H10/H12).
+
+---
+
+## ADR-018: Postgres control plane — dual EventStore backend, RLS, per-tenant keys
+
+**Context:** M12. ADR-010 deferred Postgres ("planned swap, not a current
+dependency"); the ROADMAP rows it named — Postgres schema + migrations,
+tenant isolation hardening (RLS, per-tenant keys), backup + restore, and the
+Stage-0 project/task/session persistence row — are now due. This is the
+second runtime dependency ever admitted (after `jose`, ADR-015), so the
+ADR-015 admission policy governs: named here, no transitive runtime deps,
+pinned with a lockfile, reviewed before merge, SBOM diffed on build (H10),
+no native compilation step.
+
+**Decision:**
+
+### Driver: `postgres.js` (npm `postgres`), pinned
+
+- **Zero transitive runtime dependencies** (ADR-015 item 2). `node-postgres`
+  (`pg`) pulls `pg-connection-string`, `pg-protocol`, `pg-types` and others —
+  it fails the policy as written.
+- Native ESM, tagged-template parameterization (every value is a bound
+  parameter by construction), and a multiplexed single socket, so **no
+  pooling library and no pool tuning** — the constraint "no pooling library"
+  is met by the driver, not ignored.
+- Pinned in `package.json` + lockfile; one SBOM line added per build (H10).
+
+### Dual backend behind an `EventStore` port
+
+The port is **the existing public surface of `EventLog`** (`src/events.ts`):
+`append`, `all`, `forTenant`, `query`, `exportFor`, `verify`, `bundle`,
+`anchor`, `close` — extracted as an interface. Two implementations:
+
+1. **`EventLog`** (unchanged) — SQLite (`node:sqlite`) + in-memory. Remains
+   the default for single-node, on-prem, air-gapped, and every test run
+   without `DATABASE_URL`. Not a rewrite, not deprecated.
+2. **`PostgresEventLog`** (`src/event-store-pg.ts`) — same surface over
+   Postgres. On connect it runs forward-only migrations and verifies the
+   chain (resume parity: refuse to append onto a broken chain, like
+   `EventLog.resume()`).
+
+The construction seam is `src/scenario.ts` (the single `new EventLog` call
+site); no other caller changes. `verifyBundle()` and the audit-query API are
+untouched — they operate on exported bundles and the port surface.
+
+SQLite stays the **default embedded/test backend**. Postgres tests skip
+cleanly when `DATABASE_URL` is unset (mirror the container-sandbox
+fallback pattern). No ORM; raw SQL through the port. **No query federation
+and no read replicas** — one runtime role, one writer.
+
+### Schema (implementation must match this or amend this)
+
+```sql
+-- Migration bookkeeping. Forward-only; hash of the migration file recorded.
+migrations(id INTEGER PRIMARY KEY,
+           hash TEXT NOT NULL,
+           applied_at TIMESTAMPTZ NOT NULL);
+
+-- Parity with the SQLite security_events table (src/events.ts).
+security_events(seq BIGINT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                timestamp BIGINT NOT NULL,
+                event_hash TEXT NOT NULL,
+                event JSONB NOT NULL);
+CREATE INDEX security_events_tenant_seq ON security_events (tenant_id, seq);
+-- Append-only: app role has INSERT/SELECT only; UPDATE/DELETE revoked;
+-- BEFORE UPDATE/DELETE triggers raise, mirroring the SQLite triggers.
+
+-- Capability request flow (M4) persistence.
+capability_requests(id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    principal TEXT NOT NULL,
+                    status TEXT NOT NULL,        -- pending|approved|denied|expired
+                    requested JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    decided_at TIMESTAMPTZ,
+                    decided_by TEXT);
+
+-- Project / task / session persistence (Stage-0 row).
+projects(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+         name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL);
+tasks(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      status TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL);
+agent_sessions(id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+               task_id TEXT NOT NULL REFERENCES tasks(id),
+               principal TEXT NOT NULL,
+               state JSONB NOT NULL,           -- everything needed to resume
+               created_at TIMESTAMPTZ NOT NULL,
+               updated_at TIMESTAMPTZ NOT NULL);
+```
+
+All application tables are forward-only, versioned, and recorded (row in
+`migrations` + one `policy.load`-style `store.migrate` event). No destructive
+step — schema changes are additive columns, never rewrites.
+
+### Row-level security: the database enforces tenant isolation
+
+The app connects as a dedicated non-superuser role (`app_rw`: no
+`superuser`, no `bypassrls`, no `createrole`; schema owner is a separate
+`app_ddl` role used only by the migration runner). Every tenant-scoped table
+gets `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` and
+deny-by-default policies:
+
+```sql
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON tasks
+  USING      (tenant_id = current_setting('app.tenant_id', true))
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+```
+
+The runtime sets the context **per transaction** (`SET LOCAL
+app.tenant_id = $1`). `current_setting(..., true)` returns NULL (→ `false`)
+when unset, so a hostile query that skips the tenant context reads **zero
+rows** — the database denies, not app code. App-code tenant checks remain
+(defense in depth, ADR-007) but are no longer the only control.
+
+Exception: `security_events` carries a **global** hash chain (`seq` is
+world-order, one signer). SELECT is tenant-scoped by the same policy; INSERT
+is unrestricted for `app_rw` because the runtime writes every event and the
+table has no UPDATE/DELETE to protect — append-only is enforced by revoked
+privileges + triggers instead.
+
+### Per-tenant evidence keys (extends ADR-013, no re-encryption)
+
+`src/seal.ts` HKDF info string gains the tenant:
+`evidence:<tenantId>:<classification>` (same master key, same SALT). Sealed
+records carry a **versioned keyId**: new seals use
+`evidence-key:v2:<tenantId>:<classification>`; the legacy
+`evidence-key:<classification>` format keeps opening under the old
+global-tenant derivation. `open()` dispatches on keyId shape. **No silent
+re-encryption** of existing sealed data — old records decrypt as they
+always did; the migration path is an operator-run re-seal tool, documented,
+not a flag.
+
+### Fail-closed (H15)
+
+An unreachable, unauthenticatable, or mid-migration Postgres denies every
+decision that needs the store with the distinct `denyReason:
+'store-unavailable'` (new union member in `src/domain.ts`, beside
+`'idp-unavailable'`) and one loud health event — no silent fallback to
+in-memory, no retry-until-allow. The degraded mode is explicit and
+operator-visible, per H15's methodology.
+
+### Connection and secret handling
+
+`DATABASE_URL` from the environment (production: secret-broker injection
+per ADR-008); never logged — connection errors log reason + a redacted
+endpoint, never the URL. Password never appears in the event log (H2 scan
+covers it).
+
+### Backup + restore
+
+`pg_dump`-based backup script; restore is **rehearsed in a test**, not
+assumed: restore into a scratch database, run the existing `verify()` chain
+check, assert valid. Anchor-file continuity (M3) documented in
+DEPLOYMENT.md — the anchor is outside the dump by design.
+
+**Alternatives:**
+- **`pg` / `pg-promise`** — mature but transitive dependencies fail ADR-015
+  item 2 as written; could be admitted with an amended policy, but
+  `postgres.js` covers the need with a smaller surface.
+- **Postgres-only (drop SQLite)** — rejected: it breaks the single-process
+  air-gapped install that is ADR-010's feature and would rewrite a working,
+  tested evidence backend.
+- **App-level tenant checks only, no RLS** — rejected by this milestone's
+  charter: one missing `WHERE` clause must not expose every tenant.
+- **Citus / sharding / read replicas** — no second node exists to justify
+  them (ponytail: add when one does).
+
+**Reasoning:** The evidence plane's invariants (chain, signatures,
+append-only) are backend-independent — they live in the event objects, not
+in SQLite. Making Postgres a port implementation rather than a rewrite keeps
+the audit path, the SLO baseline (M10), and the air-gapped install intact
+while the database adds what SQLite cannot: real RLS, concurrent writers,
+and operational backup tooling. `postgres.js` is the only driver class that
+meets the dependency policy without amendment.
+
+**Security implications:** Cross-tenant reads become a database-enforced
+property (tested against hostile queries, not app discipline). New attack
+surface: the database itself — connection string custody, role management,
+RLS policy drift (migration framework owns it, versioned). Fail-closed now
+has a third distinct reason. Per-tenant keys shrink blast radius of a
+master-key leak per tenant and bind decryption to tenant identity.
+
+**Tradeoffs:** One more runtime dependency to review and SBOM. Postgres mode
+is only tested when a database exists (skipped otherwise — a CI gap to name
+honestly). RLS adds a failure mode app SQLite mode does not have (context
+not set → empty reads); mitigated by fail-closed tests on both backends.
+
+**Future migration path:** Per-tenant databases/schemas (physical
+isolation, ADR-007's endgame) when a customer requires it; KMS-held master
+key (ADR-013 path) with per-tenant envelope keys; revocation broadcast over
+LISTEN/NOTIFY or a queue (H13); object-storage anchoring of the head hash
+(M3 path). Multi-node active-active and pooling tuning stay out until a
+second node runs.

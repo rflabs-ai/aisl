@@ -24,6 +24,56 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 16 — 2026-09-17 — opencode/m12-phase0-adr
+
+**Did:**
+- M12 Phase 0 landed (docs only): **ADR-018** written into `DECISIONS.md`
+  (numbering verified — 017 taken by the M11 role model). It decides, per the
+  M12 prompt's hard requirements:
+  - **Driver: `postgres.js` pinned** — zero transitive runtime deps (ADR-015
+    item 2 decides it; `pg` pulls `pg-connection-string`/`pg-protocol`/etc.),
+    native ESM, single multiplexed socket so no pooling library.
+  - **Schema inline in the ADR:** `migrations` (forward-only, hash-recorded),
+    `security_events` (parity with the SQLite table, append-only via revoked
+    UPDATE/DELETE privileges + triggers, global seq — one hash chain, one
+    signer), `capability_requests`, `projects`/`tasks`/`agent_sessions`.
+  - **RLS model:** `ENABLE`+`FORCE` RLS, deny-by-default policies keyed on
+    `current_setting('app.tenant_id', true)` (unset → NULL → false → zero
+    rows), context set per transaction via `SET LOCAL`; app connects as
+    non-superuser `app_rw`, DDL separated into `app_ddl`. `security_events`
+    SELECT tenant-scoped, INSERT unrestricted (single-writer runtime appends
+    the global chain).
+  - **Per-tenant keys:** HKDF info gains tenantId (`evidence:<tenant>:<level>`),
+    versioned keyIds `evidence-key:v2:<tenant>:<classification>`; legacy ids
+    keep opening under the old derivation — **no silent re-encryption**.
+  - **Fail-closed:** new `DenyReason` member `store-unavailable` beside
+    `idp-unavailable`; no silent in-memory fallback.
+  - **Dual backend:** `EventStore` port = the existing `EventLog` public
+    surface (append/all/forTenant/query/exportFor/verify/bundle/anchor/close);
+    SQLite stays default; `PostgresEventLog` (`src/event-store-pg.ts`) is the
+    second implementation; the construction seam is `src/scenario.ts:140`
+    (the only `new EventLog` call site). Postgres tests skip cleanly without
+    `DATABASE_URL`.
+- ROADMAP M12 marker updated (Phase 0 done, Phase 1 next).
+
+**Left:**
+- Phase 1 not started (needs Postgres install or container for local runs;
+  tests skip without `DATABASE_URL` either way).
+- Full docs sweep (CURRENT_STATE counts, DEPLOYMENT, SECURITY_CLAIMS) is the
+  main-session close-out when the milestone lands, not per-phase.
+
+**Next session should:**
+- Phase 1 (Subagent A): extract the `EventStore` port from `EventLog`'s
+  public surface, implement `src/event-store-pg.ts` + the migrations
+  framework exactly per ADR-018's schema block; parity suite over both
+  backends. B (RLS + per-tenant keys) and C (backup/restore + persistence)
+  wait on A's schema.
+
+**Evidence:**
+- Docs-only phase; `npm run typecheck` clean; `npm test` 351/351 unchanged.
+
+---
+
 ### SESSION 15 — 2026-09-17 — opencode/m12-prep-audit-closure
 
 **Did:**

@@ -82,7 +82,10 @@ pipeline, structured telemetry — **done**; ran concurrently with M11 on
 disjoint module surfaces, zero new runtime dependencies),
 `PROMPTS/M12-platform-shift.md`
 (Postgres ADR-018 + schema/migrations + tenant isolation + backup/restore —
-**[NEXT]**; Phase 0, the ADR, is unblocked and is the next move). M10 ran
+**[NEXT]**; Phase 0 **[DONE]**: ADR-018 written into DECISIONS.md — driver
+`postgres.js` pinned, schema, RLS model, per-tenant key derivation, fail-closed
+reason named. Phase 1 (EventStore port + `src/event-store-pg.ts` + migrations
+framework) is the next move; B and C wait on it). M10 ran
 first — it set the SLO baseline every later milestone must not regress.
 
 ---

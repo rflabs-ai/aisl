@@ -24,6 +24,142 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 10 — 2026-09-17 — opencode/m9-guard-followups-and-drift-closure
+
+**Did:**
+- M9: guard follow-ups + drift closure landed (one surface: `src/guard.ts`,
+  `src/runtime.ts`, `src/scenario.ts`, `src/cli.ts`, tests, docs). Three
+  subagents ran sequentially (A → B → C) because all three touch the same two
+  files.
+  - **Subagent A — Escalate wired to M4.** `GuardContext` gains
+    `principal: Principal` (required) and `capabilityRequestService?`
+    (type-only import from `./capability-request.ts`; no runtime dependency on
+    the authority plane, R3 holds). `GuardedResponse` gains `requestId?`.
+    `runLadder` stays pure; `guard()` detects the Escalate rung after the ladder
+    returns and, when a service is provided and the principal is an agent,
+    calls `submit(principal, sessionId, ['guard.review'], ['guard.review'],
+    classification, 'Guard Escalate: <reasons>')`. `submit()` owns the sole
+    `capability.request` event; the guard appends nothing. The awaiting-review
+    text names the request id; `runtime` threads `metadata.requestId` through.
+    Text-only fallback when no service or a non-agent principal. `SessionConfig`
+    / `SessionOverrides` carry the optional service; `scenario.ts` forwards it.
+  - **Subagent B — per-session classification + second pass.** Exported
+    `deriveClassification()` (`src/runtime.ts`): highest of the principal's
+    capability `maxClassification` ceilings, the registry classification of every
+    `content` key, and the requested resources; default `'public'`, unknown
+    labels fail closed (rank 100). `AgentSession.run()` runs the guard a second
+    time after `steps` are populated, compares verdicts via
+    `canonicalJson({ status, flags })`, emits ONE extra `session.guard` event
+    (`phase: 'guard-second-pass'`) only on a change, adopts the second verdict,
+    and never passes the capability-request service to the second pass (no
+    double-queue). Event metadata construction factored into `appendGuardEvent`.
+  - **Subagent C — drift fixes + D6 hook + benchmark.** `originalSealed`
+    becomes `Sealed | null` (raw object in `metadata.sealed`); `ladderRung`
+    added to `GuardedResponse` and threaded into both event phases; `guard()`
+    now gates M4 on `ladderRung === 'escalate'`; D4/D2 number flags deduped
+    (one flag: `unverified-claim` with no steps, `numeric-mismatch` with steps,
+    never both); `regenerateFn` success/failure tests (called once, no retry);
+    D6 `criticFn` hook on `guard()` (flags merged before the ladder, no real
+    critic); `evidence.falseClaimRate` + `totalLegitimateResponses` +
+    `legitimateResponsesNonDelivered` in the benchmark, measured from the
+    first-pass `session.guard` events of the existing legitimate-corpus run (no
+    extra sessions, so `auditCompleteness` accounting is unchanged).
+- Demo (`src/cli.ts`) gained section 16: a hostile output runs against a session
+  whose derived classification is ≥ confidential, with a real
+  `CapabilityRequestService`; it prints the awaiting-review text with the request
+  id and both the `session.guard` (with `requestId`) and `capability.request`
+  events.
+- Docs: `SECURITY_CLAIMS.md` Claim 23 mechanism/assumptions/evidence/limitations
+  rewritten for M9; `CURRENT_STATE.md` header + counts (252 → 278) + "What M9
+  closed"; `ROADMAP.md` "Output reliability layer" status parenthetical;
+  `RELIABILITY.md` status footer counts + §4 `GuardedResponse` snippet
+  (`originalSealed: Sealed | null`, `ladderRung`) + §8 `falseClaimRate` wording.
+
+**Left:**
+- D6 remains a hook only — no real critic model is wired (telemetry).
+- `regenerateFn` is exercised by tests but `GroundedResponseGuard` still passes
+  `null` in production, so the Regenerate rung is dormant until a model retry is
+  wired.
+- A second-pass escalation renders the text-only escalate message (the first
+  pass's `requestId` lives in the first `session.guard` event); the second pass
+  deliberately never submits a second request.
+- `benchmarks/results.json` was regenerated and is committed with this milestone;
+  its diff carries timestamp/latency/head noise by nature.
+
+**Next session should:**
+- Pick up the next Stage 1 item per ROADMAP (Granular RBAC, Classification
+  propagation, Sandbox lifecycle management, Tenant isolation hardening,
+  Configuration management, or the EASY items), or check `PROMPTS/` for the
+  next milestone prompt.
+
+**Evidence:**
+- 278 tests, 0 failures, 72 suites; typecheck clean (252 prior + 26 new).
+- Demo: 16 sections, all pass cleanly; section 16 escalates with a real request
+  id and both events logged.
+- Benchmark: 12/12 attack cases, 20/20 denied, audit completeness 1.0, hash
+  chain valid, `falseClaimRate` 0 over 1 legitimate response, query p99 0.285 ms
+  / export p99 0.337 ms / policy-diff 0.115 ms / guard p99 0.008 ms.
+
+---
+
+### SESSION 9 — 2026-09-17 — opencode/m6.1-audit-drift-remediation
+
+**Did:**
+- M6.1: Audit drift remediation landed. Closed the M6 post-milestone drift audit
+  items in the audit query + export API.
+  - `src/pdp.ts:evaluate()`: removed the redundant synthetic `audit-log:*`
+    registration block. `queryAudit()` is the single registration site; a direct
+    `authorize()` call on a caller-constructed `audit-log:*` id now fails closed
+    as `unknown-resource` instead of materializing a resource (M6 spec §7).
+  - `src/audit-query.ts:exportFor()`: the success path now overrides
+    `EventLog.exportFor()`'s wall-clock `generatedAt` with the injected service
+    clock, matching the deny path. `EventLog` still has no clock by design.
+  - `src/audit-query.ts:validateFilters()`: single-bound time filters are now
+    bounded. `{ toTime }` without `fromTime` throws (unbounded lower edge);
+    `{ fromTime }` alone is measured against the service clock and throws past
+    90 days. Deliberate tightening beyond the M6 spec's literal text.
+  - `QueryResult` JSDoc documents the array-plus-`.decision`/`.events` shape;
+    a test pins it.
+  - `tests/m6-audit-query.test.ts`: removed `as any` (typed the `issueAuditCap`
+    helper's `actions` as `readonly Action[]`, precise metadata cast in the
+    sealed-content test) and deleted eight now-unused imports.
+  - 9 new tests: direct-authorize deny (unknown-resource), service-clock
+    `generatedAt`, three single-bound time-filter cases, `QueryResult` shape,
+    `audit.export` implied by `query.audit`, the reverse direction, and result
+    bounds vs requested filter bounds.
+- Withdrawn: drift item #3 ("double authorization on export") was a misread —
+  `EventLog.query()` is pure data; `exportFor()` authorizes exactly once via
+  `queryAudit`. No code change. Drift item #5 (duplicate `tenantId` check) kept
+  as deliberate defense-in-depth.
+- Docs: Claim 21 mechanism + evidence updated (29 cases; single-bound rule noted
+  as beyond-spec). `CURRENT_STATE.md` test counts 243 → 252, M6 coverage 20 → 29.
+  `benchmarks/results.json` not committed (benchmark re-run confirmed sane;
+  diff was timestamp/latency/ephemeral-head noise only).
+
+**Left:**
+- M9's prompt was stale after M6.1 (baseline, session number, Subagent A/B/C
+  details) and was re-synced in the same session: baseline 252 / target ≥264,
+  SESSION 10 entry, and the guard wiring corrected against `src/guard.ts`,
+  `src/runtime.ts`, and `src/capability-request.ts` (real positional `submit()`
+  signature, `GuardContext.principal`, `runLadder` purity, single
+  `capability.request` event via `submit()`, benchmark accounting note).
+- The `audit.export`-implied-by-`query.audit` rule still lives in two sites
+  (`src/capability.ts:verifyCapability` and `src/pdp.ts:evaluate()`); they
+  cross-reference each other in comments. Factor into one helper if a third
+  audit action appears.
+
+**Next session should:**
+- Begin M9 (`PROMPTS/M9-guard-followups-and-drift-closure.md`, prompt already
+  re-synced), or pick up the next Stage 1 item per ROADMAP.
+
+**Evidence:**
+- 252 tests, 0 failures, typecheck clean (243 prior + 9 new; all preserved).
+- Demo: 15 sections, all pass cleanly; section 13 query/export unchanged.
+- Benchmark: 12/12 attack cases, 20/20 denied, audit completeness 1.0,
+  hash chain valid, audit query p99 0.248 ms / export p99 0.233 ms.
+
+---
+
 ### SESSION 8 — 2026-09-17 — opencode/m7-policy-testing-and-reliability
 
 **Did:**

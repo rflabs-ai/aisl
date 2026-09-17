@@ -69,7 +69,9 @@ first act is to reject any issuer whose `kind` is `model`, `tool`, or `agent`
 (`src/capability.ts:134`).
 
 Consequently, hostile text cannot escalate: there is no parser from text to
-authority to attack.
+authority to attack. (M9 note: the output guard may queue a *capability
+request* on its Escalate rung — a request is intent/evidence, mints nothing,
+and a human must approve through M4 before any capability exists.)
 
 ## 3. Request lifecycle
 

@@ -29,6 +29,7 @@ function sampleGuardContext(): GuardContext {
     steps: [],
     canaries: [],
     classification: 'public',
+    principal: { id: 'agent:test', kind: 'agent', tenantId: 'acme', roles: [], attributes: {} },
   };
 }
 

@@ -1,12 +1,12 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M7/M8 — policy testing framework and output
-reliability layer landed.
+Honest snapshot. Updated after M9 — guard follow-ups (Escalate wired to M4,
+per-session classification, second-pass guard) and the M7/M8 drift closure.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~4,500 lines of source across 27 modules
-(`src/`), 243 test assertions (`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~4,600 lines of source across 27 modules
+(`src/`), 278 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
@@ -67,6 +67,19 @@ dependencies: `typescript`, `@types/node`.
   return; `SessionTrace.guarded` carries the result and `metadata.sealed`
   holds the encrypted original. D5 leaks skip the ladder; D6 critic model is
   a stub (telemetry only). Guard holds no authority (R3 dependency test).
+- **Guard follow-ups + drift closure (M9):** the Escalate rung queues a real
+  `CapabilityRequest` through M4 when `classification >= confidential` and a
+  `CapabilityRequestService` is configured (`submit()` appends the
+  `capability.request` event; the awaiting-review text and `session.guard`
+  metadata carry the request id); approval stays out of band. Session
+  classification is derived per run by `deriveClassification()` from capability
+  `maxClassification` ceilings + the registry classification of visible/requested
+  resources, defaulting to `'public'`. A second guard pass runs after execution
+  with the populated `steps` and emits one extra `session.guard` event
+  (`phase: 'guard-second-pass'`) only when the verdict changes. `metadata.sealed`
+  is a raw `Sealed` object and `metadata.ladderRung` records the rung that fired.
+  The D6 critic hook is callable (`guard(ctx, criticFn?)`) but no real critic is
+  wired.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
   ceilings, tenant isolation, deterministic output.
 - Authorization: capability AND policy, fail-closed on any internal error.
@@ -97,16 +110,17 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 243 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
-M6, M7, M8:
+All 278 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
+M6, M7, M8, M9:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
 decisions logged (2) | 8 tamper-evidence (5) | 9 tenant isolation (3) | 10
 network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
 principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
-lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export (20)**
-| **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**.
+lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export (29)**
+| **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**
+| **M9 guard follow-ups + drift closure (26)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -121,9 +135,10 @@ Measured this run (`benchmarks/results.json`):
 - Prompt-injection-driven requests: 4; successes: 0.
 - Legitimate tasks: 2/2 allowed; false-denial rate 0.
 - Audit completeness: 2022/2022 decisions recorded; hash chain valid.
-- Audit query latency p99: 0.262 ms; audit export latency p99: 0.231 ms.
-- Policy diff latency: 0.119 ms (one run, sub-ms).
-- Guard latency p99: 0.007 ms (1000 runs of a small honest input).
+- Audit query latency p99: 0.285 ms; audit export latency p99: 0.337 ms.
+- Policy diff latency: 0.115 ms (one run, sub-ms).
+- Guard latency p99: 0.008 ms (1000 runs of a small honest input).
+- `falseClaimRate` 0 over 1 legitimate-corpus guard verdict (target ≤ 1%).
 
 These numbers describe a 12-case corpus written by the same person who wrote the
 code. They are not evidence of security against a competent adversary.
@@ -285,6 +300,44 @@ Ordered by severity.
    is documented (TM-002 residual): a poisoned source yields a well-cited lie,
    and D2 cannot detect it — that is the inherent ceiling of evidence-bound
    detection.
+
+## What M9 closed
+
+M9 was a follow-up + repair milestone (not a new Stage 1 row): it closed the
+three items SESSION 8 deferred and the six drift items the M7/M8 audit found.
+
+1. ~~**Escalate produced only text.**~~ The Escalate rung now queues a real
+   `CapabilityRequest` through M4 when `classification >= confidential` and a
+   `CapabilityRequestService` is configured. `submit()` records the
+   `capability.request` event; the awaiting-review text and the `session.guard`
+   metadata carry the request id. The guard does not own the service and does not
+   wait for approval — M4's existing (out-of-band) approval flow gates delivery.
+   Deployments without M4 fall back to text-only, and the guard still holds no
+   authority (R3 holds).
+2. ~~**Classification was hardcoded `'public'`.**~~ `deriveClassification()`
+   (`src/runtime.ts`) derives the per-session classification from the principal's
+   capability `maxClassification` ceilings, the registry classification of every
+   `content` key, and the requested resources; it defaults to `'public'` when
+   nothing is visible. This makes the Escalate rung reachable in real workloads.
+3. ~~**Guard ran only before execution.**~~ A second pass runs after the
+   requested actions execute, on the same model text with the executed `steps`.
+   It emits one extra `session.guard` event (`phase: 'guard-second-pass'`) only
+   when the verdict (`status` + `flags`) changes; same-verdict passes emit
+   nothing and never re-submit a capability request. The trace adopts the
+   better-informed second verdict.
+4. ~~**Wire-format drift.**~~ `metadata.sealed` is a raw `Sealed` object
+   (`.ciphertext`/`.keyId`/`.iv`/`.tag` readable without a JSON-parse step) and
+   `metadata.ladderRung` records the rung that fired.
+5. ~~**D4 produced duplicate flags.**~~ A bare number is flagged exactly once:
+   `unverified-claim` with no steps, `numeric-mismatch` with steps that lack it,
+   never both.
+6. ~~**`regenerateFn` rung untested; `falseClaimRate` not exported.**~~ Both are
+   covered: the rung has success/failure tests (called once, no retry), and
+   `evidence.falseClaimRate` / `totalLegitimateResponses` are in
+   `benchmarks/results.json`.
+7. ~~**D6 had no hook.**~~ `GroundedResponseGuard.guard()` accepts an optional
+   `criticFn`; its flags merge before the ladder. No real critic is wired
+   (telemetry only).
 
 ## Known assumptions
 

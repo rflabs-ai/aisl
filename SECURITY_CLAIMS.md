@@ -677,10 +677,13 @@ queries fail closed (`tenant-mismatch`). Exported bundles preserve Ed25519
 signatures and event hashes for offline `verifyBundle()` verification.
 
 **Mechanism:** `AuditQueryService` (`src/audit-query.ts`) validates service-side
-query bounds (time range ≤ 90 days, limit ≤ 1000, offset ≥ 0); authorizes via
-`AuthorizationService.queryAudit` (`src/pdp.ts`); synthetic resource
-`audit-log:<tenantId>` (`ResourceType: 'audit-log'`) is registered on demand as
-an authorization target when audit access is first authorized (mirrors
+query bounds (limit ≤ 1000, offset ≥ 0; time range ≤ 90 days when both bounds
+are present; an open-ended `fromTime` window is measured against the service
+clock; `toTime` without `fromTime` is rejected as unbounded — a deliberate
+tightening beyond the M6 spec, which only described both-bound behavior);
+authorizes via `AuthorizationService.queryAudit` (`src/pdp.ts`); synthetic
+resource `audit-log:<tenantId>` (`ResourceType: 'audit-log'`) is registered on
+demand as an authorization target when audit access is first authorized (mirrors
 `evidence-key:<classification>` in `revealEvidence`); it carries no content and
 is never part of the tenant's resource inventory. A capability holding
 `query.audit` also authorizes `audit.export` (`verifyCapability` in
@@ -697,12 +700,17 @@ predecessor of the slice and `verifyBundle()` can validate it offline.
 **Assumptions:** the PDP process is the single point of entry; the synthetic
 resource id derivation cannot be overridden by caller input.
 
-**Evidence:** `tests/m6-audit-query.test.ts` (20 cases) covering: unauthenticated
+**Evidence:** `tests/m6-audit-query.test.ts` (29 cases) covering: unauthenticated
 denial, tenant-mismatch denial, capability requirement, default deny, policy
 matching, filter parity (actor, action, decision, resourceId, time range,
-limit/offset), empty matches, bad filter bounds, tenant isolation invariant,
-export shape, chain slice verification, decision audit completeness, SQLite
-parity, and sealed content confidentiality.
+limit/offset), empty matches, bad filter bounds, single-bound time filters
+(toTime-only rejected, open-ended fromTime clock-bounded), tenant isolation
+invariant, direct `authorize()` on a caller-constructed `audit-log:*` id denied
+as unknown-resource, `QueryResult` array-plus-`.decision`/`.events` shape,
+export shape, export `generatedAt` from the service clock, the
+`audit.export`-implied-by-`query.audit` rule and its reverse direction, result
+bounds vs requested filter bounds, chain slice verification, decision audit
+completeness, SQLite parity, and sealed content confidentiality.
 
 **Test:** `tests/m6-audit-query.test.ts`.
 
@@ -778,58 +786,98 @@ authority handle, and the PDP does not import it.
 implements D2 (claim-source binding: verbatim span verification), D3
 (session-fact consistency: "I <verb>ed X" matches a `StepRecord` action), D4
 (numeric recomputation against step output), D5 (prose leak check — skips
-ladder, withholds immediately); D6 stub (critic model hook, telemetry only).
-The fallback ladder (`runLadder`) is pure: `flags + repairFn + regenerateFn
-→ GuardedResponse`, with rungs Repair → Regenerate → Abstain → Escalate
-(Escalate gated on `classificationRank >= 'confidential'`). `AgentSession.run()`
-calls the guard between `model.complete()` and trace return; `SessionTrace.guarded`
-is the user-facing result and `metadata.sealed` on the `session.guard` event
-holds the encrypted original (AES-256-GCM via `src/seal.ts`). D5 leaks skip
-the ladder entirely — strikethrough is not a secrecy control.
+ladder, withholds immediately); D6 has a callable optional `criticFn` hook
+(telemetry only, no real critic wired). The fallback ladder (`runLadder`) is
+pure: `flags + repairFn + regenerateFn → GuardedResponse`, with rungs Repair →
+Regenerate → Abstain → Escalate (Escalate gated on `classificationRank >=
+'confidential'`), and records the rung that fired in `GuardedResponse.ladderRung`.
+The Escalate rung wires into M4: when a `CapabilityRequestService` is provided
+and the principal is an agent, `guard()` submits a `CapabilityRequest`
+(synthetic `guard.review` resource/action id) via
+`CapabilityRequestService.submit()`, which appends the `capability.request`
+event itself; the awaiting-review text names the request id and the
+`session.guard` event metadata carries `requestId`. The guard does not own the
+service and does not wait for approval — M4's out-of-band approval flow gates
+delivery. Per-session classification is derived in `AgentSession.run()` by
+`deriveClassification()` from the principal's capability `maxClassification`
+ceilings, the registry classification of every `content` key, and the resources
+named in the model's requests; it defaults to `'public'` when nothing is
+visible. A second guard pass runs after the requested actions execute, on the
+same model text with the executed `steps` populated; it emits ONE extra
+`session.guard` event (`metadata.phase === 'guard-second-pass'`) only when the
+verdict (`status` + `flags`) changes, and the trace adopts the better-informed
+second verdict. `session.guard` metadata carries `metadata.sealed` as a raw
+`Sealed` object (`.ciphertext`/`.keyId`/`.iv`/`.tag`, no JSON-parse step) and
+`metadata.ladderRung`. D5 leaks skip the ladder entirely — strikethrough is not
+a secrecy control.
 
 **Threat model:** TM-001 (compromised model asserting unverified claims),
 TM-004 (withheld text leaking flagged spans or canaries via the evidence
 store).
 
-**Assumptions:** the guard module is invoked once per `run()`; the
-classification passed to the guard determines whether the Escalate rung is
-reachable (today: `'public'` for v1; per-session classification derivation
-is a future enhancement); `GuardContext.context` carries the ingested
-content keyed by `resourceId`.
+**Assumptions:** the guard module is invoked at most twice per `run()` (pre- and
+post-execution) and the second pass never submits a capability request; the
+per-session classification (derived from capability ceilings + visible/requested
+resources, default `'public'`) determines whether the Escalate rung is
+reachable; `GuardContext.context` carries the ingested content keyed by
+`resourceId`; a deployment without an M4 `CapabilityRequestService` falls back to
+text-only escalation.
 
-**Evidence:** `tests/guard.test.ts` — 18 cases covering D2 (cited-and-real,
+**Evidence:** `tests/guard.test.ts` — 33 cases covering D2 (cited-and-real,
 cited-and-forged, cited-but-span-missing, uncited number), D3
-(action-claim-mismatch and its inverse), D4 (numeric-mismatch), D5 leak
-(skips ladder, withholds), ladder repair (success and abort-on-empty),
-abstain, escalate (reached for confidential+), escalate NOT reached for
-low classification, fail-closed when guard throws, R3 structural assertion
-on `GuardContext` keys + dependency-direction between `src/pdp.ts` and
-`src/guard.ts`. `security-tests/guard-invariants.test.ts` — 8 cases: R1
-false-claim budget (100/100 honest sessions delivered cleanly on the
-`summarizeRepoModel` corpus; `falseClaimRate = 0`); R2 withhold scan (four
-hostile cases: forged citation, action-claim-mismatch, prose leak,
-poisoned source — first three withhold/repair; poisoned source is
-correctly delivered and documents the D2 ceiling); R3 no-authority
-(`GuardContext` keys clean, `pdp.ts` and `guard.ts` do not import each
-other). Benchmark `guardLatencyP99Ms` measured per run.
+(action-claim-mismatch and its inverse), D4 (numeric-mismatch, and the
+exclusivity rule: a bare number with no steps flags `unverified-claim`, with
+steps that lack it flags `numeric-mismatch`, never both), D5 leak (skips ladder,
+withholds), ladder repair (success and abort-on-empty), abstain, escalate
+(reached for confidential+), escalate NOT reached for low classification,
+`regenerateFn` success (status repaired, rung `regenerate`, called once) and
+failure (withheld, no retry), `ladderRung` mapping, the D6 `criticFn` hook
+(absent → no critic flags; supplied → flags merge before the ladder), the
+M4 wiring (escalate queues a `CapabilityRequest` with `principalId`,
+`requestedActions: ['guard.review']`, flag reasons in the justification, and a
+`requestId` in the awaiting-review text; text-only fallback without a service;
+no queue below confidential or for a non-agent principal), fail-closed when the
+guard throws, R3 structural assertion on `GuardContext` keys +
+dependency-direction between `src/pdp.ts` and `src/guard.ts`.
+`security-tests/guard-invariants.test.ts` — 8 cases: R1 false-claim budget
+(100/100 honest sessions delivered cleanly on the `summarizeRepoModel` corpus;
+`falseClaimRate = 0`); R2 withhold scan (four hostile cases: forged citation,
+action-claim-mismatch, prose leak, poisoned source — first three
+withhold/repair; poisoned source is correctly delivered and documents the D2
+ceiling); R3 no-authority (`GuardContext` keys clean, `pdp.ts` and `guard.ts` do
+not import each other). `tests/runtime-second-pass.test.ts` — 8 cases:
+`deriveClassification` (default public, content → internal, capability ceiling →
+confidential, unknown label fail-closed) and the second pass (agree → exactly one
+event; a first-pass action-claim-mismatch cleared post-execution → one
+`guard-second-pass` event and a delivered trace; same-verdict escalate does not
+double-queue a `CapabilityRequest`). `tests/runtime-drift-fixes.test.ts` — 3
+cases: `metadata.sealed` is a raw `Sealed` object with a string `ciphertext`;
+`metadata.ladderRung` records the rung that fired. Benchmark `guardLatencyP99Ms`
+and `evidence.falseClaimRate` measured per run.
 
-**Test:** `tests/guard.test.ts`, `security-tests/guard-invariants.test.ts`.
+**Test:** `tests/guard.test.ts`, `security-tests/guard-invariants.test.ts`,
+`tests/runtime-second-pass.test.ts`, `tests/runtime-drift-fixes.test.ts`.
 
 **Known limitations:** verifies *support*, not *truth* — a poisoned source
 yields a well-cited lie (TM-002 residual). Uncited-but-true claims are
 flagged as `unverified-claim` (false-positive budget applies; on the
 current corpus `falseClaimRate = 0`). The `action-claim-mismatch` check
 matches by verb only (deleted→delete, wrote→write); a noun-vs-resource
-match is a future enhancement. The classification passed to the guard is
-`'public'` in v1; per-session classification derivation is the next step.
-D5 takes the *first* canary match and stops the ladder; future versions
-may enumerate all matches and surface them. The guard does not retry on
-`regenerateFn` in v1 (the hook exists but no caller); re-running the guard
-on the post-`steps` trace would catch action-claim-mismatch on a second
-pass and is documented as a follow-up.
+match is a future enhancement. D5 takes the *first* canary match and stops
+the ladder; future versions may enumerate all matches and surface them.
+`regenerateFn` is exercised by tests but no production caller supplies one —
+`GroundedResponseGuard` passes `null`, so the rung is dormant until a model
+retry is wired. The second-pass verdict compares `status` + `flags` only, and a
+second-pass escalation never submits a second request by design; an escalated
+second-pass verdict therefore renders the text-only escalate message even when
+the first pass queued a request (the first `session.guard` event retains the
+`requestId`). The Escalate rung requires both `classification >= confidential`
+and a configured `CapabilityRequestService`.
 
 **Residual risk:** LOW for the four cases the test suite exercises. MEDIUM
 in production because generative models hallucinate by construction
 (IMPOSSIBLE+ row in ROADMAP): the guard's mitigation is requiring evidence
-for consequential claims, not detecting all hallucinations.
+for consequential claims, not detecting all hallucinations. The second pass
+reduces false positives from pre-execution flags; it is a quality gate, not a
+new boundary.
 

@@ -69,7 +69,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
-| Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23) |
+| Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23; M9: Escalate wired to M4, classification derived per session, second-pass guard) |
 
 ---
 

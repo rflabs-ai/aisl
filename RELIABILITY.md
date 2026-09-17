@@ -1,15 +1,23 @@
 # RELIABILITY LAYER — output guardrails (implemented; see SESSION 8)
 
-Status: **implemented**. Code lives in `src/guard.ts` (D2–D5, D6 stub, ladder,
+Status: **implemented**. Code lives in `src/guard.ts` (D2–D5, D6 hook, ladder,
 sealed originals) and is wired into `AgentSession.run()` between
-`model.complete()` and trace return. Tests: `tests/guard.test.ts` (18 cases)
-and `security-tests/guard-invariants.test.ts` (R1–R3 structural, 8 cases).
-Claims: Claim 22 (M7 harness, policy testing) and Claim 23 (M7/M8 delivered
-claims are evidence-bound or annotated). The D6 model-based critique remains a
-stub for telemetry only; the upgrade path is documented inline. The poisoned-
-source ceiling is documented as TM-002 residual (a poisoned source yields a
-well-cited lie — D2 cannot detect it). For the implementation history see
-SESSION 8 in `AGENT-SESSION.md`.
+`model.complete()` and trace return. Tests: `tests/guard.test.ts` (33 cases),
+`security-tests/guard-invariants.test.ts` (R1–R3 structural, 8 cases),
+`tests/runtime-second-pass.test.ts` (8 cases) and `tests/runtime-drift-fixes.test.ts`
+(3 cases). Claims: Claim 22 (M7 harness, policy testing) and Claim 23 (M7/M8
+delivered claims are evidence-bound or annotated). M9 closed the M8 follow-ups
+and the M7/M8 drift audit: the Escalate rung queues a real `CapabilityRequest`
+through M4 (`src/capability-request.ts`), classification is derived per session
+from capability ceilings + visible/requested resources (`deriveClassification`),
+a post-execution second pass re-runs the guard on the executed `steps` and emits
+one extra `session.guard` event only when the verdict changes, and the wire
+format carries a raw `Sealed` object plus the `ladderRung` that fired. The D6
+model-based critique has a callable hook but remains telemetry only; the upgrade
+path is documented inline. The poisoned-source ceiling is documented as TM-002
+residual (a poisoned source yields a well-cited lie — D2 cannot detect it). For
+the implementation history see SESSION 8 (M8) and SESSION 10 (M9) in
+`AGENT-SESSION.md`.
 
 ## 0. The hole this closes
 
@@ -72,7 +80,9 @@ export interface GuardContext {
   readonly context: ReadonlyMap<string, string>;  // resourceId -> ingested content
   readonly steps: readonly StepRecord[];          // what actually executed
   readonly canaries: readonly string[];           // secret/canary values
-  readonly classification: Classification;
+  readonly classification: Classification;        // derived per session (M9)
+  readonly principal: Principal;                  // gates Escalate to agents (M9)
+  readonly capabilityRequestService?: CapabilityRequestService;  // M4 wiring (M9)
 }
 
 export interface ResponseGuard {
@@ -171,7 +181,8 @@ export interface GuardedResponse {
   readonly flags: readonly ClaimFlag[];
   readonly citations: readonly { claim: string; sourceId: string }[];
   readonly guardId: string;
-  readonly originalSealed: string | null;      // sealed original, evidence only
+  readonly originalSealed: Sealed | null;      // sealed original, evidence only
+  readonly ladderRung: 'repair' | 'regenerate' | 'abstain' | 'escalate' | null;
 }
 ```
 
@@ -264,8 +275,9 @@ dependency check.
 
 ## 8. Metrics added to the benchmark
 
-- `falseClaimRate` — flagged claims / delivered claims on the legitimate
-  fixture corpus (target within assurance target 7's <= 1% false-denial budget).
+- `falseClaimRate` — the fraction of legitimate-corpus guard verdicts that were
+  flagged/repaired/withheld (non-delivered); target within assurance target 7's
+  <= 1% false-denial budget.
 - `withholdRate` — withheld / total responses.
 - `leakWithholdPrecision` — leak withholds that contained a real canary.
 - `guardLatencyP99` — guard must not blow the decision-latency budget

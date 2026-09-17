@@ -18,6 +18,7 @@ import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 import { type IdPHealth } from './identity.ts';
 import { AuditQueryService } from './audit-query.ts';
+import { type CapabilityRequestService } from './capability-request.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -85,6 +86,7 @@ export interface SessionOverrides {
   readonly approvals: readonly Approval[];
   readonly checks: readonly Check[];
   readonly task: string;
+  readonly capabilityRequestService?: CapabilityRequestService;
 }
 
 const RESOURCE_IDS = {
@@ -270,6 +272,7 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
         approvals: overrides?.approvals,
         checks: overrides?.checks ?? [secretLeakCheck(secretValues)],
         canaries: secretValues,
+        capabilityRequestService: overrides?.capabilityRequestService,
         now: clock.now,
       });
     },

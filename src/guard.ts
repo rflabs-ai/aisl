@@ -10,8 +10,9 @@
  *   - D6 (model-based critique) is telemetry only — see the stub.
  */
 
-import { seal } from './seal.ts';
-import { classificationRank, type ActionRequest, type AuthorizationDecision, type Classification } from './domain.ts';
+import { seal, type Sealed } from './seal.ts';
+import { classificationRank, type ActionRequest, type AuthorizationDecision, type Classification, type Principal } from './domain.ts';
+import { type CapabilityRequestService } from './capability-request.ts';
 
 export type ClaimFlagReason =
   | 'unverified-claim'
@@ -44,6 +45,8 @@ export interface GuardContext {
   readonly steps: readonly StepRecord[];
   readonly canaries: readonly string[];
   readonly classification: Classification;
+  readonly principal: Principal;
+  readonly capabilityRequestService?: CapabilityRequestService;
 }
 
 export interface GuardedResponse {
@@ -52,7 +55,9 @@ export interface GuardedResponse {
   readonly flags: readonly ClaimFlag[];
   readonly citations: readonly { readonly claim: string; readonly sourceId: string }[];
   readonly guardId: string;
-  readonly originalSealed: string | null;
+  readonly originalSealed: Sealed | null;
+  readonly ladderRung: 'repair' | 'regenerate' | 'abstain' | 'escalate' | null;
+  readonly requestId?: string;
 }
 
 export interface ResponseGuard {
@@ -121,7 +126,7 @@ export function runDetectors(ctx: GuardContext): readonly ClaimFlag[] {
     const insideCitation = citations.some((s) => idx >= s.index && idx <= s.index + s.length);
     if (insideCitation) continue;
     if (stepOutputs.some((o) => o.includes(n))) continue;
-    flags.push({ claim: n, reason: 'unverified-claim' });
+    flags.push({ claim: n, reason: stepOutputs.length > 0 ? 'numeric-mismatch' : 'unverified-claim' });
   }
   for (const m of ctx.modelText.matchAll(VERB_RE)) {
     if (m.index === undefined) continue;
@@ -130,12 +135,6 @@ export function runDetectors(ctx: GuardContext): readonly ClaimFlag[] {
     if (action === undefined) continue;
     if (!ctx.steps.some((s) => s.executed && s.request.action === action)) {
       flags.push({ claim: `I ${verb}`, reason: 'action-claim-mismatch' });
-    }
-  }
-  if (stepOutputs.length > 0) {
-    for (const m of ctx.modelText.matchAll(NUMBER_RE)) {
-      const n = m[0]!;
-      if (!stepOutputs.some((b) => b.includes(n))) flags.push({ claim: n, reason: 'numeric-mismatch' });
     }
   }
   return flags;
@@ -158,20 +157,19 @@ export function runLadder(
   regenerateFn: RegenerateFn | null,
   options: { readonly escalateText: string; readonly classification: Classification; readonly ctx: GuardContext },
 ): GuardedResponse {
-  if (flags.length === 0) return { status: 'delivered', text: initialText, flags: [], citations: toCitations(initialText), guardId: GUARD_ID, originalSealed: null };
+  if (flags.length === 0) return { status: 'delivered', text: initialText, flags: [], citations: toCitations(initialText), guardId: GUARD_ID, originalSealed: null, ladderRung: null };
   const repairable = flags.filter((f) => f.reason !== 'leak');
-  const sealed = (txt: string) => JSON.stringify(seal(txt, options.classification));
-  const okIfClean = (text: string): GuardedResponse | null =>
+  const sealed = (txt: string) => seal(txt, options.classification);
+  const okIfClean = (text: string, rung: 'repair' | 'regenerate'): GuardedResponse | null =>
     runDetectors({ ...options.ctx, modelText: text, canaries: [] }).length === 0
-      ? { status: 'repaired', text, flags: [], citations: toCitations(text), guardId: GUARD_ID, originalSealed: sealed(initialText) }
+      ? { status: 'repaired', text, flags: [], citations: toCitations(text), guardId: GUARD_ID, originalSealed: sealed(initialText), ladderRung: rung }
       : null;
   const repaired = repairFn(initialText, repairable);
-  if (repaired !== null) { const r = okIfClean(repaired); if (r !== null) return r; }
-  if (regenerateFn !== null) { const r = okIfClean(regenerateFn(initialText, repairable)); if (r !== null) return r; }
-  const text = classificationRank(options.classification) >= classificationRank('confidential')
-    ? (options.escalateText ?? ESCALATE_DEFAULT)
-    : SAFE_COMPLETION;
-  return { status: 'withheld', text, flags, citations: [], guardId: GUARD_ID, originalSealed: sealed(initialText) };
+  if (repaired !== null) { const r = okIfClean(repaired, 'repair'); if (r !== null) return r; }
+  if (regenerateFn !== null) { const r = okIfClean(regenerateFn(initialText, repairable), 'regenerate'); if (r !== null) return r; }
+  const escalated = classificationRank(options.classification) >= classificationRank('confidential');
+  const text = escalated ? (options.escalateText ?? ESCALATE_DEFAULT) : SAFE_COMPLETION;
+  return { status: 'withheld', text, flags, citations: [], guardId: GUARD_ID, originalSealed: sealed(initialText), ladderRung: escalated ? 'escalate' : 'abstain' };
 }
 
 export function assertGuardContextIsReadOnly(ctx: GuardContext): void {
@@ -183,19 +181,34 @@ export function assertGuardContextIsReadOnly(ctx: GuardContext): void {
 
 export class GroundedResponseGuard implements ResponseGuard {
   readonly id = GUARD_ID;
-  guard(ctx: GuardContext): GuardedResponse {
+  guard(ctx: GuardContext, criticFn?: (modelText: string) => readonly ClaimFlag[]): GuardedResponse {
     try {
-      const flags = runDetectors(ctx);
+      const flags = criticFn === undefined ? runDetectors(ctx) : [...runDetectors(ctx), ...criticFn(ctx.modelText)];
       if (flags.some((f) => f.reason === 'leak')) {
-        return { status: 'withheld', text: SAFE_COMPLETION, flags, citations: [], guardId: this.id, originalSealed: JSON.stringify(seal(ctx.modelText, ctx.classification)) };
+        return { status: 'withheld', text: SAFE_COMPLETION, flags, citations: [], guardId: this.id, originalSealed: seal(ctx.modelText, ctx.classification), ladderRung: null };
       }
-      return runLadder(ctx.modelText, flags.filter((f) => f.reason !== 'leak'), repairSpanStrip, null, { escalateText: ESCALATE_DEFAULT, classification: ctx.classification, ctx });
+      const nonLeakFlags = flags.filter((f) => f.reason !== 'leak');
+      const response = runLadder(ctx.modelText, nonLeakFlags, repairSpanStrip, null, { escalateText: ESCALATE_DEFAULT, classification: ctx.classification, ctx });
+      const escalated = response.ladderRung === 'escalate';
+      if (escalated && ctx.capabilityRequestService !== undefined && ctx.principal.kind === 'agent') {
+        const request = ctx.capabilityRequestService.submit(
+          ctx.principal,
+          ctx.sessionId,
+          ['guard.review'],
+          ['guard.review'],
+          ctx.classification,
+          `Guard Escalate: ${nonLeakFlags.map((f) => f.reason).join(', ')}`,
+        );
+        return { ...response, text: `${ESCALATE_DEFAULT} Review request: ${request.id}.`, requestId: request.id };
+      }
+      return response;
     } catch {
-      return { status: 'withheld', text: SAFE_COMPLETION, flags: [], citations: [], guardId: this.id, originalSealed: null };
+      return { status: 'withheld', text: SAFE_COMPLETION, flags: [], citations: [], guardId: this.id, originalSealed: null, ladderRung: null };
     }
   }
 }
 
-// ponytail: D6 model-based critique is a stub. Real critic is a future hook;
-// upgrade path: a second model pass with critic prompt or n-sample agreement. Telemetry only.
+// ponytail: D6 model-based critique has a callable hook (guard()'s optional
+// criticFn) but no real critic is wired. Upgrade path: a second model pass with
+// a critic prompt or n-sample agreement. Telemetry only.
 export const D6_STUB = true;

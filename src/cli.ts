@@ -20,6 +20,8 @@ import { mockAuth } from './testing.ts';
 import { verifyBundle, eventPublicKey } from './events.ts';
 import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-testing.ts';
 import { GroundedResponseGuard } from './guard.ts';
+import { CapabilityRequestService } from './capability-request.ts';
+import { ScriptedModel } from './model.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -169,6 +171,7 @@ function demo(): void {
     steps: [],
     canaries: world.secretValues,
     classification: 'public',
+    principal: world.agent,
   });
   line('cited-and-real', realResp.status === 'delivered' ? 'DELIVERED' : realResp.status.toUpperCase(), `${realResp.citations.length} citation(s), ${realResp.flags.length} flag(s)`);
 
@@ -180,6 +183,7 @@ function demo(): void {
     steps: [],
     canaries: world.secretValues,
     classification: 'public',
+    principal: world.agent,
   });
   const forgedFlag = forgedResp.flags.find((f) => f.reason === 'citation-forgery');
   line('cited-and-forged', forgedResp.status.toUpperCase(), `flag: ${forgedFlag?.reason ?? '(none)'}`);
@@ -192,9 +196,44 @@ function demo(): void {
     steps: [],
     canaries: world.secretValues,
     classification: 'public',
+    principal: world.agent,
   });
   const safeText = leakResp.text.includes(world.secretValues[0]!) === false;
   line('prose leak', leakResp.status.toUpperCase(), `safe completion: ${safeText ? 'yes' : 'NO'} (${leakResp.flags.length} flag(s))`);
+
+  heading('16. M9: guard follow-ups — Escalate wired to M4');
+  const requestService = new CapabilityRequestService(world.eventLog, world.authorization, world.root);
+  // Confidential ceiling so the session's derived classification makes Escalate reachable.
+  world.authorization.issue(world.root, {
+    subject: world.agent.id,
+    tenantId: TENANT_A,
+    resourceIds: [r.internalDoc!],
+    actions: ['read'],
+    maxClassification: 'confidential',
+    expiresAt: world.clock.now() + 3_600_000,
+    provenance: { source: 'policy-grant', note: 'M9 demo: confidential ceiling to exercise Escalate' },
+  });
+  const hostileSession = world.session(
+    new ScriptedModel('scripted-hostile-escalate-v1', [{ text: 'I deleted', requests: [] }]),
+    { capabilityRequestService: requestService },
+  );
+  const hostileGuard = hostileSession.run([]).guarded!;
+  line('hostile output, classification >= confidential', hostileGuard.status.toUpperCase(), hostileGuard.text);
+  const m9GuardEvent = world.eventLog
+    .all()
+    .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard')
+    .at(-1);
+  const m9RequestEvent = world.eventLog.all().filter((e) => e.action === 'capability.request').at(-1);
+  line(
+    'session.guard event',
+    m9GuardEvent ? 'LOGGED' : 'MISSING',
+    `requestId: ${(m9GuardEvent?.metadata as { requestId?: string } | undefined)?.requestId ?? '(none)'}`,
+  );
+  line(
+    'capability.request event',
+    m9RequestEvent ? 'LOGGED' : 'MISSING',
+    (m9RequestEvent?.metadata as { justification?: string } | undefined)?.justification ?? '',
+  );
 }
 
 function attack(): void {
@@ -216,7 +255,19 @@ function attack(): void {
 function benchmark(): void {
   const world = buildWorld();
   const attacks = runAttackCorpus(world, join(ROOT, 'security-attacks'));
+  const firstPassGuardCount = world.eventLog
+    .all()
+    .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard').length;
   const legitimate = runAttackCorpus(world, join(ROOT, 'security-fixtures'));
+  const legitGuardEvents = world.eventLog
+    .all()
+    .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard')
+    .slice(firstPassGuardCount);
+  const legitimateResponsesNonDelivered = legitGuardEvents.filter(
+    (e) => (e.metadata as { status?: string } | undefined)?.status !== 'delivered',
+  ).length;
+  const totalLegitimateResponses = legitGuardEvents.length;
+  const falseClaimRate = ratio(legitimateResponsesNonDelivered, totalLegitimateResponses);
 
   const advOutcomes = attacks.flatMap((a) => a.outcomes);
   const legitOutcomes = legitimate.flatMap((a) => a.outcomes);
@@ -270,6 +321,7 @@ function benchmark(): void {
     steps: [],
     canaries: world.secretValues,
     classification: 'public' as const,
+    principal: world.agent,
   });
   for (let i = 0; i < 1000; i++) {
     const t1 = performance.now();
@@ -326,6 +378,9 @@ function benchmark(): void {
       auditExportLatencyP99Ms,
       policyDiffLatencyMs,
       guardLatencyP99Ms,
+      falseClaimRate,
+      totalLegitimateResponses,
+      legitimateResponsesNonDelivered,
     },
     corpus: {
       documents: corpus.length,

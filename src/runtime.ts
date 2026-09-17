@@ -12,9 +12,11 @@ import {
   type Action,
   type ActionRequest,
   type AuthorizationDecision,
+  type Classification,
   type Principal,
   type ResourceType,
   canonicalJson,
+  classificationRank,
 } from './domain.ts';
 import { seal } from './seal.ts';
 import { type EventLog } from './events.ts';
@@ -24,6 +26,7 @@ import { type ResourceRegistry, type IngestedData, detectInjectionSignals } from
 import { type ModelPort } from './model.ts';
 import { type Check, type Verification, runVerifications } from './verification.ts';
 import { type GuardedResponse, type ResponseGuard, GroundedResponseGuard } from './guard.ts';
+import { type CapabilityRequestService } from './capability-request.ts';
 
 export interface ExecutionContext {
   readonly sessionId: string;
@@ -83,6 +86,34 @@ export class LocalSandbox implements Sandbox {
   }
 }
 
+/**
+ * Highest classification visible to this session: every capability ceiling, every
+ * registry resource the session holds content for, and every resource the model
+ * requested. Unknown ids are ignored; nothing visible defaults to `public`.
+ * Read-only — never mutates the registry.
+ */
+export function deriveClassification(input: {
+  readonly capabilities: readonly { readonly maxClassification: Classification }[];
+  readonly content?: ReadonlyMap<string, string>;
+  readonly registry: ResourceRegistry;
+  readonly requestedResourceIds: readonly string[];
+}): Classification {
+  let best: Classification = 'public';
+  const consider = (label: Classification): void => {
+    if (classificationRank(label) > classificationRank(best)) best = label;
+  };
+  for (const cap of input.capabilities) consider(cap.maxClassification);
+  for (const id of input.content?.keys() ?? []) {
+    const resource = input.registry.get(id);
+    if (resource) consider(resource.classification);
+  }
+  for (const id of input.requestedResourceIds) {
+    const resource = input.registry.get(id);
+    if (resource) consider(resource.classification);
+  }
+  return best;
+}
+
 export interface StepRecord {
   readonly request: ActionRequest;
   readonly decision: AuthorizationDecision;
@@ -126,6 +157,7 @@ export interface SessionConfig {
   readonly guard?: ResponseGuard | null;
   /** Canary / secret values the guard must never let through to prose. Defaults to []. */
   readonly canaries?: readonly string[];
+  readonly capabilityRequestService?: CapabilityRequestService;
 }
 
 export class AgentSession {
@@ -239,46 +271,52 @@ export class AgentSession {
       availableActions: this.cfg.tools.names() as Action[],
     });
 
-    // ponytail: guard runs pre-execution on the model's first-pass text. Re-running after `steps` would catch
-    // action-claim-mismatch on a second pass; that's a future enhancement, not a v1 requirement.
+    const classification = deriveClassification({
+      capabilities: this.cfg.authorization.capabilitiesFor(this.cfg.principal.id),
+      content: this.cfg.content,
+      registry: this.cfg.registry,
+      requestedResourceIds: modelOutput.requests.map((r) => r.resourceId),
+    });
+
     const guard = this.cfg.guard === null ? null : (this.cfg.guard ?? new GroundedResponseGuard());
-    const guarded = guard === null ? null : guard.guard({
+    const first = guard === null ? null : guard.guard({
       sessionId: this.sessionId,
       modelText: modelOutput.text,
       context: this.cfg.content ?? new Map<string, string>(),
       steps: [],
       canaries: this.cfg.canaries ?? [],
-      classification: 'public',
+      classification,
+      principal: this.cfg.principal,
+      capabilityRequestService: this.cfg.capabilityRequestService,
     });
 
     const steps = modelOutput.requests.map((r) => this.attempt(r));
+
+    // Second pass runs post-execution so action-claim-mismatch sees the real steps.
+    // No capabilityRequestService here: the first pass already queued any escalate
+    // request, and re-submitting would double-queue.
+    const second = guard === null ? null : guard.guard({
+      sessionId: this.sessionId,
+      modelText: modelOutput.text,
+      context: this.cfg.content ?? new Map<string, string>(),
+      steps,
+      canaries: this.cfg.canaries ?? [],
+      classification,
+      principal: this.cfg.principal,
+    });
+
+    const verdictKey = (g: GuardedResponse | null): string =>
+      g === null ? 'none' : canonicalJson({ status: g.status, flags: g.flags });
+    const firstKey = verdictKey(first);
+    const verdictChanged = verdictKey(second) !== firstKey;
+    // The post-execution pass is strictly better informed; today flags can only
+    // shrink or change reason, and the extra event preserves the first verdict for
+    // investigators.
+    const guarded = verdictChanged ? second : first;
     const endedAt = this.clock();
 
-    if (guarded !== null) {
-      const outputDigest = guarded.text === null
-        ? null
-        : createHash('sha256').update(guarded.text).digest('hex');
-      this.cfg.eventLog.append({
-        tenantId: this.cfg.principal.tenantId,
-        principal: this.cfg.principal.id,
-        actor: this.cfg.agentId,
-        actorKind: this.cfg.principal.kind,
-        action: 'session.guard',
-        result: guarded.status === 'withheld' ? 'error' : 'success',
-        decision: 'allow',
-        metadata: {
-          phase: 'guard',
-          sessionId: this.sessionId,
-          guardId: guarded.guardId,
-          status: guarded.status,
-          flags: guarded.flags,
-          citations: guarded.citations,
-          outputDigest,
-          sealed: guarded.originalSealed,
-          ladderRung: null,
-        },
-      });
-    }
+    if (first !== null) this.appendGuardEvent('guard', first);
+    if (verdictChanged && second !== null) this.appendGuardEvent('guard-second-pass', second);
 
     this.cfg.eventLog.append({
       tenantId: this.cfg.principal.tenantId,
@@ -308,6 +346,33 @@ export class AgentSession {
       endedAt,
       ...(guarded !== null ? { guarded } : {}),
     };
+  }
+
+  private appendGuardEvent(phase: 'guard' | 'guard-second-pass', guarded: GuardedResponse): void {
+    const outputDigest = guarded.text === null
+      ? null
+      : createHash('sha256').update(guarded.text).digest('hex');
+    this.cfg.eventLog.append({
+      tenantId: this.cfg.principal.tenantId,
+      principal: this.cfg.principal.id,
+      actor: this.cfg.agentId,
+      actorKind: this.cfg.principal.kind,
+      action: 'session.guard',
+      result: guarded.status === 'withheld' ? 'error' : 'success',
+      decision: 'allow',
+      metadata: {
+        phase,
+        sessionId: this.sessionId,
+        guardId: guarded.guardId,
+        status: guarded.status,
+        flags: guarded.flags,
+        citations: guarded.citations,
+        outputDigest,
+        sealed: guarded.originalSealed,
+        ladderRung: guarded.ladderRung,
+        ...(guarded.requestId !== undefined ? { requestId: guarded.requestId } : {}),
+      },
+    });
   }
 
   private record(

@@ -677,7 +677,9 @@ security_events(seq BIGINT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
                 timestamp BIGINT NOT NULL,
                 event_hash TEXT NOT NULL,
-                event JSONB NOT NULL);
+                event TEXT NOT NULL);   -- TEXT, parity with src/events.ts:227:
+                -- verify() re-hashes the PARSED object, so the column must
+                -- round-trip byte-stably; JSONB normalization would not.
 CREATE INDEX security_events_tenant_seq ON security_events (tenant_id, seq);
 -- Append-only: app role has INSERT/SELECT only; UPDATE/DELETE revoked;
 -- BEFORE UPDATE/DELETE triggers raise, mirroring the SQLite triggers.
@@ -716,11 +718,21 @@ step — schema changes are additive columns, never rewrites.
 
 ### Row-level security: the database enforces tenant isolation
 
-The app connects as a dedicated non-superuser role (`app_rw`: no
-`superuser`, no `bypassrls`, no `createrole`; schema owner is a separate
-`app_ddl` role used only by the migration runner). Every tenant-scoped table
-gets `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` and
-deny-by-default policies:
+Three non-superuser roles (no `superuser`, no `bypassrls`, no `createrole`;
+schema owner is a separate `app_ddl` role used only by the migration runner):
+
+- **`app_rw`** — the runtime role. On `security_events` it holds INSERT and
+  **global SELECT**: `resume()`, `verify()`, and `bundle()` must read the
+  whole hash chain across all tenants (src/events.ts:257/406/453), so RLS
+  must not filter event reads for the process that signs every event.
+  On tenant tables it has full RLS-governed access.
+- **`app_reader`** — the audit-query path. Tenant-scoped SELECT on
+  `security_events` (same policy shape as below); hostile cross-tenant reads
+  through this role return **zero rows** — the database denies, not app code.
+- Every role: UPDATE/DELETE revoked on all tables; triggers as belt-and-braces.
+
+Every tenant-scoped table gets `ENABLE ROW LEVEL SECURITY` +
+`FORCE ROW LEVEL SECURITY` and deny-by-default policies:
 
 ```sql
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
@@ -737,10 +749,14 @@ rows** — the database denies, not app code. App-code tenant checks remain
 (defense in depth, ADR-007) but are no longer the only control.
 
 Exception: `security_events` carries a **global** hash chain (`seq` is
-world-order, one signer). SELECT is tenant-scoped by the same policy; INSERT
-is unrestricted for `app_rw` because the runtime writes every event and the
-table has no UPDATE/DELETE to protect — append-only is enforced by revoked
-privileges + triggers instead.
+world-order, one signer). `app_rw` reads it unfiltered and appends (see the
+role list above — the chain is world-order, one signer, and the runtime has
+no UPDATE/DELETE to give up); `app_reader` gets the tenant-scoped policy.
+The boundary, stated honestly: RLS proves cross-tenant denial at the
+reader/tenant-table surface; the runtime role can read every event because
+it is the signer and the chain verifier — that trust is the existing
+"runtime process is not compromised" assumption (CURRENT_STATE), unchanged
+by this ADR.
 
 ### Per-tenant evidence keys (extends ADR-013, no re-encryption)
 

@@ -30,19 +30,23 @@ was left, and what the next session should pick up.
 - M12 Phase 0 landed (docs only): **ADR-018** written into `DECISIONS.md`
   (numbering verified — 017 taken by the M11 role model). It decides, per the
   M12 prompt's hard requirements:
-  - **Driver: `postgres.js` pinned** — zero transitive runtime deps (ADR-015
+  - **Driver: `postgres.js`** — zero transitive runtime deps (ADR-015
     item 2 decides it; `pg` pulls `pg-connection-string`/`pg-protocol`/etc.),
-    native ESM, single multiplexed socket so no pooling library.
+    native ESM, single multiplexed socket so no pooling library. Pinned when
+    the dependency lands in Phase 1.
   - **Schema inline in the ADR:** `migrations` (forward-only, hash-recorded),
-    `security_events` (parity with the SQLite table, append-only via revoked
-    UPDATE/DELETE privileges + triggers, global seq — one hash chain, one
-    signer), `capability_requests`, `projects`/`tasks`/`agent_sessions`.
+    `security_events` (parity with the SQLite table — `event TEXT`, not JSONB,
+    so the parsed-object hash recompute round-trips byte-stably; append-only
+    via revoked UPDATE/DELETE privileges + triggers, global seq — one hash
+    chain, one signer), `capability_requests`, `projects`/`tasks`/
+    `agent_sessions`.
   - **RLS model:** `ENABLE`+`FORCE` RLS, deny-by-default policies keyed on
     `current_setting('app.tenant_id', true)` (unset → NULL → false → zero
-    rows), context set per transaction via `SET LOCAL`; app connects as
-    non-superuser `app_rw`, DDL separated into `app_ddl`. `security_events`
-    SELECT tenant-scoped, INSERT unrestricted (single-writer runtime appends
-    the global chain).
+    rows), context set per transaction via `SET LOCAL`. Three non-superuser
+    roles: `app_rw` (runtime: global SELECT+INSERT on events — resume/
+    verify/bundle read the whole chain; RLS-governed on tenant tables),
+    `app_reader` (audit path: tenant-scoped event SELECT — hostile
+    cross-tenant reads return zero rows), `app_ddl` (migration runner only).
   - **Per-tenant keys:** HKDF info gains tenantId (`evidence:<tenant>:<level>`),
     versioned keyIds `evidence-key:v2:<tenant>:<classification>`; legacy ids
     keep opening under the old derivation — **no silent re-encryption**.
@@ -54,6 +58,13 @@ was left, and what the next session should pick up.
     second implementation; the construction seam is `src/scenario.ts:140`
     (the only `new EventLog` call site). Postgres tests skip cleanly without
     `DATABASE_URL`.
+- Session audit of the ADR found two design defects before Phase 1 could
+  follow them: (1) tenant-scoped SELECT on `security_events` would make
+  `resume()`/`verify()`/`bundle()` impossible (they read the whole global
+  chain) — amended to the two-role model above; (2) `event JSONB` broke the
+  claimed SQLite parity — amended to `event TEXT`. ROADMAP "pinned" wording
+  corrected. Tickets
+  `.scratch/session-audit/2026-09-17-m12-phase0-adr/issues/{01,02,03}`.
 - ROADMAP M12 marker updated (Phase 0 done, Phase 1 next).
 
 **Left:**

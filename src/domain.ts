@@ -75,6 +75,19 @@ export function isAuthenticated(p: Principal, now: number): p is Principal & { r
   return p.auth !== undefined && p.auth.expiresAt > now;
 }
 
+/**
+ * A role is data, not code: a named bundle of actions bounded by a
+ * classification ceiling. Roles narrow authority — they never mint it.
+ */
+export interface Role {
+  readonly id: string;
+  /** '*' = tenant-agnostic baseline role */
+  readonly tenantId: string;
+  readonly description?: string;
+  readonly actions: readonly Action[];
+  readonly maxClassification: Classification;
+}
+
 export type KnownClassification =
   | 'public'
   | 'internal'

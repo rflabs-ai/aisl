@@ -7,7 +7,7 @@
  * it into authority (see capability.ts — the only capability constructor).
  */
 
-import { type Classification, type Resource, type ResourceType } from './domain.ts';
+import { type Classification, type Resource, type ResourceType, classificationRank } from './domain.ts';
 
 export class ResourceRegistry {
   private readonly resources = new Map<string, Resource>();
@@ -30,6 +30,20 @@ export class ResourceRegistry {
   list(tenantId?: string): readonly Resource[] {
     const all = [...this.resources.values()];
     return tenantId ? all.filter((r) => r.tenantId === tenantId) : all;
+  }
+
+  /**
+   * Raise-only classification update (M11 propagation). A derived label can
+   * only ever increase sensitivity; unknown ids are never created — a write to
+   * a resource the registry does not know cannot mint one.
+   */
+  raiseClassification(id: string, classification: Classification): Resource | undefined {
+    const current = this.resources.get(id);
+    if (!current) return undefined;
+    if (classificationRank(classification) <= classificationRank(current.classification)) return current;
+    const raised = { ...current, classification };
+    this.resources.set(id, raised);
+    return raised;
   }
 }
 
@@ -58,20 +72,44 @@ export function defineResource(spec: ResourceSpec): Resource {
   };
 }
 
+/**
+ * Max label by classificationRank of current + sources. Unknown labels rank 100
+ * and win. Propagation only raises; it never downgrades, and a derived label
+ * feeds ceilings, never grants.
+ */
+export function propagateClassification(current: Classification, sources: readonly Classification[]): Classification {
+  let best = current;
+  for (const s of sources) {
+    if (classificationRank(s) > classificationRank(best)) best = s;
+  }
+  return best;
+}
+
 export interface IngestedData {
   readonly resourceId: string;
   readonly source: string;
   readonly content: string;
   /** Data carries no authority. Kept explicit so it cannot be silently upgraded. */
   readonly authority: 'none';
+  /** Present only when derivedFrom sources are given: the max label of this artifact and its sources. */
+  readonly derivedClassification?: Classification;
 }
 
 export function ingestDocument(
   resource: Resource,
   content: string,
   source = resource.id,
+  derivedFrom?: readonly Resource[],
 ): IngestedData {
-  return { resourceId: resource.id, source, content, authority: 'none' };
+  return {
+    resourceId: resource.id,
+    source,
+    content,
+    authority: 'none',
+    ...(derivedFrom
+      ? { derivedClassification: propagateClassification(resource.classification, derivedFrom.map((r) => r.classification)) }
+      : {}),
+  };
 }
 
 /**

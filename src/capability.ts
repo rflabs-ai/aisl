@@ -14,6 +14,7 @@ import {
   type Classification,
   type DenyReason,
   type Principal,
+  type Role,
   classificationRank,
   canonicalJson,
 } from './domain.ts';
@@ -183,6 +184,64 @@ export function issueCapability(
 const ROOT_KIND = 'authorization';
 function authorityRequired(issuer: Principal): boolean {
   return issuer.kind !== ROOT_KIND;
+}
+
+/** Options for role-templated issuance; the role supplies the ceiling unless the request narrows it. */
+export interface RoleIssuanceRequest {
+  readonly actions: readonly Action[];
+  readonly maxClassification?: Classification;
+  readonly expiresAt: number;
+  readonly singleUse?: boolean;
+  readonly constraints?: readonly Constraint[];
+  readonly provenance: Provenance;
+}
+
+/**
+ * M11: build an IssueRequest bounded by a role. Roles narrow authority — they
+ * never mint it, so an over-privileged request throws instead of being capped.
+ * The returned request still flows through issueCapability unchanged: issuer
+ * kinds, tenant match, and attenuation all apply there and nowhere else.
+ */
+export function issueRequestForRole(
+  roles: readonly Role[],
+  issuer: Principal,
+  roleId: string,
+  subject: string,
+  resourceIds: readonly string[],
+  request: RoleIssuanceRequest,
+): IssueRequest {
+  const role = roles.find((r) => r.id === roleId && (r.tenantId === issuer.tenantId || r.tenantId === '*'));
+  if (!role) {
+    throw new CapabilityIssuanceError(
+      `role '${roleId}' is not visible to issuer ${issuer.id} in tenant '${issuer.tenantId}'`,
+    );
+  }
+  if (request.actions.length === 0) {
+    throw new CapabilityIssuanceError(`issuance against role '${roleId}' requires at least one action`);
+  }
+  const outside = request.actions.find((a) => !role.actions.includes(a));
+  if (outside !== undefined) {
+    throw new CapabilityIssuanceError(`action '${outside}' is not held by role '${roleId}'`);
+  }
+  if (
+    request.maxClassification !== undefined &&
+    classificationRank(request.maxClassification) > classificationRank(role.maxClassification)
+  ) {
+    throw new CapabilityIssuanceError(
+      `classification '${request.maxClassification}' exceeds role '${roleId}' ceiling '${role.maxClassification}'`,
+    );
+  }
+  return {
+    subject,
+    tenantId: issuer.tenantId,
+    resourceIds: [...resourceIds],
+    actions: [...request.actions],
+    maxClassification: request.maxClassification ?? role.maxClassification,
+    expiresAt: request.expiresAt,
+    singleUse: request.singleUse,
+    constraints: request.constraints,
+    provenance: request.provenance,
+  };
 }
 
 function findOverreach(request: IssueRequest, authority: IssuerAuthority): string | undefined {

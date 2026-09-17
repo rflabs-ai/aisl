@@ -210,12 +210,28 @@ export class AgentSession {
     };
 
     let output: unknown;
+    let toolResult: ToolResult | undefined;
     try {
-      output = this.cfg.sandbox.runTool(tool, ctx).output;
+      toolResult = this.cfg.sandbox.runTool(tool, ctx);
+      output = toolResult.output;
     } catch (error) {
       const message = (error as Error).message;
       this.record('error', request, decision, message);
       return { request, decision, executed: false, error: message, verifications: [] };
+    }
+
+    // M11 propagation: a mutating write lifts the target's label to the max of
+    // everything the session can see. Clearance ceilings are not data labels,
+    // so derivation uses data sources only. Labels only raise, never lower.
+    let derived: Classification | undefined;
+    if (toolResult.changed === true && resource) {
+      derived = deriveClassification({
+        capabilities: [],
+        content: this.cfg.content,
+        registry: this.cfg.registry,
+        requestedResourceIds: [request.resourceId],
+      });
+      this.cfg.registry.raiseClassification(request.resourceId, derived);
     }
 
     const verifications = runVerifications(
@@ -226,7 +242,7 @@ export class AgentSession {
     );
 
     const failed = verifications.filter((v) => v.result !== 'pass');
-    this.record(failed.length > 0 ? 'error' : 'success', request, decision, undefined, { verifications }, output);
+    this.record(failed.length > 0 ? 'error' : 'success', request, decision, undefined, { verifications }, output, derived);
 
     this.cfg.authorization.consume(decision.capabilityId);
 
@@ -387,10 +403,12 @@ export class AgentSession {
     error?: string,
     extra: Record<string, unknown> = {},
     output?: unknown,
+    derivedClassification?: Classification,
   ): void {
     const rendered = output === undefined ? null : typeof output === 'string' ? output : canonicalJson(output);
     const digest = rendered === null ? null : createHash('sha256').update(rendered).digest('hex');
-    const classification = this.cfg.registry.get(request.resourceId)?.classification ?? 'x-unknown-resource';
+    const classification =
+      derivedClassification ?? this.cfg.registry.get(request.resourceId)?.classification ?? 'x-unknown-resource';
     const sealed = rendered === null ? null : seal(rendered, classification);
 
     this.cfg.eventLog.append({
@@ -410,6 +428,7 @@ export class AgentSession {
         error: error ?? null,
         outputDigest: digest,
         sealed,
+        ...(derivedClassification !== undefined ? { derivedClassification } : {}),
         ...extra,
       },
     });

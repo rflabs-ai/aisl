@@ -6,12 +6,16 @@
  *   node src/policy-diff.ts                       # baseline vs baseline (prints "0 changed")
  *   node src/policy-diff.ts path/to/overlay.json  # baseline vs baseline+overlay
  *
- * Overlay file shape: { "rules": [ ...PolicyRule... ] }
+ * Overlay file shape:
+ *   { "rules": [ ...PolicyRule... ] }                      (legacy, unversioned)
+ *   { "id", "version", "rules", "provenance", "hash" }     (M11 PolicyBundle —
+ *    hash-verified BEFORE any engine is built; mismatch aborts the diff)
  */
 
 import { readFileSync } from 'node:fs';
 import { createPolicyEngine, BASELINE_POLICY, type PolicyRule } from './policy.ts';
 import { diffDecisions } from './policy-testing.ts';
+import { loadPolicyBundle, type PolicyBundle } from './policy-config.ts';
 
 const overlayPath = process.argv[2];
 
@@ -33,15 +37,30 @@ function baselineScenarios() {
   ];
 }
 
-function loadOverlay(path: string): readonly PolicyRule[] {
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as { rules?: unknown };
-  if (!Array.isArray(raw.rules)) throw new Error(`overlay ${path}: "rules" must be an array`);
-  return raw.rules as readonly PolicyRule[];
+interface Overlay {
+  readonly rules: readonly PolicyRule[];
+  readonly id: string;
+  readonly versionLabel: string;
 }
 
+function loadOverlay(path: string): Overlay {
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as { rules?: unknown; version?: unknown; id?: unknown };
+  // Versioned bundle: verify the hash before any engine is built (fail closed).
+  if (raw.version !== undefined) {
+    const bundle = loadPolicyBundle(raw as PolicyBundle);
+    return { rules: bundle.rules, id: bundle.id, versionLabel: ` (bundle v${bundle.version})` };
+  }
+  if (!Array.isArray(raw.rules)) throw new Error(`overlay ${path}: "rules" must be an array`);
+  return { rules: raw.rules as readonly PolicyRule[], id: 'baseline+overlay', versionLabel: '' };
+}
+
+// The overlay is verified (and may abort the run) before any engine is built.
+const overlay = overlayPath ? loadOverlay(overlayPath) : undefined;
+if (overlay?.versionLabel) console.log(`overlay: ${overlay.id}${overlay.versionLabel}`);
+
 const before = createPolicyEngine(BASELINE_POLICY, 'baseline');
-const after = overlayPath
-  ? createPolicyEngine([...BASELINE_POLICY, ...loadOverlay(overlayPath)], 'baseline+overlay')
+const after = overlay
+  ? createPolicyEngine([...BASELINE_POLICY, ...overlay.rules], overlay.id)
   : createPolicyEngine(BASELINE_POLICY, 'baseline');
 const scenarios = baselineScenarios();
 const diffs = diffDecisions(before, after, scenarios);

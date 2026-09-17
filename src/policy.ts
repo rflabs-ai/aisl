@@ -16,6 +16,7 @@ import {
   type PrincipalKind,
   type Resource,
   type ResourceType,
+  type Role,
   classificationRank,
 } from './domain.ts';
 
@@ -24,6 +25,37 @@ export interface PrincipalMatch {
   readonly ids?: readonly string[];
   readonly roles?: readonly string[];
 }
+
+/** Bumped whenever the baseline role table changes shape. */
+export const ROLE_TABLE_VERSION = 1;
+
+/**
+ * Baseline roles. Tenant-agnostic ('*'): they bound what a holder may be
+ * granted — never what they hold. Roles narrow authority; they do not mint it.
+ */
+export const BASELINE_ROLES: readonly Role[] = [
+  {
+    id: 'worker',
+    tenantId: '*',
+    description: 'Read/write work over internal-and-below material.',
+    actions: ['read', 'write'],
+    maxClassification: 'internal',
+  },
+  {
+    id: 'reader',
+    tenantId: '*',
+    description: 'Read-only over internal-and-below material.',
+    actions: ['read'],
+    maxClassification: 'internal',
+  },
+  {
+    id: 'reviewer',
+    tenantId: '*',
+    description: 'Human approval over restricted-and-below material.',
+    actions: ['task.approve'],
+    maxClassification: 'restricted',
+  },
+];
 
 /**
  * Hierarchical resource matching (M5).
@@ -251,7 +283,52 @@ const NO_MATCH: PolicyResult = {
   reason: 'no matching allow rule; default deny',
 };
 
-export function createPolicyEngine(rules: readonly PolicyRule[], id = 'in-process-rego-free-v1'): PolicyEngine & { _compileCacheSize(): number } {
+/**
+ * M11: allow rules that reference roles are cross-validated against the role
+ * table at construction — a rule may never grant what the role does not hold.
+ * A wildcard allow cannot be verified against a finite role action set and is
+ * rejected outright. Deny rules and roles not in the table (possibly
+ * org-defined elsewhere) are not validated. Fail closed, never widen.
+ */
+function validateRulesAgainstRoles(rules: readonly PolicyRule[], roles: readonly Role[]): void {
+  for (const rule of rules) {
+    if (rule.effect !== 'allow') continue;
+    const roleRefs = rule.principals.roles;
+    if (!roleRefs || roleRefs.length === 0) continue;
+    for (const roleId of roleRefs) {
+      const role = roles.find((r) => r.id === roleId);
+      if (!role) continue;
+      if (rule.actions.includes('*')) {
+        throw new PolicyCompilationError(
+          `rule '${rule.id}' grants wildcard actions to role '${roleId}': a wildcard allow cannot be verified against the role's finite action set`,
+          roleId,
+        );
+      }
+      const overAction = rule.actions.find((a) => !role.actions.includes(a));
+      if (overAction !== undefined) {
+        throw new PolicyCompilationError(
+          `rule '${rule.id}' grants action '${overAction}' not held by role '${roleId}'`,
+          roleId,
+        );
+      }
+      if (
+        rule.maxClassification !== undefined &&
+        classificationRank(rule.maxClassification) > classificationRank(role.maxClassification)
+      ) {
+        throw new PolicyCompilationError(
+          `rule '${rule.id}' grants classification '${rule.maxClassification}' above role '${roleId}' ceiling '${role.maxClassification}'`,
+          roleId,
+        );
+      }
+    }
+  }
+}
+
+export function createPolicyEngine(
+  rules: readonly PolicyRule[],
+  id = 'in-process-rego-free-v1',
+  roles: readonly Role[] = BASELINE_ROLES,
+): PolicyEngine & { _compileCacheSize(): number } {
   const cache = new Map<string, IdPatternMatcher>();
   for (const rule of rules) {
     const patterns = rule.resources.idPatterns;
@@ -260,6 +337,7 @@ export function createPolicyEngine(rules: readonly PolicyRule[], id = 'in-proces
       if (!cache.has(p)) cache.set(p, compileIdPattern(p));
     }
   }
+  validateRulesAgainstRoles(rules, roles);
 
   return {
     id,

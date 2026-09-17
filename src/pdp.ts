@@ -10,7 +10,9 @@ import {
   type Capability,
   type IssueRequest,
   type IssuerAuthority,
+  type RoleIssuanceRequest,
   issueCapability,
+  issueRequestForRole,
   markUsed,
   verifyCapability,
 } from './capability.ts';
@@ -19,12 +21,13 @@ import {
   type AuthorizationDecision,
   type DenyReason,
   type Principal,
+  type Role,
   allow,
   deny,
   isAuthenticated,
 } from './domain.ts';
 import { type EventLog, type SecurityEvent, type AuditFilters } from './events.ts';
-import { type Approval, type PolicyEngine } from './policy.ts';
+import { BASELINE_ROLES, type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
 import { hasMfa, type IdPHealth } from './identity.ts';
@@ -62,6 +65,7 @@ export class AuthorizationService {
   private readonly eventLog: EventLog;
   private readonly now: () => number;
   private readonly idpHealth?: () => IdPHealth;
+  private readonly roles: readonly Role[];
 
   constructor(
     registry: ResourceRegistry,
@@ -69,12 +73,14 @@ export class AuthorizationService {
     eventLog: EventLog,
     now: () => number = Date.now,
     idpHealth?: () => IdPHealth,
+    roles: readonly Role[] = BASELINE_ROLES,
   ) {
     this.registry = registry;
     this.engine = engine;
     this.eventLog = eventLog;
     this.now = now;
     this.idpHealth = idpHealth;
+    this.roles = roles;
   }
 
   issue(
@@ -103,6 +109,24 @@ export class AuthorizationService {
       },
     });
     return cap;
+  }
+
+  /**
+   * M11: role-templated issuance. The role bounds the request; everything the
+   * issue() pipeline enforces (issuer kinds, tenant match, attenuation,
+   * registration, audit) applies unchanged. Roles narrow authority — they
+   * never mint it.
+   */
+  issueForRole(
+    issuer: Principal,
+    roleId: string,
+    subject: string,
+    resourceIds: readonly string[],
+    opts: RoleIssuanceRequest,
+    issuerAuthority?: IssuerAuthority,
+  ): Capability {
+    const request = issueRequestForRole(this.roles, issuer, roleId, subject, resourceIds, opts);
+    return this.issue(issuer, request, issuerAuthority);
   }
 
   grant(cap: Capability): void {

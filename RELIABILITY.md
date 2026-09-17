@@ -247,7 +247,7 @@ or `withheld` with the reason recorded.
 outputs; assert status and flags per case.
 *Known limitation:* verifies support, not truth; poisoned sources yield
 well-cited lies. Uncited-but-true claims are flagged (false positives) — the
-false-denial budget (assurance target 7) applies.
+≤ 1% false-denial budget (Assurance targets, ROADMAP) applies.
 *Residual risk:* claim-extraction misses a consequential claim; classifier
 upgrade path noted in D2.
 
@@ -276,17 +276,18 @@ dependency check.
 ## 8. Metrics added to the benchmark
 
 - `falseClaimRate` — the fraction of legitimate-corpus guard verdicts that were
-  flagged/repaired/withheld (non-delivered); target within assurance target 7's
-  <= 1% false-denial budget. Benchmark note (M9 audit): the benchmark
-  denominator is currently the legitimate-corpus guard verdicts only (one per
-  run — LEG-002 is network-gated and emits no verdict); the statistically
-  meaningful measurement is the R1 security test (100 honest sessions).
-  Widening the benchmark denominator is the first item of the assurance-targets
-  milestone (`PROMPTS/M10-assurance-targets-and-slos.md`).
+  flagged/repaired/withheld (non-delivered); target ≤ 1% (the documented
+  false-denial budget in the ROADMAP Assurance targets). Since M10 the
+  benchmark denominator is the legitimate-fixture guard verdicts plus an
+  N=100 honest R1-style corpus (`summarizeRepoModel` sessions, run in
+  `benchmark()`; their PDP decisions are added to `expectedDecisions` so
+  `auditCompleteness` stays 1.0) — the M9-audit caveat about the denominator
+  being 1 is closed. The gate is a `hard` assurance target
+  (`evidence.falseClaimRate` ≤ 0.01, `src/slo.ts`).
 - `withholdRate` — withheld / total responses.
 - `leakWithholdPrecision` — leak withholds that contained a real canary.
 - `guardLatencyP99` — guard must not blow the decision-latency budget
-  (assurance target 9).
+  (measured per run as `guardLatencyP99Ms`, advisory — reported, not gated).
 
 ## 9. Implementation shape (when scheduled)
 

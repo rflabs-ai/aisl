@@ -1,12 +1,13 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M9 — guard follow-ups (Escalate wired to M4,
-per-session classification, second-pass guard) and the M7/M8 drift closure.
+Honest snapshot. Updated after M10 — assurance targets + SLO gate (ADR-014):
+a gated `slo` block on every benchmark run, and the `falseClaimRate`
+denominator widened to 100 honest sessions.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~4,600 lines of source across 27 modules
-(`src/`), 278 test assertions (`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~4,600 lines of source across 28 modules
+(`src/`), 283 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
@@ -60,6 +61,19 @@ dependencies: `typescript`, `@types/node`.
   diffs `BASELINE_POLICY` against an optional overlay file. Three migrated
   fixtures under `tests/fixtures/policy/` (default-deny-empty,
   deny-overrides-allow, classification-ceiling).
+- **Assurance targets + SLO gate (M10):** `src/slo.ts` holds the per-control
+  target catalog (`SLO_TARGETS`) — one measurable target per control, each with
+  a named measurement (ADR-014); the catalog is mirrored in the ROADMAP
+  "Assurance targets" table and the ids are pinned by test.
+  `evaluateSlo(metrics)` evaluates it against benchmark metrics.
+  `npm run benchmark` prints the target table, writes
+  `metrics.slo = { pass, hardFailures, targets[] }` to
+  `benchmarks/results.json`, and exits nonzero when a `hard` target misses.
+  Latency metrics are advisory (reported, never gated). The `falseClaimRate`
+  denominator is the legitimate-fixture guard verdicts plus an N=100 honest
+  R1-style corpus run inside the benchmark (`evidence.honestCorpusSessions`);
+  those sessions' PDP decisions are added to `expectedDecisions` so
+  `auditCompleteness` stays 1.0.
 - **Output reliability layer (M8):** `GroundedResponseGuard` (`src/guard.ts`)
   implements D2–D5 detection with a pure `runLadder` fallback (Repair →
   Regenerate → Abstain → Escalate; Escalate gated on classification).
@@ -110,8 +124,8 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 278 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
-M6, M7, M8, M9:
+All 283 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
+M6, M7, M8, M9, M10:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -120,7 +134,7 @@ network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
 principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
 lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export (29)**
 | **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**
-| **M9 guard follow-ups + drift closure (26)**.
+| **M9 guard follow-ups + drift closure (26)** | **M10 assurance-target gate (5)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -134,11 +148,14 @@ Measured this run (`benchmarks/results.json`):
 - 12/12 attack cases behaved as required; 20/20 adversarial requests denied.
 - Prompt-injection-driven requests: 4; successes: 0.
 - Legitimate tasks: 2/2 allowed; false-denial rate 0.
-- Audit completeness: 2022/2022 decisions recorded; hash chain valid.
-- Audit query latency p99: 0.285 ms; audit export latency p99: 0.337 ms.
-- Policy diff latency: 0.115 ms (one run, sub-ms).
-- Guard latency p99: 0.008 ms (1000 runs of a small honest input).
-- `falseClaimRate` 0 over 1 legitimate-corpus guard verdict (target ≤ 1%).
+- Audit completeness: 2122/2122 decisions recorded; hash chain valid.
+- Audit query latency p99: 0.262 ms; audit export latency p99: 0.255 ms.
+- Policy diff latency: 0.117 ms (one run, sub-ms).
+- Guard latency p99: 0.009 ms (1000 runs of a small honest input).
+- `falseClaimRate` 0 over 101 legitimate responses (fixture guard verdicts +
+  100 honest R1-style sessions; target ≤ 1%).
+- SLO gate: all 14 assurance targets pass (10 hard, 4 advisory);
+  `metrics.slo.pass = true`, exit code 0.
 
 These numbers describe a 12-case corpus written by the same person who wrote the
 code. They are not evidence of security against a competent adversary.
@@ -339,6 +356,27 @@ three items SESSION 8 deferred and the six drift items the M7/M8 audit found.
    `criticFn`; its flags merge before the ladder. No real critic is wired
    (telemetry only).
 
+## What M10 closed
+
+M10 was a measurement milestone (no behavior change to pdp/capability/policy/
+guard): it closed ADR-014's "per-control assurance targets, reported on every
+benchmark run" promise and the M9 audit's thin-denominator caveat.
+
+1. ~~**Benchmark metrics had no targets and no gate.**~~ `src/slo.ts` —
+   `SLO_TARGETS` (one measurable target per control, named measurement) and
+   `evaluateSlo(metrics, targets?)`. `npm run benchmark` prints the target
+   table, writes `metrics.slo = { pass, hardFailures, targets[] }` to
+   `benchmarks/results.json`, and exits nonzero when a `hard` target misses;
+   latency is advisory (reported, never gated). The catalog is mirrored in the
+   ROADMAP "Assurance targets" table; a test pins the ids and the `slo` block
+   shape, and a fabricated-metrics test proves the gate CAN fail.
+2. ~~**`falseClaimRate` denominator was 1.**~~ The benchmark now runs the
+   R1-style honest corpus (100 `summarizeRepoModel` sessions; ~1 s). Its
+   first-pass guard verdicts join the fixture corpus's, so the denominator is
+   101 and the non-delivered count covers all of them. The sessions' PDP
+   decisions are added to `expectedDecisions`, keeping `auditCompleteness` at
+   1.0 (test-asserted).
+
 ## Watch-items from the M9 audit
 
 Not vulnerabilities — deliberate ceilings with named upgrade paths (details in
@@ -347,9 +385,10 @@ Claim 23's limitations and RELIABILITY §8):
 1. Derived per-session classification is coarse (max over all principal
    capabilities and the full content map; conservative by design). Upgrade:
    derive from per-session granted caps only.
-2. Benchmark `falseClaimRate` denominator is 1 legitimate-corpus verdict per
-   run; the R1 security test (100 honest sessions) is the real measurement.
-   Upgrade: the assurance-targets milestone (M10).
+2. ~~Benchmark `falseClaimRate` denominator is 1 legitimate-corpus verdict per
+   run.~~ **M10 closed**: the benchmark runs the R1-style honest corpus
+   (N=100); the denominator is 101 (`evidence.totalLegitimateResponses`, floor
+   ≥ 100 is a hard assurance target). See "What M10 closed".
 3. A failed `CapabilityRequestService.submit()` degrades to the text-only
    withhold without a distinct error marker on the `session.guard` event.
    Upgrade: a `guard.error` marker.

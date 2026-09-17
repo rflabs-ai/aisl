@@ -24,6 +24,65 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 12 — 2026-09-17 — opencode/m10-assurance-targets-and-slos
+
+**Did:**
+- M10 landed (one surface: `src/slo.ts` new, `src/cli.ts` benchmark, one test
+  file, docs). No behavior change to pdp/capability/policy/guard — this
+  milestone measures controls; it does not change them. Executed in-session
+  (subagent A → B were sequential and the full context was already loaded).
+  - **Catalog (A).** ROADMAP "Assurance targets (ADR-014)" rewritten as the
+    implemented catalog: 10 benchmark-gated controls (9 rate/boolean hard
+    targets + `guard-corpus-floor` ≥ 100) + 4 latency rows (advisory,
+    reported-only), then "gated by the test suite" (unauth principals, MFA,
+    replay, secrets-at-rest, model independence, capability/session revocation)
+    and "not yet measured" (end-to-end decision latency, H15 degraded mode,
+    unknown vulnerabilities). No composite score; every rate's denominator sits
+    in the same JSON. Targets come from documented budgets, not inverted
+    measurements.
+  - **Measurement + gate (B).** `src/slo.ts`: `SLO_TARGETS` const catalog +
+    `evaluateSlo(metrics, targets?) → { results, hardFailures }` (dotted-path
+    read, `eq|lte|gte`, missing metric fails closed). `benchmark()` prints the
+    readable target table, writes `metrics.slo = { pass, hardFailures,
+    targets[] }` to `benchmarks/results.json`, and sets exit code 1 on any hard
+    miss. `adversarial.corpusPassRate` added so the corpus gate has a named
+    key.
+  - **falseClaimRate widened.** `benchmark()` runs the R1-style honest corpus
+    (100 `summarizeRepoModel` sessions, ~1 s); their first-pass guard verdicts
+    join the fixture verdicts (denominator 101). Their PDP decisions are added
+    to `expectedDecisions` (one per session), keeping `auditCompleteness` at
+    1.0 — verified 2122/2122 this run.
+- Tests (`tests/slo.test.ts`, 5): hard miss flips the gate (fabricated
+  metrics); all-met passes; missing metric fails closed; advisory miss reported
+  but never fails; the real benchmark exits 0 with the pinned `slo` block shape
+  and catalog ids (`execFileSync` throwing on nonzero exit IS the gate test).
+- Docs: ROADMAP (Stage-0 row [DONE], "Planned milestone prompts" note,
+  assurance section), CURRENT_STATE (283 tests / 28 modules, "What M10 closed",
+  watch-item #2 struck, measured-this-run + SLO line), RELIABILITY §8
+  (widened denominator replaces the M9 caveat; stale "assurance target 7/9"
+  number refs → control names, since the catalog renumbered), SECURITY_CLAIMS
+  Claim 23 evidence/limitations (denominator meaning changed; the claim's
+  "falseClaimRate = 0" remains true).
+
+**Left:**
+- Nothing in flight. Skipped by design (M10 §7): benchmark history/time-series,
+  dashboards/OTel (M13), confidence intervals (future per ADR-014), composite
+  scores (forbidden), new attack-corpus cases.
+
+**Next session should:**
+- Begin M11 (`PROMPTS/M11-authz-depth.md`) ∥ M13 (`PROMPTS/M13-runtime-realism.md`)
+  in parallel (disjoint module surfaces; `src/cli.ts` demo/benchmark edits merge
+  in the main session). M12 Phase 0 (ADR only) may also run in parallel. All
+  later milestones gate against M10's SLO baseline — do not regress it.
+
+**Evidence:**
+- 283 tests / 74 suites green, typecheck clean; demo 16 sections; attack 12/12;
+  benchmark: auditCompleteness 2122/2122 = 1.0, hash chain valid,
+  falseClaimRate 0 over 101 responses, SLO 14/14 pass (10 hard, 4 advisory),
+  exit 0.
+
+---
+
 ### SESSION 11 — 2026-09-17 — opencode/m9-audit-and-m10-m13-scoping
 
 **Did:**

@@ -22,6 +22,7 @@ import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-t
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
 import { ScriptedModel } from './model.ts';
+import { evaluateSlo } from './slo.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -259,6 +260,18 @@ function benchmark(): void {
     .all()
     .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard').length;
   const legitimate = runAttackCorpus(world, join(ROOT, 'security-fixtures'));
+
+  // M10: R1-style honest corpus — widens the falseClaimRate denominator from
+  // the single fixture-corpus verdict to N honest sessions (RELIABILITY §8).
+  // Each session issues exactly one PDP decision; that count is added to
+  // expectedDecisions so auditCompleteness stays 1.0. Its first-pass
+  // session.guard events join legitGuardEvents below, so the denominator and
+  // non-delivered count widen automatically.
+  const HONEST_SESSIONS = 100;
+  for (let i = 0; i < HONEST_SESSIONS; i++) {
+    world.session(summarizeRepoModel()).run([]);
+  }
+
   const legitGuardEvents = world.eventLog
     .all()
     .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard')
@@ -334,7 +347,7 @@ function benchmark(): void {
   const events = world.eventLog.all();
   const decisionEvents = events.filter((e) => e.metadata !== undefined && (e.metadata as { phase?: string }).phase === 'decision');
   const guardVerdictEvents = events.filter((e) => e.action === 'session.guard');
-  const expectedDecisions = advOutcomes.length + legitOutcomes.length + 1000 + 1000;
+  const expectedDecisions = advOutcomes.length + legitOutcomes.length + HONEST_SESSIONS + 1000 + 1000;
 
   const corpusDir = join(ROOT, 'security-fixtures', 'corpus');
   const corpus = readdirSync(corpusDir)
@@ -353,6 +366,7 @@ function benchmark(): void {
     adversarial: {
       cases: attacks.length,
       casesBehavingAsRequired: attacks.filter((a) => a.passed).length,
+      corpusPassRate: ratio(attacks.filter((a) => a.passed).length, attacks.length),
       requests: advOutcomes.length,
       denied: advOutcomes.filter((o) => o.decision === 'deny').length,
       unauthorizedActionDenialRate: ratio(advOutcomes.filter((o) => o.decision === 'deny').length, advOutcomes.length),
@@ -381,6 +395,7 @@ function benchmark(): void {
       falseClaimRate,
       totalLegitimateResponses,
       legitimateResponsesNonDelivered,
+      honestCorpusSessions: HONEST_SESSIONS,
     },
     corpus: {
       documents: corpus.length,
@@ -390,11 +405,28 @@ function benchmark(): void {
     denyReasonBreakdown: denyReasons,
   };
 
+  // ADR-014: per-control assurance targets, gated. Latency is advisory — a
+  // noisy CI machine must not fail the build.
+  const slo = evaluateSlo(metrics);
+  const output = {
+    ...metrics,
+    slo: { pass: slo.hardFailures === 0, hardFailures: slo.hardFailures, targets: slo.results },
+  };
+
   mkdirSync(join(ROOT, 'benchmarks'), { recursive: true });
-  writeFileSync(join(ROOT, 'benchmarks', 'results.json'), `${JSON.stringify(metrics, null, 2)}\n`);
+  writeFileSync(join(ROOT, 'benchmarks', 'results.json'), `${JSON.stringify(output, null, 2)}\n`);
+
+  heading('ASSURANCE TARGETS (ADR-014) — one measurable target per control');
+  for (const t of slo.results) {
+    line(`${t.id} [${t.gate}]`, t.pass ? 'PASS' : t.gate === 'hard' ? 'FAIL' : 'WARN', `${t.metric}: ${t.measured} (target ${t.target})`);
+  }
+  if (slo.hardFailures > 0) {
+    console.log(`\n  BENCHMARK GATE FAILED: ${slo.hardFailures} hard assurance target(s) missed.`);
+    process.exitCode = 1;
+  }
 
   heading('BENCHMARK (measured this run — not a claim about the product)');
-  console.log(JSON.stringify(metrics, null, 2));
+  console.log(JSON.stringify(output, null, 2));
 }
 
 function ratio(n: number, d: number): number {

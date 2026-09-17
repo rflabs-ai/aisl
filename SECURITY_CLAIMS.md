@@ -853,7 +853,11 @@ event; a first-pass action-claim-mismatch cleared post-execution → one
 double-queue a `CapabilityRequest`). `tests/runtime-drift-fixes.test.ts` — 3
 cases: `metadata.sealed` is a raw `Sealed` object with a string `ciphertext`;
 `metadata.ladderRung` records the rung that fired. Benchmark `guardLatencyP99Ms`
-and `evidence.falseClaimRate` measured per run.
+and `evidence.falseClaimRate` measured per run; since M10 the `falseClaimRate`
+denominator is the fixture guard verdicts plus a 100-session honest R1 corpus
+(101 responses; the sessions' PDP decisions count toward `expectedDecisions`),
+and `falseClaimRate ≤ 0.01` is a `hard` assurance target gated on every
+benchmark run (`src/slo.ts`, `metrics.slo` in `benchmarks/results.json`).
 
 **Test:** `tests/guard.test.ts`, `security-tests/guard-invariants.test.ts`,
 `tests/runtime-second-pass.test.ts`, `tests/runtime-drift-fixes.test.ts`.
@@ -861,7 +865,8 @@ and `evidence.falseClaimRate` measured per run.
 **Known limitations:** verifies *support*, not *truth* — a poisoned source
 yields a well-cited lie (TM-002 residual). Uncited-but-true claims are
 flagged as `unverified-claim` (false-positive budget applies; on the
-current corpus `falseClaimRate = 0`). The `action-claim-mismatch` check
+current corpus `falseClaimRate = 0`, measured since M10 over 101 honest
+responses per benchmark run). The `action-claim-mismatch` check
 matches by verb only (deleted→delete, wrote→write); a noun-vs-resource
 match is a future enhancement. D5 takes the *first* canary match and stops
 the ladder; future versions may enumerate all matches and surface them.

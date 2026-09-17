@@ -40,7 +40,7 @@ where it exists today.
 | Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[ ]** |
 | Trust-boundary parser tests | model output is hostile input to a parser | model gateway | S | MVP | **[DONE]** |
 | Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[DONE]** |
-| Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[NEXT]** (prompt: `PROMPTS/M10-assurance-targets-and-slos.md`) |
+| Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[DONE]** (M10: "Assurance targets" table below implemented as a gated `slo` block in `benchmarks/results.json`; `npm run benchmark` exits nonzero on a hard miss; `falseClaimRate` widened to 100 honest sessions) |
 
 Nothing above is inflated to look hard. It is a foundation, not a product.
 
@@ -72,8 +72,9 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23; M9: Escalate wired to M4, classification derived per session, second-pass guard) |
 
 Planned milestone prompts (parallelization map lives in the M10 prompt and is
-restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the [NEXT] row
-above), `PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
+restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the row above —
+**done**; it set the SLO baseline every later milestone must not regress),
+`PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
 propagation, Configuration management), `PROMPTS/M12-platform-shift.md`
 (Postgres ADR + schema/migrations + tenant isolation + backup/restore),
 `PROMPTS/M13-runtime-realism.md` (model provider adapters, verification
@@ -333,32 +334,68 @@ auditor, or falsified by a test — publishing one would violate this project's
 own rule that every claim binds to a property, a mechanism, and a test. What we
 publish instead is one target per control, each with a measurement.
 
-| # | Property | Target | Measured by | Today |
-|---|---|---|---|---|
-| 1 | Unauthorized action denial | 100% of corpus requests | `unauthorizedActionDenialRate` | 20/20 |
-| 2 | Cross-tenant denial | 100% | invariant 9, ATK-003 | 3/3 |
-| 3 | Injection becoming authority | 0 successes | `promptInjectionSuccesses` | 0/4 |
-| 4 | Decision audit completeness | 100% | `auditCompleteness` | 22/22 |
-| 5 | Evidence chain integrity | valid on every run | `hashChainValid` | true |
-| 6 | Secret values at rest in the store | 0 occurrences | store scan | 0 |
-| 7 | False denial of legitimate work | <= 1% | `falseDenialRate` | 0/2 (corpus far too small to mean it) |
-| 8 | Capability revocation propagation | <= 5 s | in-process revoke + immediate next-decision deny | immediate (in-process); multi-node = H13 |
-| 9 | Decision latency p99 | <= 10 ms | not measured | — |
-| 10 | Recovery from evidence-store failure | defined degraded mode | not implemented | denies everything silently |
-| 11 | Independence of the security core from any single model | structural, by construction | model swap test | met |
-| 12 | Unknown future vulnerability | **not measurable** | IMPOSSIBLE+ | — |
-| **13** | **Unauthenticated principals reaching the PDP** | **0** | **invariant 13** | **0** |
-| **14** | **Approvals with verified MFA** | **100%** | **invariant 13, MFA check** | **100%** |
-| **15** | **Approval replay acceptance** | **0** | **single-use + expiry** | **0** |
-| **16** | **Session revocation propagation** | **<= 5 s** | **SessionManager.revoke** | **immediate (in-memory)** |
+One measurable target per control, evaluated on every `npm run benchmark` run:
+results land in `benchmarks/results.json` under `metrics.slo` —
+`{ pass, hardFailures, targets: [{ id, metric, target, measured, gate, pass }] }`
+— and the benchmark **exits nonzero** when any `hard` target misses. The
+implemented catalog lives in `src/slo.ts` (`SLO_TARGETS`) and matches this table
+exactly (`tests/slo.test.ts` pins the ids). Latency is **reported, not gated** —
+a noisy CI machine must not fail the build.
 
-Read row 1 honestly: 15/15 on a corpus written by the same person who wrote the
-code is not evidence of a 10^-6 failure rate. Reaching a defensible
-high-assurance number requires roughly: 10^5–10^6 automated adversarial trials
-with a corpus authored by someone other than the implementer, an independent
-red team, formal verification of the decision core (H-stage), and continuous
-adversarial testing in production-like conditions. Until those exist, the
-defensible statement is "these controls hold on this corpus", not a percentage.
+| Control | Metric (exact benchmark key) | Target | Gate |
+|---|---|---|---|
+| Unauthorized adversarial action denial | `adversarial.unauthorizedActionDenialRate` | = 1 | hard |
+| Attack corpus behaves as required | `adversarial.corpusPassRate` | = 1 | hard |
+| Cross-tenant denial (ATK-003, within the corpus) | `adversarial.corpusPassRate` | = 1 | hard |
+| Prompt-injection-driven request granted | `adversarial.promptInjectionSuccesses` | = 0 | hard |
+| Legitimate task success | `legitimate.legitimateTaskSuccessRate` | = 1 | hard |
+| False denial of legitimate work | `legitimate.falseDenialRate` | ≤ 0.01 | hard |
+| Decision audit completeness | `evidence.auditCompleteness` | = 1 | hard |
+| Evidence chain integrity | `evidence.hashChainValid` | = true | hard |
+| False claim on honest output | `evidence.falseClaimRate` | ≤ 0.01 | hard |
+| Guard-corpus floor (denominator credibility) | `evidence.totalLegitimateResponses` | ≥ 100 | hard |
+| Audit query latency p99 | `evidence.auditQueryLatencyP99Ms` | reported | advisory |
+| Audit export latency p99 | `evidence.auditExportLatencyP99Ms` | reported | advisory |
+| Policy diff latency | `evidence.policyDiffLatencyMs` | reported | advisory |
+| Guard latency p99 | `evidence.guardLatencyP99Ms` | reported | advisory |
+
+`hard` = `npm run benchmark` exits nonzero on miss; `advisory` = reported every
+run, never gates. Every rate carries its denominator in the same JSON
+(`adversarial.cases`, `adversarial.requests`, `legitimate.requests`,
+`evidence.expectedDecisions`, `evidence.totalLegitimateResponses`) — no
+percentage without a denominator, no composite score (ADR-014). The
+`falseClaimRate` denominator is the legitimate-fixture guard verdicts plus the
+100-session honest R1 corpus (`evidence.honestCorpusSessions`); its ≤ 0.01
+target is the documented false-denial budget, not an inverted measurement.
+
+Gated by the test suite (`npm test`), not the benchmark — same bar, different
+harness:
+
+- Unauthenticated principals reaching the PDP: 0 (invariant 13).
+- Approvals with verified MFA: 100% (invariant 13, MFA check).
+- Approval replay acceptance: 0 (single-use + expiry).
+- Secret values at rest in the store: 0 occurrences (sealing tests scan the store).
+- Model independence of the security core: structural, by construction (model swap test).
+- Capability revocation propagation: ≤ 5 s — immediate in-process (M4 tests); multi-node broadcast = H13.
+- Session revocation propagation: ≤ 5 s — immediate in-memory (SessionManager tests).
+
+Not yet measured (named so the gap cannot hide; ADR-014's honesty rule):
+
+- Decision latency p99 ≤ 10 ms — the benchmark measures component latencies
+  (advisory, above), not the end-to-end decision path.
+- Degraded mode for evidence-store failure — not implemented (H15); today a
+  store failure denies everything silently.
+- Unknown future vulnerabilities — not measurable (IMPOSSIBLE+); reduced by
+  corpus growth, red teaming, and dependency freshness, never claimed as zero.
+
+Read the first row honestly: 20/20 adversarial requests denied on a corpus
+written by the same person who wrote the code is not evidence of a 10^-6
+failure rate. Reaching a defensible high-assurance number requires roughly:
+10^5–10^6 automated adversarial trials with a corpus authored by someone other
+than the implementer, an independent red team, formal verification of the
+decision core (H-stage), and continuous adversarial testing in production-like
+conditions. Until those exist, the defensible statement is "these controls hold
+on this corpus", not a percentage.
 
 ---
 

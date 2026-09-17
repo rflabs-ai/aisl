@@ -30,11 +30,11 @@ to reach tenant B / customer B / restricted material.
 ## Controls
 
 - `src/pdp.ts:273` — tenant equality checked before policy.
-- `src/policy.ts:157` — `@tenant-isolation` deny, independent of any rule set.
+- `src/policy.ts:269` — `@tenant-isolation` deny, independent of any rule set.
 - `src/capability.ts:39` — capabilities bind `subject` and `tenantId`.
 - Classification ceilings enforced twice: capability (`src/capability.ts:239`)
-  and policy rule (`src/policy.ts:171`).
-- Unknown classification labels rank at the ceiling (`src/domain.ts:109`).
+  and policy rule (`src/policy.ts:282`).
+- Unknown classification labels rank at the ceiling (`src/domain.ts:111`).
 
 ## Assumptions
 

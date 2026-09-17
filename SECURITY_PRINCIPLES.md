@@ -50,7 +50,7 @@ not the session, not the network.
 
 - **Mechanism**: scoped, signed, expiring capabilities instead of broad
   credentials. Single-use is available and is consumed on execution.
-- **Code**: `src/capability.ts:128` (mint), `src/pdp.ts:87` (consume).
+- **Code**: `src/capability.ts:128` (mint), `src/pdp.ts:121` (consume).
 - **Test**: `tests/capability.test.ts` — signature tampering, single-use,
   constraints.
 
@@ -59,7 +59,7 @@ not the session, not the network.
 - **Mechanism**: approval is a separate record (`Approval`) that a rule may
   require; issuing a capability and executing an action are distinct operations
   performed by distinct principals.
-- **Code**: `src/policy.ts:53` (`requiresApproval`), `src/pdp.ts:85`.
+- **Code**: `src/policy.ts:134` (`requiresApproval`), `src/pdp.ts:330` (MFA filter).
 - **Test**: `tests/policy.test.ts` — approval-gated rules; demo step 8/9.
 
 ## Defense in Depth
@@ -67,7 +67,7 @@ not the session, not the network.
 - **Mechanism**: an action must clear resource existence, tenant, capability,
   signature, expiry, scope, classification, constraints, and policy. Compromise
   of one check does not grant access.
-- **Code**: `src/pdp.ts:273` -> `src/capability.ts:217` -> `src/policy.ts:167`.
+- **Code**: `src/pdp.ts:273` -> `src/capability.ts:217` -> `src/policy.ts:280`.
 - **Test**: `tests/invariants.test.ts` invariant 1 ("capability alone is not
   enough") — a valid capability for a policy-denied action is still denied.
 
@@ -76,8 +76,8 @@ not the session, not the network.
 - **Mechanism**: default deny at the engine; any thrown error inside
   `evaluate()` becomes a deny; unknown classifications rank at the ceiling;
   unknown resources are denied.
-- **Code**: `src/policy.ts:145` (`NO_MATCH`), `src/pdp.ts:242`,
-  `src/domain.ts:109` (unknown classification rank 100).
+- **Code**: `src/policy.ts:248` (`NO_MATCH`), `src/pdp.ts:321` (evaluate try/catch),
+  `src/domain.ts:111` (unknown classification rank 100).
 - **Test**: invariant 12; `tests/policy.test.ts` unknown-classification case.
 
 ## Explicit Trust Boundaries
@@ -91,7 +91,7 @@ not the session, not the network.
 - **Mechanism**: `Classification` is extensible (`KnownClassification | string`),
   ranked, and enforced at both the capability ceiling and the policy rule
   ceiling. Unrecognised labels rank at maximum, so new domains fail closed.
-- **Code**: `src/domain.ts:111`, `src/capability.ts:239`, `src/policy.ts:171`.
+- **Code**: `src/domain.ts:111`, `src/capability.ts:239`, `src/policy.ts:282`.
 - **Test**: `tests/policy.test.ts` — unknown classification is denied.
 
 ## Model Agnosticism

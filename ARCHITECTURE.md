@@ -84,8 +84,8 @@ model output (untrusted JSON)
              4. verifyCapability: signature, subject, tenant, expiry,
                 single-use, scope, classification ceiling, constraints
                                                         src/capability.ts:217
-             5. policy evaluate: default deny, deny-overrides
-                                                        src/policy.ts:176
+              5. policy evaluate: default deny, deny-overrides
+                                                        src/policy.ts:295
               6. event appended, always                  src/pdp.ts:159
         -> deny: return, nothing executes
         -> allow: sandbox.run(tool.invoke(scoped ctx))
@@ -151,7 +151,7 @@ The brief's plane diagram was sound. Four changes, all recorded in DECISIONS.md:
 
 Each seam is an interface with one trivial implementation today:
 
-- `PolicyEngine` (`src/policy.ts:95`) — swap in Cedar or OPA without touching callers.
+- `PolicyEngine` (`src/policy.ts:175`) — swap in Cedar or OPA without touching callers.
 - `ModelPort` (`src/model.ts:26`) — any provider, any local model.
 - `Sandbox` (`src/runtime.ts:64`) — container today, microVM later.
 - `Check` (`src/verification.ts:30`) — arbitrary post-execution verification.

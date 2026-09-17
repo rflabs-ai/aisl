@@ -483,7 +483,7 @@ extending token life (mitigated by clock tolerance).
 whose reviewer lacks MFA or whose auth has expired, before passing approvals
 to the policy engine.
 
-**Mechanism:** `Approval.reviewerAuth` field (required, `src/policy.ts:62`);
+**Mechanism:** `Approval.reviewerAuth` field (required, `src/policy.ts:142`);
 `hasMfa(a.reviewerAuth)` check in `src/pdp.ts:330` before policy evaluation.
 Session creation (`src/session-manager.ts:66`) also requires MFA.
 
@@ -511,8 +511,8 @@ principal B, and an approval for tenant A cannot authorize actions in tenant B.
 The policy engine's `approvalApplies` function matches on `principalId`,
 `action`, `resourceId`, and expiry — all four must match.
 
-**Mechanism:** `approvalApplies` in `src/policy.ts:120`; tenant equality check
-in `src/policy.ts:157`; PDP tenant guard in `src/pdp.ts:273`.
+**Mechanism:** `approvalApplies` in `src/policy.ts:223`; tenant equality check
+in `src/policy.ts:269`; PDP tenant guard in `src/pdp.ts:273`.
 
 **Threat model:** TM-003 (cross-tenant), TM-001 (approval theft).
 

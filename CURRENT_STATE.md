@@ -7,7 +7,7 @@ Honest snapshot. Updated after M5 — hierarchical resource matching landed.
 TypeScript foundation on Node 24, ~3,500 lines of source across 22 modules
 (`src/`), 166 test assertions (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
-(`security-fixtures/`), four threat models (`threat-models/`), a measured
+(`security-fixtures/`), five threat models (`threat-models/`), a measured
 benchmark (`benchmarks/results.json`), and this documentation set.
 
 Runtime dependencies: **1** (`jose` — JWT/JWK verification, ADR-015). Dev

@@ -339,6 +339,21 @@ three items SESSION 8 deferred and the six drift items the M7/M8 audit found.
    `criticFn`; its flags merge before the ladder. No real critic is wired
    (telemetry only).
 
+## Watch-items from the M9 audit
+
+Not vulnerabilities — deliberate ceilings with named upgrade paths (details in
+Claim 23's limitations and RELIABILITY §8):
+
+1. Derived per-session classification is coarse (max over all principal
+   capabilities and the full content map; conservative by design). Upgrade:
+   derive from per-session granted caps only.
+2. Benchmark `falseClaimRate` denominator is 1 legitimate-corpus verdict per
+   run; the R1 security test (100 honest sessions) is the real measurement.
+   Upgrade: the assurance-targets milestone (M10).
+3. A failed `CapabilityRequestService.submit()` degrades to the text-only
+   withhold without a distinct error marker on the `session.guard` event.
+   Upgrade: a `guard.error` marker.
+
 ## Known assumptions
 
 - The runtime process is not compromised.

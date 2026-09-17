@@ -271,6 +271,11 @@ export class AgentSession {
       availableActions: this.cfg.tools.names() as Action[],
     });
 
+    // ponytail: classification is the max over ALL principal capabilities + the whole
+    // content map, so it is coarse — every session in a mixed-sensitivity world derives
+    // a high label. Conservative by design (more withholding, never less). Upgrade path:
+    // derive from the session's granted caps and actually-ingested resources only, if
+    // coarseness bites. See Claim 23 limitations.
     const classification = deriveClassification({
       capabilities: this.cfg.authorization.capabilitiesFor(this.cfg.principal.id),
       content: this.cfg.content,

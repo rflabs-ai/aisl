@@ -277,7 +277,12 @@ dependency check.
 
 - `falseClaimRate` — the fraction of legitimate-corpus guard verdicts that were
   flagged/repaired/withheld (non-delivered); target within assurance target 7's
-  <= 1% false-denial budget.
+  <= 1% false-denial budget. Benchmark note (M9 audit): the benchmark
+  denominator is currently the legitimate-corpus guard verdicts only (one per
+  run — LEG-002 is network-gated and emits no verdict); the statistically
+  meaningful measurement is the R1 security test (100 honest sessions).
+  Widening the benchmark denominator is the first item of the assurance-targets
+  milestone (`PROMPTS/M10-assurance-targets-and-slos.md`).
 - `withholdRate` — withheld / total responses.
 - `leakWithholdPrecision` — leak withholds that contained a real canary.
 - `guardLatencyP99` — guard must not blow the decision-latency budget

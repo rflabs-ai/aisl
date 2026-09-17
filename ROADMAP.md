@@ -40,7 +40,7 @@ where it exists today.
 | Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[ ]** |
 | Trust-boundary parser tests | model output is hostile input to a parser | model gateway | S | MVP | **[DONE]** |
 | Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[DONE]** |
-| Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[NEXT]** |
+| Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[NEXT]** (prompt: `PROMPTS/M10-assurance-targets-and-slos.md`) |
 
 Nothing above is inflated to look hard. It is a foundation, not a product.
 
@@ -70,6 +70,15 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
 | Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23; M9: Escalate wired to M4, classification derived per session, second-pass guard) |
+
+Planned milestone prompts (parallelization map lives in the M10 prompt and is
+restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the [NEXT] row
+above), `PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
+propagation, Configuration management), `PROMPTS/M12-platform-shift.md`
+(Postgres ADR + schema/migrations + tenant isolation + backup/restore),
+`PROMPTS/M13-runtime-realism.md` (model provider adapters, verification
+pipeline, structured telemetry). M10 runs first — it sets the SLO baseline
+every later milestone must not regress.
 
 ---
 

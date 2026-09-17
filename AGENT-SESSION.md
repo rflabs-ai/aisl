@@ -24,6 +24,52 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 11 — 2026-09-17 — opencode/m9-audit-and-m10-m13-scoping
+
+**Did:**
+- Committed the two snapshots left in the working tree: `b76a2ea` (M6.1 audit
+  drift remediation — SESSION 9's code; its doc entries ride with the M9 commit
+  because the same doc files were entangled) and `270f345` (M9). The pre-commit
+  gate (typecheck + 278 tests) ran on both; working tree clean after.
+- Audited M9 against the prompt's acceptance list (all items verified against
+  evidence, not intent) and the §11 constraints. Six findings, none blocking;
+  all documented so they cannot rot:
+  1. Coarse per-session classification (max over all principal caps + the full
+     content map) — `ponytail:` marker at the `deriveClassification` call site
+     + Claim 23 limitation + CURRENT_STATE watch-item.
+  2. Thin benchmark `falseClaimRate` denominator (0/1; LEG-002 is
+     network-gated and emits no verdict) — RELIABILITY §8 note; the fix is
+     M10's first item.
+  3. Submit-failure observability (fail-closed degrade to text-only, no error
+     marker) — Claim 23 limitation + CURRENT_STATE watch-item.
+  4. Second-pass escalation renders the text-only escalate message — already
+     documented in Claim 23.
+  5. D6 `criticFn` hook is concrete-class-only (intentional) — documented.
+  6. Test nit (abstain/escalate acceptance) — rationale in the test comment.
+- CURRENT_STATE gained a "Watch-items from the M9 audit" section; ARCHITECTURE
+  §2 gained a one-line M9 note (a guard-queued capability request is intent,
+  not authority); RELIABILITY §2's GuardContext snippet was re-synced.
+- Wrote four milestone prompts with explicit parallelization maps:
+  `PROMPTS/M10-assurance-targets-and-slos.md` (the ROADMAP [NEXT] row; runs
+  FIRST and sets the SLO baseline), `PROMPTS/M11-authz-depth.md` (A ∥ B then C),
+  `PROMPTS/M12-platform-shift.md` (Phase 0 ADR parallel with M11/M13; impl:
+  ADR → A → B ∥ C), `PROMPTS/M13-runtime-realism.md` (A ∥ B ∥ C; parallel with
+  M11). ROADMAP [NEXT] row + "Planned milestone prompts" note + SESSION 10
+  next-session pointer updated.
+
+**Left:**
+- Nothing in flight. M10 not started; its prompt is ready.
+
+**Next session should:**
+- Begin M10 (`PROMPTS/M10-assurance-targets-and-slos.md`). The cross-milestone
+  parallelization map is in that prompt and restated in M11–M13.
+
+**Evidence:**
+- 278 tests, typecheck clean; attack harness 12/12; demo 16 sections;
+  benchmark: auditCompleteness 1.0, hash chain valid, falseClaimRate 0.
+
+---
+
 ### SESSION 10 — 2026-09-17 — opencode/m9-guard-followups-and-drift-closure
 
 **Did:**
@@ -87,10 +133,9 @@ was left, and what the next session should pick up.
   its diff carries timestamp/latency/head noise by nature.
 
 **Next session should:**
-- Pick up the next Stage 1 item per ROADMAP (Granular RBAC, Classification
-  propagation, Sandbox lifecycle management, Tenant isolation hardening,
-  Configuration management, or the EASY items), or check `PROMPTS/` for the
-  next milestone prompt.
+- Begin M10 (`PROMPTS/M10-assurance-targets-and-slos.md`, the ROADMAP [NEXT]
+  row). M11–M13 prompts (authz depth, platform shift, runtime realism) and the
+  cross-milestone parallelization map are in `PROMPTS/`.
 
 **Evidence:**
 - 278 tests, 0 failures, 72 suites; typecheck clean (252 prior + 26 new).

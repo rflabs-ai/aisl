@@ -872,7 +872,18 @@ second-pass escalation never submits a second request by design; an escalated
 second-pass verdict therefore renders the text-only escalate message even when
 the first pass queued a request (the first `session.guard` event retains the
 `requestId`). The Escalate rung requires both `classification >= confidential`
-and a configured `CapabilityRequestService`.
+and a configured `CapabilityRequestService`. The per-session classification is
+deliberately coarse: it is the maximum over *all* capabilities the principal
+holds (not only the session's grants) and over the entire `content` map, so
+sessions in a mixed-sensitivity world derive a high label — the conservative
+direction, and what makes Escalate reachable; deriving from per-session granted
+caps only is the upgrade path if coarseness bites. If
+`CapabilityRequestService.submit()` throws, the fail-closed catch degrades to
+the text-only withhold — no `requestId`, no `capability.request` event, and the
+`session.guard` event carries no distinct error marker (a `guard.error` marker
+is the upgrade path). The `criticFn` hook exists only on `GroundedResponseGuard`,
+not on the `ResponseGuard` interface — intentional: the runtime cannot pass a
+critic.
 
 **Residual risk:** LOW for the four cases the test suite exercises. MEDIUM
 in production because generative models hallucinate by construction

@@ -559,3 +559,58 @@ The lockfile pins the exact version; updates require review.
 **Future migration path:** None expected — `jose` is the standard Node.js JWT
 library. If a hardware-backed key operation is needed (HSM/TPM), `jose`
 supports WebCrypto which can be backed by hardware.
+
+---
+
+## ADR-017: Role model — roles narrow issuance, they never mint it
+
+**Context:** M11 (Granular RBAC, Stage 1). `Principal.roles` was a free string
+list that policy rules could match but that had no definition and no effect on
+capability issuance. The alternatives were a full RBAC engine (roles as
+authority sources, role hierarchies, permission matrices) or leaving roles as
+untyped strings.
+
+**Decision:** A role is data: `{ id, tenantId, actions, maxClassification,
+description? }` (`src/policy.ts`, `BASELINE_ROLES`, `ROLE_TABLE_VERSION`). It
+is a NARROWING TEMPLATE over issuance, never a source of authority:
+`AuthorizationService.issueForRole` builds the `IssueRequest` through
+`issueRequestForRole` and delegates to the ordinary `issue()` pipeline, so the
+issuer-kind allowlist, tenant match, and attenuation (ADR-002, invariants 2/3/
+4/6) apply unchanged. An issuance request exceeding the role (action outside
+the set, classification above the ceiling) throws; an omitted classification
+defaults to the role ceiling. `createPolicyEngine` cross-validates allow rules
+that reference roles at construction and refuses any that grant beyond the
+role (including wildcard action sets) with `PolicyCompilationError`. Role
+tables load as versioned, hash-verified bundles (see `src/policy-config.ts`).
+
+**Alternatives:**
+- **Roles as authority sources** (RBAC engine: a role GRANTS its holder
+  rights) — rejected: it duplicates the capability model's job and creates a
+  second path to authority. Here a capability still names explicit resources,
+  and the role only bounds what an issuer may mint.
+- **Role hierarchies / inheritance** — deferred: no operator has outgrown a
+  flat table; inheritance adds a widening path that is hard to audit.
+- **ABAC over principal attributes** — the policy conditions already cover
+  the needed cases (`param-equals`, `network-host-in`); attributes remain
+  matchable via future conditions without a role rework.
+
+**Reasoning:** The invariant that matters is "roles narrow authority; they
+never mint it." A widening template is exactly how over-privileged RBAC ships:
+the role looks like an organization chart but functions as a privilege
+escrow. Throwing on over-reach (instead of silently capping) makes the
+over-privileged request visible at the call site, and cross-validation at
+engine construction keeps the rule set and the role table from drifting apart.
+
+**Security implications:** Issuance through a role cannot exceed the role
+(Claim 24, tested structurally for the whole baseline table). The role table
+itself is configuration: it loads through the versioned-bundle mechanism, so
+tamper is refused and loads are audited (Claim 26). A role defined too widely
+makes wide mints legitimate — the platform constrains scope, not judgment.
+
+**Tradeoffs:** No inheritance, no per-role approval routing, no dynamic role
+CRUD; tables are code-adjacent data with a version bump on shape change.
+Cross-validation only covers roles present in the constructed table.
+
+**Future migration path:** Per-tenant role tables via `RoleBundle`;
+inheritance only if a flat table measurably fails; role-based approval
+routing through the M4 request flow; signed bundles (H10/H12).

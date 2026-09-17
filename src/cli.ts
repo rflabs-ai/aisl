@@ -15,7 +15,10 @@ import { runAttackCorpus } from './attacks.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyRule } from './policy.ts';
 import { type Resource } from './domain.ts';
 import { buildWorld, summarizeRepoModel, TENANT_A } from './scenario.ts';
-import { detectInjectionSignals } from './registry.ts';
+import { defineResource, detectInjectionSignals } from './registry.ts';
+import { AgentSession, LocalSandbox } from './runtime.ts';
+import { AuthorizationService } from './pdp.ts';
+import { policyBundleHash, createEngineFromBundle } from './policy-config.ts';
 import { mockAuth } from './testing.ts';
 import { verifyBundle, eventPublicKey } from './events.ts';
 import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-testing.ts';
@@ -34,7 +37,7 @@ function heading(text: string): void {
   console.log(`\n${text}\n${'-'.repeat(text.length)}`);
 }
 
-function demo(): void {
+async function demo(): Promise<void> {
   const world = buildWorld();
   const r = world.resources;
 
@@ -42,13 +45,13 @@ function demo(): void {
   console.log(`  tenant: ${TENANT_A}   model: scripted (assumed hostile)   sandbox: in-process (no isolation yet)`);
 
   heading('1. Legitimate task');
-  const legitTrace = world.session(summarizeRepoModel()).run([]);
+  const legitTrace = await world.session(summarizeRepoModel()).run([]);
   const legit = legitTrace.steps[0]!;
   line('read repository A', legit.decision.decision === 'allow' ? 'ALLOW' : 'DENY', legit.decision.reason);
   console.log(`         output: ${String(legit.output).split('\n')[0]}`);
 
   heading('2-7. Attacks');
-  const attacks = runAttackCorpus(world, join(ROOT, 'security-attacks'));
+  const attacks = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   for (const a of attacks) {
     const outcome = a.outcomes[0]!;
     const status = a.passed ? (outcome.decision === 'deny' ? 'DENY' : 'ALLOW') : 'FAIL';
@@ -218,7 +221,7 @@ function demo(): void {
     new ScriptedModel('scripted-hostile-escalate-v1', [{ text: 'I deleted', requests: [] }]),
     { capabilityRequestService: requestService },
   );
-  const hostileGuard = hostileSession.run([]).guarded!;
+  const hostileGuard = (await hostileSession.run([])).guarded!;
   line('hostile output, classification >= confidential', hostileGuard.status.toUpperCase(), hostileGuard.text);
   const m9GuardEvent = world.eventLog
     .all()
@@ -235,11 +238,116 @@ function demo(): void {
     m9RequestEvent ? 'LOGGED' : 'MISSING',
     (m9RequestEvent?.metadata as { justification?: string } | undefined)?.justification ?? '',
   );
+
+  heading('17. M11: role-scoped issuance, label propagation, versioned policy bundles');
+
+  // 17a: role-templated issuance — roles narrow authority, they never mint it.
+  const roleCap = world.authorization.issueForRole(world.root, 'worker', world.agent.id, [r.internalDoc!], {
+    actions: ['read'],
+    expiresAt: world.clock.now() + 600_000,
+    provenance: { source: 'policy-grant', note: 'M11 demo: role-templated issuance' },
+  });
+  line('issueForRole(worker) mints at the role ceiling', 'ISSUE', `ceiling=${roleCap.maxClassification} actions=[${roleCap.actions.join(',')}]`);
+  let roleOverreach = '';
+  try {
+    world.authorization.issueForRole(world.root, 'worker', world.agent.id, [r.confidentialDoc!], {
+      actions: ['read'],
+      maxClassification: 'confidential',
+      expiresAt: world.clock.now() + 600_000,
+      provenance: { source: 'policy-grant' },
+    });
+  } catch (e) {
+    roleOverreach = (e as Error).message;
+  }
+  line('role overreach refused (confidential > worker ceiling internal)', roleOverreach ? 'REFUSED' : 'FAIL', roleOverreach);
+  let agentMint = '';
+  try {
+    world.authorization.issueForRole(world.agent, 'worker', world.agent.id, [r.internalDoc!], {
+      actions: ['read'],
+      expiresAt: world.clock.now() + 600_000,
+      provenance: { source: 'policy-grant' },
+    });
+  } catch (e) {
+    agentMint = (e as Error).message;
+  }
+  line('agent cannot mint through a role', agentMint ? 'REFUSED' : 'FAIL', agentMint);
+
+  // 17b: classification propagation — a write lifts the target label to the max
+  // of the data sources the step sees; the label only raises, and the evidence
+  // seals under the derived label's key.
+  const draftId = 'doc:acme-draft-memo';
+  world.registry.add(defineResource({ id: draftId, type: 'document', tenantId: TENANT_A, classification: 'public' }));
+  const m11Policy = createPolicyEngine([
+    ...BASELINE_POLICY,
+    { id: 'allow-agent-write-m11', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['write'], resources: {} },
+  ]);
+  const m11Authz = new AuthorizationService(world.registry, m11Policy, world.eventLog, world.clock.now);
+  m11Authz.issue(world.root, {
+    subject: world.agent.id,
+    tenantId: TENANT_A,
+    resourceIds: [draftId],
+    actions: ['write'],
+    maxClassification: 'restricted',
+    expiresAt: world.clock.now() + 600_000,
+    provenance: { source: 'policy-grant', note: 'M11 demo: write into a public draft' },
+  });
+  // Reduced content map so the demo's derived label is deterministic: the step
+  // sees one confidential source document.
+  const m11Session = new AgentSession({
+    principal: world.agent,
+    agentId: world.agent.id,
+    model: summarizeRepoModel(),
+    task: 'M11 propagation demo',
+    registry: world.registry,
+    authorization: m11Authz,
+    eventLog: world.eventLog,
+    tools: world.tools,
+    sandbox: new LocalSandbox(),
+    content: new Map([[r.confidentialDoc!, world.content.get(r.confidentialDoc!) ?? '']]),
+    now: world.clock.now,
+  });
+  const m11Write = m11Session.attempt({ action: 'write', resourceId: draftId });
+  line(
+    'write into public draft (session holds a confidential source)',
+    m11Write.executed ? 'RAISED' : 'DENY',
+    `${draftId}: public -> ${world.registry.require(draftId).classification}`,
+  );
+  const m11WriteEvent = world.eventLog.all().filter((e) => e.action === 'write' && e.resourceId === draftId).at(-1);
+  const m11Meta = m11WriteEvent?.metadata as { derivedClassification?: string; sealed?: { keyId?: string } } | undefined;
+  line(
+    'derived label recorded; evidence sealed under its key',
+    'SEALED',
+    `derived=${m11Meta?.derivedClassification} key=${m11Meta?.sealed?.keyId}`,
+  );
+
+  // 17c: versioned policy bundle — hash-verified load, tamper refused.
+  const m11BundleBase = {
+    id: 'policy:baseline-v1',
+    version: 1,
+    rules: BASELINE_POLICY,
+    provenance: { source: 'repo:src/policy.ts', reviewedBy: 'user:alice', approvedAt: '2026-09-17T00:00:00Z' },
+  } as const;
+  const m11Bundle = { ...m11BundleBase, hash: policyBundleHash(m11BundleBase) };
+  createEngineFromBundle(m11Bundle, { eventLog: world.eventLog, tenantId: TENANT_A, actor: world.root.id });
+  const policyLoadEvents = world.eventLog.all().filter((e) => e.action === 'policy.load').length;
+  line(
+    'versioned policy bundle loads (hash verified)',
+    policyLoadEvents === 1 ? 'LOAD' : 'FAIL',
+    `v${m11Bundle.version}, ${m11Bundle.rules.length} rules, hash ${m11Bundle.hash.slice(0, 12)}..., policy.load events: ${policyLoadEvents}`,
+  );
+  let tamperRefused = '';
+  const tampered = { ...m11Bundle, rules: [{ ...m11Bundle.rules[0]!, description: 'tampered by an attacker' }] };
+  try {
+    createEngineFromBundle(tampered);
+  } catch (e) {
+    tamperRefused = (e as Error).message;
+  }
+  line('tampered bundle refused (hash mismatch, fail closed)', tamperRefused ? 'REFUSED' : 'FAIL', tamperRefused);
 }
 
-function attack(): void {
+async function attack(): Promise<void> {
   const world = buildWorld();
-  const results = runAttackCorpus(world, join(ROOT, 'security-attacks'));
+  const results = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   heading('ATTACK HARNESS');
   let failed = 0;
   for (const a of results) {
@@ -253,13 +361,13 @@ function attack(): void {
   if (failed > 0) process.exitCode = 1;
 }
 
-function benchmark(): void {
+async function benchmark(): Promise<void> {
   const world = buildWorld();
-  const attacks = runAttackCorpus(world, join(ROOT, 'security-attacks'));
+  const attacks = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   const firstPassGuardCount = world.eventLog
     .all()
     .filter((e) => e.action === 'session.guard' && (e.metadata as { phase?: string } | undefined)?.phase === 'guard').length;
-  const legitimate = runAttackCorpus(world, join(ROOT, 'security-fixtures'));
+  const legitimate = await runAttackCorpus(world, join(ROOT, 'security-fixtures'));
 
   // M10: R1-style honest corpus — widens the falseClaimRate denominator from
   // the single fixture-corpus verdict to N honest sessions (RELIABILITY §8).
@@ -269,7 +377,7 @@ function benchmark(): void {
   // non-delivered count widen automatically.
   const HONEST_SESSIONS = 100;
   for (let i = 0; i < HONEST_SESSIONS; i++) {
-    world.session(summarizeRepoModel()).run([]);
+    await world.session(summarizeRepoModel()).run([]);
   }
 
   const legitGuardEvents = world.eventLog
@@ -434,9 +542,9 @@ function ratio(n: number, d: number): number {
 }
 
 const command = process.argv[2] ?? 'demo';
-if (command === 'demo') demo();
-else if (command === 'attack') attack();
-else if (command === 'benchmark') benchmark();
+if (command === 'demo') await demo();
+else if (command === 'attack') await attack();
+else if (command === 'benchmark') await benchmark();
 else {
   console.error(`unknown command: ${command} (try demo | attack | benchmark)`);
   process.exitCode = 1;

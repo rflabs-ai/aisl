@@ -24,6 +24,77 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 13 — 2026-09-17 — opencode/m11-authz-depth
+
+**Did:**
+- M11 landed from `PROMPTS/M11-authz-depth.md` (three Stage-1 rows, subagents
+  A ∥ B in parallel on disjoint surfaces, C after A; zero new runtime
+  dependencies; main session owned `src/cli.ts` and docs).
+  - **A — Granular RBAC.** `Role` as data (`src/domain.ts`), `BASELINE_ROLES` +
+    `ROLE_TABLE_VERSION` (`src/policy.ts`), `issueRequestForRole`
+    (`src/capability.ts`) + `AuthorizationService.issueForRole` (`src/pdp.ts`,
+    6th optional ctor param = role table) — issuance through a role delegates
+    to the ordinary `issue()` pipeline, so issuer kinds/attenuation/audit are
+    untouched; over-privileged requests throw, unknown roles fail closed.
+    `createPolicyEngine(rules, id, roles?)` cross-validates role-referencing
+    allow rules at construction (action/ceiling/wildcard overreach →
+    `PolicyCompilationError`).
+  - **B — Classification propagation.** `propagateClassification` +
+    `ResourceRegistry.raiseClassification` (raise-only seam),
+    `ingestDocument(..., derivedFrom?)` → `derivedClassification`,
+    runtime write path (`changed: true`) lifts the target label to the max of
+    the step's data sources (capability ceilings excluded — clearance is not a
+    data label), execution events carry `metadata.derivedClassification` and
+    seal under `evidence-key:<derived>`.
+  - **C — Configuration management.** New `src/policy-config.ts`:
+    `PolicyBundle`/`RoleBundle`, `hash = sha256(canonicalJson({version,
+    rules|roles}))`, `loadPolicyBundle`/`loadRoleBundle` fail closed on any
+    mismatch, `createEngineFromBundle` appends exactly one opt-in
+    `policy.load` event, role table loads through the same bundle mechanism.
+    `npm run policy:diff` verifies versioned overlay hashes before diffing;
+    legacy unversioned overlays unchanged.
+- Demo section 17 (`src/cli.ts`): role-templated issuance (mint at ceiling,
+  overreach refused, agent-mint refused), derived-artifact label raise +
+  sealed-key match, versioned bundle load + tamper refusal. Deliberately uses
+  only sync APIs (`attempt()`, no `run()`) so the section is independent of
+  the concurrent M13 async-ModelPort conversion.
+- Docs: ROADMAP (3 rows [DONE] + milestone-paragraph update), CURRENT_STATE
+  (counts 318/85, M11 "What works" bullets, "What M11 closed" ×3, known-gap #6
+  struck with honest residual: hash proves integrity, review gate is git),
+  SECURITY_CLAIMS (Claims 24/25/26), DECISIONS (ADR-017 role model, refs
+  ADR-002), this entry.
+- **Concurrency note:** an M13 session (model provider adapters, async
+  `ModelPort`) is running against this same working tree. M11's commits were
+  built with git plumbing (temp index → `commit-tree`) so M13's in-flight
+  files were never written or staged by this session. M11's `src/runtime.ts`
+  was committed WITHOUT M13's async hunks; M13 will re-apply them on its own
+  integration commit.
+
+**Left:**
+- **Post-M13 audit (owed):** when M13 lands its integration (async `cli.ts`
+  merge), re-run `npm run typecheck && npm test && npm run demo &&
+  npm run benchmark` on the merged tree, reconcile CURRENT_STATE/AGENT-SESSION
+  counts (M11's docs describe the M11-only tree: 318 assertions / 85 suites /
+  28 modules), and verify M13's async changes did not alter M11's seams
+  (`issueForRole`, propagation, bundles).
+- Deferred by design (M11 §8): role inheritance, dynamic role CRUD, ABAC
+  beyond existing conditions, per-role approval routing, signed bundles.
+
+**Next session should:**
+- If M13 has landed: run the post-M13 audit above. Otherwise: M12 Phase 0
+  (Postgres ADR only) — it touches no M11 surface.
+
+**Evidence:**
+- Commit `12ed44b` (M11 code+tests) verified in an isolated worktree:
+  typecheck clean, 318 tests / 85 suites green, `npm run benchmark` exit 0 —
+  all 14 assurance targets pass (10 hard), audit completeness 2122/2122,
+  `falseClaimRate` 0 over 101. No M10 SLO regression.
+- 35 new assertions: RBAC 12 (`tests/m11-rbac.test.ts`), propagation 11
+  (`tests/m11-classification.test.ts`), bundles 12
+  (`tests/m11-policy-config.test.ts`).
+
+---
+
 ### SESSION 12 — 2026-09-17 — opencode/m10-assurance-targets-and-slos
 
 **Did:**

@@ -50,11 +50,11 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 
 | Item | Purpose | Dependencies | Complexity | Class | Status |
 | --- | --- | --- | --- | --- | --- |
-| Granular RBAC | roles compose with capabilities | identity | M | MVP | **[ ]** |
+| Granular RBAC | roles compose with capabilities | identity | M | MVP | **[DONE]** (M11: `Role` as data + `BASELINE_ROLES`, `AuthorizationService.issueForRole` role-templated issuance, `createPolicyEngine` cross-validates role-referencing allow rules at construction; Claim 24) |
 | Policy testing framework | unit-test rules, simulate and diff changes | policy | M | MVP | **[DONE]** (M7: `src/policy-testing.ts`, JSON fixtures, `npm run policy:diff`; Claim 22) |
 | Approval workflow | separation of duties as a first-class object | identity, policy | M | MVP | **[DONE]** |
 | Capability request flow | agent asks, human grants, narrow | approval, PDP | M | MVP | **[DONE]** |
-| Classification propagation | labels flow to derived artifacts | registry, ingestion | L | P | **[ ]** |
+| Classification propagation | labels flow to derived artifacts | registry, ingestion | L | P | **[DONE]** (M11: `propagateClassification` + raise-only `raiseClassification`, write path lifts labels, events seal under `evidence-key:<derived>`; Claim 25) |
 | Secrets brokerage (real backend) | KMS-backed, dynamic, audited | ADR-008 | L | E | **[DONE]** |
 | Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[DONE]** |
 | Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[DONE]** |
@@ -65,7 +65,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Structured telemetry (OTel) | observability without ad-hoc logs | — | M | P | **[ ]** |
 | Postgres schema + migrations | multi-node control plane | ADR-010 | M | P | **[ ]** |
 | Audit query + export API | customers read their own evidence | events | M | MVP | **[DONE]** (M6: authorized, tenant-scoped, offline verifyBundle, Claim 21) |
-| Configuration management | versioned, reviewable, attributable | policy | M | P | **[ ]** |
+| Configuration management | versioned, reviewable, attributable | policy | M | P | **[DONE]** (M11: `PolicyBundle`/`RoleBundle`, sha256 over `canonicalJson({version, rules|roles})` verified fail-closed, one `policy.load` event per load, `policy:diff` verifies versioned overlays; the review gate is git; Claim 26) |
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
@@ -75,10 +75,12 @@ Planned milestone prompts (parallelization map lives in the M10 prompt and is
 restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the row above —
 **done**; it set the SLO baseline every later milestone must not regress),
 `PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
-propagation, Configuration management), `PROMPTS/M12-platform-shift.md`
+propagation, Configuration management — **done**; A/B subagents ran in
+parallel on disjoint surfaces, C consumed A's role surface),
+`PROMPTS/M12-platform-shift.md`
 (Postgres ADR + schema/migrations + tenant isolation + backup/restore),
 `PROMPTS/M13-runtime-realism.md` (model provider adapters, verification
-pipeline, structured telemetry). M10 runs first — it sets the SLO baseline
+pipeline, structured telemetry). M10 ran first — it set the SLO baseline
 every later milestone must not regress.
 
 ---

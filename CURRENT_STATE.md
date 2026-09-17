@@ -1,13 +1,15 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M10 — assurance targets + SLO gate (ADR-014):
-a gated `slo` block on every benchmark run, and the `falseClaimRate`
-denominator widened to 100 honest sessions.
+Honest snapshot. Updated after M11 — authz depth (granular RBAC,
+classification propagation, policy bundles): roles narrow authority and never
+mint it, derived labels only raise, and policy loads are hash-verified
+artifacts. M10's SLO gate remains the non-regression baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~5,500 lines of source across 27 modules
-(`src/`), 283 test assertions (`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~5,900 lines of source across 28 modules
+(`src/` — `policy-config.ts` is M11's addition), 318 test assertions
+(`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
@@ -94,6 +96,37 @@ dependencies: `typescript`, `@types/node`.
   is a raw `Sealed` object and `metadata.ladderRung` records the rung that fired.
   The D6 critic hook is callable (`guard(ctx, criticFn?)`) but no real critic is
   wired.
+- **Granular RBAC (M11):** roles are first-class data (`Role`: id, tenantId,
+  actions, `maxClassification` ceiling; `BASELINE_ROLES` + `ROLE_TABLE_VERSION`
+  in `src/policy.ts`). `AuthorizationService.issueForRole` mints through the
+  ordinary `issue()` pipeline — issuer kinds, tenant match, attenuation
+  (invariant 6, ADR-002), registration, and audit all apply unchanged — so a
+  capability minted through a role can never exceed the role, and roles never
+  mint authority. `createPolicyEngine` cross-validates allow rules that
+  reference roles at construction: granting an action outside the role's set,
+  a classification above the role's ceiling, or a wildcard action set is a
+  `PolicyCompilationError` (fail closed).
+- **Classification propagation (M11):** `propagateClassification`
+  (`src/registry.ts`) takes the max label by `classificationRank` — unknown
+  labels rank 100 and win, labels only raise, never lower. `ingestDocument`
+  reports a `derivedClassification` when `derivedFrom` sources are given;
+  `ResourceRegistry.raiseClassification` is the raise-only seam; and the
+  runtime write path (a tool step with `changed: true`) lifts the target's
+  label to the max of the data sources the step sees (capability ceilings are
+  deliberately excluded — clearance is not a data label). Derived-artifact
+  events carry `metadata.derivedClassification` and seal under
+  `evidence-key:<derived>`; a derived label feeds ceilings, never grants.
+- **Configuration management (M11):** policy and role tables are versioned
+  bundles (`PolicyBundle`/`RoleBundle` in `src/policy-config.ts`) with
+  `hash = sha256(canonicalJson({ version, rules | roles }))`.
+  `loadPolicyBundle`/`loadRoleBundle` recompute and refuse any mismatch before
+  anything compiles or logs. `createEngineFromBundle` builds the engine and —
+  opt-in via `eventLog` — appends exactly one `policy.load` event (version,
+  hash, rule count, provenance); plain-rule engines append nothing.
+  `npm run policy:diff` verifies versioned overlay hashes before diffing;
+  legacy unversioned overlays still load. Stated honestly: authoring is still
+  in-repo and the review gate is git — this is a verified artifact, not a
+  policy service.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
   ceilings, tenant isolation, deterministic output.
 - Authorization: capability AND policy, fail-closed on any internal error.
@@ -124,8 +157,8 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 283 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
-M6, M7, M8, M9, M10:
+All 318 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
+M6, M7, M8, M9, M10, M11:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -134,7 +167,8 @@ network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
 principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
 lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export (29)**
 | **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**
-| **M9 guard follow-ups + drift closure (26)** | **M10 assurance-target gate (5)**.
+| **M9 guard follow-ups + drift closure (26)** | **M10 assurance-target gate (5)**
+| **M11 authz depth (35: RBAC 12, propagation 11, bundles 12)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -149,13 +183,14 @@ Measured this run (`benchmarks/results.json`):
 - Prompt-injection-driven requests: 4; successes: 0.
 - Legitimate tasks: 2/2 allowed; false-denial rate 0.
 - Audit completeness: 2122/2122 decisions recorded; hash chain valid.
-- Audit query latency p99: 0.262 ms; audit export latency p99: 0.255 ms.
-- Policy diff latency: 0.117 ms (one run, sub-ms).
-- Guard latency p99: 0.009 ms (1000 runs of a small honest input).
+- Audit query latency p99: 0.250 ms; audit export latency p99: 0.271 ms.
+- Policy diff latency: 0.109 ms (one run, sub-ms).
+- Guard latency p99: 0.006 ms (1000 runs of a small honest input).
 - `falseClaimRate` 0 over 101 legitimate responses (fixture guard verdicts +
   100 honest R1-style sessions; target ≤ 1%).
 - SLO gate: all 14 assurance targets pass (10 hard, 4 advisory);
-  `metrics.slo.pass = true`, exit code 0.
+  `metrics.slo.pass = true`, exit code 0. M11 added no new hard targets and
+  regressed none.
 
 These numbers describe a 12-case corpus written by the same person who wrote the
 code. They are not evidence of security against a competent adversary.
@@ -192,8 +227,14 @@ Ordered by severity.
 5. **No resource limits at the process level.** The container sandbox enforces
    memory/CPU/PID limits when Docker is available; the host process itself has no
    quotas, timeouts, budgets, or rate limiting.
-6. **Policy is code.** Anyone who can edit the repository can edit the security
-   boundary. No signature, versioning, review gate, or attribution.
+6. ~~**Policy is code.**~~ **M11 closed (honestly, in part)**: policy and role
+   tables load as versioned, attributed, hash-verified bundles
+   (`src/policy-config.ts`); a tampered bundle is refused before any rule
+   compiles or any event logs, and every bundle load is recorded as a
+   `policy.load` event. What remains true: authoring is still in-repo and the
+   review gate is git — the hash proves integrity, not review. A committer can
+   recompute a hash; signatures and an out-of-band approval service are the
+   next step (H10/H12 territory).
 7. **Shared process for all tenants.** Logical isolation only; one memory-safety
    bug crosses every boundary. Container sandbox isolates per-task when Docker is
    available.
@@ -376,6 +417,44 @@ benchmark run" promise and the M9 audit's thin-denominator caveat.
    101 and the non-delivered count covers all of them. The sessions' PDP
    decisions are added to `expectedDecisions`, keeping `auditCompleteness` at
    1.0 (test-asserted).
+
+## What M11 closed
+
+M11 was the authz-depth milestone (three Stage-1 rows, subagents A ∥ B then C,
+zero new runtime dependencies). It did not change the decision semantics —
+capability AND policy still gate every action — it narrowed what can be
+granted and made the grant surface a verified artifact.
+
+1. ~~**Roles were free strings with no definition and no effect on issuance.**~~
+   `Role` is data (`src/policy.ts`: `BASELINE_ROLES`, `ROLE_TABLE_VERSION`):
+   an action set bounded by a classification ceiling, tenant-scoped
+   (`'*'` = tenant-agnostic). `AuthorizationService.issueForRole` builds the
+   `IssueRequest` through `issueRequestForRole` (`src/capability.ts`) and then
+   flows through the ordinary `issue()` pipeline, so issuer kinds, tenant
+   match, and attenuation (invariant 6, ADR-002) apply unchanged. A role can
+   never widen a mint: over-privileged requests throw, unknown roles fail
+   closed, and a principal that could not mint before still cannot.
+   `createPolicyEngine` rejects allow rules that grant a referenced role more
+   than the role holds (actions, classification, wildcards) at construction.
+2. ~~**Classification was fixed at `defineResource`; derived artifacts
+   inherited nothing.**~~ `propagateClassification` computes the max label by
+   `classificationRank` (unknown labels rank 100 and win); `ingestDocument`
+   reports `derivedClassification` for `derivedFrom` sources;
+   `ResourceRegistry.raiseClassification` is the raise-only seam; the runtime
+   write path lifts a written target to the max of the step's data sources and
+   the execution event records `metadata.derivedClassification`, sealed under
+   `evidence-key:<derived>`. Labels only raise; a derived label feeds
+   ceilings, never grants.
+3. ~~**Policy had no version, signature, review gate, or attribution
+   (known-gap #6).**~~ `PolicyBundle`/`RoleBundle` (`src/policy-config.ts`)
+   carry `version`, `provenance`, and `hash = sha256(canonicalJson({ version,
+   rules | roles }))`; `loadPolicyBundle`/`loadRoleBundle` verify and refuse
+   any mismatch before compilation or logging; `createEngineFromBundle`
+   appends exactly one `policy.load` event (opt-in seam); `npm run policy:diff`
+   verifies versioned overlays before diffing and still loads legacy
+   unversioned ones. Stated honestly: authoring is still in-repo, the review
+   gate is git, and a hash proves integrity rather than review — the
+   residual is recorded in known-gap #6 and Claim 26.
 
 ## Watch-items from the M9 audit
 

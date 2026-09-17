@@ -897,3 +897,171 @@ for consequential claims, not detecting all hallucinations. The second pass
 reduces false positives from pre-execution flags; it is a quality gate, not a
 new boundary.
 
+---
+
+## Claim 24 — Role-templated issuance cannot exceed the role (M11)
+
+**Claim:** A capability minted through `AuthorizationService.issueForRole` never
+grants an action outside the referenced role's action set and never carries a
+classification ceiling above the role's ceiling. Issuing through a role never
+bypasses the ordinary issuance checks: a principal that could not mint before
+still cannot, and a non-root issuer still attenuates against its own authority.
+
+**Mechanism:** `issueRequestForRole` (`src/capability.ts`) resolves the role
+from the table the service was constructed with (id + tenant match, `'*'` =
+tenant-agnostic), throws on unknown/invisible roles, throws when requested
+actions leave the role's set, throws when a requested `maxClassification`
+outranks the role ceiling (an omitted ceiling defaults TO the role ceiling —
+never silently capped beyond it), and returns a plain `IssueRequest`. That
+request flows through `issueCapability` unchanged, so `CAPABILITY_ISSUER_KINDS`
+(invariant 2), tenant match (invariant 9), and attenuation (invariant 6,
+ADR-002) are enforced where they always were. `createPolicyEngine`
+cross-validates allow rules that reference roles at construction: an action
+outside the role's set, a classification above the role's ceiling, or a
+wildcard action set is a `PolicyCompilationError` — fail closed, before any
+decision is made.
+
+**Threat model:** TM-001 (a compromised model or tool convincing a caller to
+mint through a role), TM-003 (role overreach across tenants).
+
+**Assumptions:** the role table is the operator's intent (it is data loaded at
+construction; bundles make it a verified artifact — Claim 26); the runtime is
+not compromised.
+
+**Evidence:** `tests/m11-rbac.test.ts` — 12 cases: role caps issuance (mint at
+ceiling, narrower requests win); over-privileged issuance throws (action
+outside the role, classification above the ceiling); unknown role fails closed;
+roles are tenant-scoped; roles never mint (agent issuers refuse, non-root
+issuers attenuate — `must present its own authority` / `exceeds issuer
+authority`); cross-validation rejects widening rules (action, classification,
+wildcard) and skips deny rules and unknown-role references; tampering a
+role-minted capability fails the signature check; a role-minted capability used
+above its ceiling denies with `classification-ceiling`; structural invariant —
+every baseline role mints only its own actions at or below its own ceiling.
+
+**Test:** `tests/m11-rbac.test.ts`.
+
+**Known limitations:** roles narrow issuance; they are not an ABAC system —
+no role inheritance, no nested roles, no dynamic role CRUD (upgrade path when
+operators define more than a handful of roles). Rules referencing roles absent
+from the constructed table are not validated (org tables may define them
+elsewhere) — cross-validation is only as strong as the table it is given. The
+baseline table is tenant-agnostic; per-tenant role tables load through
+`RoleBundle` (Claim 26).
+
+**Residual risk:** an operator who defines an over-broad role has made the
+over-broad mint legitimate — the control constrains scope, it does not judge
+judgment (same shape as Claim 1's limitation).
+
+---
+
+## Claim 25 — Propagation only raises (M11)
+
+**Claim:** A derived artifact's classification is the maximum rank of its source
+labels; it can only raise, never lower; an unknown label outranks every known
+label; and a derived label never grants authority — it only feeds ceilings
+(capability ceilings, policy `maxClassification`, sealing keys).
+
+**Mechanism:** `classificationRank` (`src/domain.ts`) ranks unknown labels at
+100, so a typo or org-specific label fails toward sensitivity.
+`propagateClassification` (`src/registry.ts`) is a max-by-rank over the current
+label plus source labels — no new ranking logic. `ingestDocument` reports
+`derivedClassification` when `derivedFrom` sources are given (pure — callers
+apply it). `ResourceRegistry.raiseClassification` refuses to lower, returns
+undefined for unknown ids, and never creates resources. The runtime write path
+(`AgentSession.attempt` with `changed: true`) derives from data sources only —
+the session's content map plus the target resource; capability ceilings are
+deliberately EXCLUDED (clearance is not a data label) — then raises the target
+in the registry and records the derived label: the execution event carries
+`metadata.derivedClassification` and the output seals under
+`evidence-key:<derived>`, so the sealing key matches the derived sensitivity.
+
+**Threat model:** TM-002 (H4 failure mode: "classification lost on derived
+content"), TM-003.
+
+**Assumptions:** the source labels in the registry and content map are correct
+(propagation inherits whatever the inputs claim); the runtime is not
+compromised.
+
+**Evidence:** `tests/m11-classification.test.ts` — 11 cases: derived-from-
+confidential is confidential; public + phi → phi; unknown label wins; labels
+never lower; `ingestDocument` reports the derived label only when
+`derivedFrom` is given; `raiseClassification` raises, refuses to lower, and
+never creates; end-to-end write path — a write into a public draft from a
+session holding a confidential source raises the target, records
+`metadata.derivedClassification`, and seals under `evidence-key:confidential`
+(= `keyIdFor('confidential')`); a second write with no higher sources leaves
+the label at confidential.
+
+**Test:** `tests/m11-classification.test.ts`.
+
+**Known limitations:** deliberately coarse — the write path takes the max over
+the session's whole content map, not a per-document lineage (the same
+conservative coarseness as the guard's session classification; content-level
+lineage is the Stage-3 "Advanced provenance" row). The ingest path is pure by
+design: `ingestDocument` reports the derived label, and the caller must apply
+it to the registry — nothing downstream raises automatically on ingest alone.
+
+**Residual risk:** a source labeled too low propagates a too-low label —
+propagation is only as honest as the labels it inherits.
+
+---
+
+## Claim 26 — Policy bundles fail closed on tamper (M11)
+
+**Claim:** A policy or role table loaded as a versioned bundle is refused unless
+its hash matches `sha256(canonicalJson({ version, rules | roles }))`. A refused
+bundle never compiles rules, never constructs an engine, and never appends an
+event. Every successful bundle load through the seam is recorded as exactly one
+`policy.load` event with version, hash, rule count, and provenance.
+
+**Mechanism:** `src/policy-config.ts` — `PolicyBundle`/`RoleBundle` carry `id`,
+`version`, the payload (`rules`/`roles`), `provenance`
+(`source`, optional `reviewedBy`/`approvedAt`), and `hash`;
+`policyBundleHash`/`roleBundleHash` compute it over `canonicalJson` (deterministic
+across runs and platforms — `src/domain.ts`); `loadPolicyBundle`/`loadRoleBundle`
+reject structurally broken bundles, recompute the hash, and throw
+`PolicyBundleError` on any mismatch; `createEngineFromBundle` verifies first,
+builds via `createPolicyEngine` (which also runs Claim 24's role
+cross-validation against the bundled role table), and — opt-in via
+`opts.eventLog` — appends exactly one `policy.load` event; plain
+`createPolicyEngine` calls append nothing (the seam stays optional).
+`npm run policy:diff` (`src/policy-diff.ts`) routes versioned overlays through
+`loadPolicyBundle` before any engine is built and aborts on mismatch; legacy
+unversioned overlays load unchanged.
+
+**Threat model:** TM-003/H3 (adversarial policy conditions), H10 (supply chain —
+the bundle hash is the review artifact's fingerprint).
+
+**Assumptions:** the hash function is intact; whoever verifies the bundle has
+the authentic hash out of band (git history, review record); the runtime is not
+compromised.
+
+**Evidence:** `tests/m11-policy-config.test.ts` — 12 cases: a well-formed
+baseline bundle loads and the engine behaves like the baseline (allow +
+default-deny spot checks); tampered rules refuse (loader and
+`createEngineFromBundle`); structural breakage refuses (missing id/version/
+rules, non-array rules, non-string hash); the mismatch names the bundle id;
+exactly one `policy.load` event per successful load with version/hash/
+ruleCount/bundleId/provenance, a second load appends one more, plain engines
+append none; a refused bundle appends zero events; role bundles verify, refuse
+on tamper, and drive role cross-validation (a bundled-role overgrant throws
+`PolicyCompilationError`); `policy:diff` subprocess: versioned overlay exits 0
+with `"<n> changed"`, tampered overlay exits nonzero naming the hash mismatch,
+legacy overlay still exits 0.
+
+**Test:** `tests/m11-policy-config.test.ts`.
+
+**Known limitations:** stated honestly — the hash proves integrity, not review.
+Authoring is still in-repo and the review gate is git; a committer can recompute
+a hash, so this is not a signature scheme and not a policy service.
+`provenance` is unverified metadata. Bundle format versioning starts at 1 with
+no migration tooling. No signature, no external anchoring, no approval routing
+(H10/H12 territory — the upgrade path is signed bundles with an out-of-band
+approval record).
+
+**Residual risk:** an attacker with commit access can ship a tampered bundle
+with a recomputed hash; the defense is the same one that guards every other
+line in the repo — review — plus the `policy.load` evidence trail, which makes
+the load attributable and detectable after the fact.
+

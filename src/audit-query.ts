@@ -15,7 +15,7 @@ import {
   type AuthorizationDecision,
 } from './domain.ts';
 import {
-  EventLog,
+  type EventStore,
   type SecurityEvent,
   type AuditFilters,
   type AuditExport,
@@ -50,12 +50,12 @@ const MAX_TIME_RANGE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
 
 export class AuditQueryService {
   private readonly authorization: AuthorizationService;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
   private readonly clock: () => number;
 
   constructor(
     authorizationOrRegistry: AuthorizationService | ResourceRegistry,
-    eventLog: EventLog,
+    eventLog: EventStore,
     policyOrClock?: PolicyEngine | (() => number),
     clockOrIdp?: (() => number) | (() => IdPHealth),
     idpHealth?: () => IdPHealth,

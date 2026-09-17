@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { runAttackCorpus } from './attacks.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyRule } from './policy.ts';
 import { type Resource } from './domain.ts';
-import { buildWorld, summarizeRepoModel, TENANT_A } from './scenario.ts';
+import { buildWorld, summarizeRepoModel, TENANT_A, whenWorldReady } from './scenario.ts';
 import { defineResource, detectInjectionSignals } from './registry.ts';
 import { AgentSession, LocalSandbox } from './runtime.ts';
 import { AuthorizationService } from './pdp.ts';
@@ -42,6 +42,7 @@ function heading(text: string): void {
 
 async function demo(): Promise<void> {
   const world = buildWorld();
+  await whenWorldReady(world);
   const r = world.resources;
 
   heading('MVP DEMO — high-assurance AI execution environment');
@@ -486,6 +487,7 @@ async function demo(): Promise<void> {
 
 async function attack(): Promise<void> {
   const world = buildWorld();
+  await whenWorldReady(world);
   const results = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   heading('ATTACK HARNESS');
   let failed = 0;
@@ -502,6 +504,7 @@ async function attack(): Promise<void> {
 
 async function benchmark(): Promise<void> {
   const world = buildWorld();
+  await whenWorldReady(world);
   const attacks = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   const firstPassGuardCount = world.eventLog
     .all()

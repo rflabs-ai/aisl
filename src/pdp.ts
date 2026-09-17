@@ -26,7 +26,7 @@ import {
   deny,
   isAuthenticated,
 } from './domain.ts';
-import { type EventLog, type SecurityEvent, type AuditFilters } from './events.ts';
+import { type EventStore, type SecurityEvent, type AuditFilters } from './events.ts';
 import { BASELINE_ROLES, type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
@@ -62,7 +62,7 @@ export class AuthorizationService {
   private readonly revoked = new Map<string, RevokedCapability>();
   private readonly registry: ResourceRegistry;
   private readonly engine: PolicyEngine;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
   private readonly now: () => number;
   private readonly idpHealth?: () => IdPHealth;
   private readonly roles: readonly Role[];
@@ -70,7 +70,7 @@ export class AuthorizationService {
   constructor(
     registry: ResourceRegistry,
     engine: PolicyEngine,
-    eventLog: EventLog,
+    eventLog: EventStore,
     now: () => number = Date.now,
     idpHealth?: () => IdPHealth,
     roles: readonly Role[] = BASELINE_ROLES,

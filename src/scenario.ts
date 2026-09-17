@@ -6,7 +6,8 @@
  */
 
 import { type Action, type ActionRequest, type AuthContext, type Principal } from './domain.ts';
-import { EventLog } from './events.ts';
+import { EventLog, type EventStore } from './events.ts';
+import { PostgresEventLog } from './event-store-pg.ts';
 import { NetworkGateway } from './gates.ts';
 import { EnvelopeSecretBroker } from './envelope-secrets.ts';
 import { type ModelPort, ScriptedModel } from './model.ts';
@@ -62,7 +63,7 @@ export function createClock(start = Date.UTC(2026, 0, 1)): Clock {
 
 export interface World {
   readonly registry: ResourceRegistry;
-  readonly eventLog: EventLog;
+  readonly eventLog: EventStore;
   readonly authorization: AuthorizationService;
   readonly policy: PolicyEngine;
   readonly tools: ToolRegistry;
@@ -137,7 +138,13 @@ export const AUDIT_POLICY_RULE: PolicyRule = {
 export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
-  const eventLog = new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+  const eventLog: EventStore = process.env.DATABASE_URL
+    ? new PostgresEventLog({
+        url: process.env.DATABASE_URL,
+        ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
+        ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
+      })
+    : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
 
   registry.add(defineResource({ id: RESOURCE_IDS.repoA, type: 'repository', tenantId: TENANT_A, classification: 'internal' }));
   registry.add(defineResource({ id: RESOURCE_IDS.internalDoc, type: 'document', tenantId: TENANT_A, classification: 'internal' }));
@@ -277,6 +284,15 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
       });
     },
   };
+}
+
+/**
+ * Postgres mode: the store connects/migrates asynchronously. Callers (cli,
+ * tests) must await readiness before any decision, or every append until
+ * ready fails closed. No-op for the synchronous SQLite/in-memory backends.
+ */
+export async function whenWorldReady(world: World): Promise<void> {
+  if (world.eventLog instanceof PostgresEventLog) await world.eventLog.whenReady();
 }
 
 export function summarizeRepoModel(): ModelPort {

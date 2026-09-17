@@ -20,7 +20,7 @@ import {
   type PolicyEngine,
   type PolicyRule,
 } from './policy.ts';
-import type { EventLog } from './events.ts';
+import type { EventStore } from './events.ts';
 
 export interface BundleProvenance {
   /** Where the bundle came from (e.g. 'repo:src/policy/baseline.json'). */
@@ -130,7 +130,7 @@ export function loadRoleBundle(bundle: RoleBundle): RoleBundle {
  */
 export function createEngineFromBundle(
   bundle: PolicyBundle,
-  opts: { roleBundle?: RoleBundle; eventLog?: EventLog; tenantId?: string; actor?: string } = {},
+  opts: { roleBundle?: RoleBundle; eventLog?: EventStore; tenantId?: string; actor?: string } = {},
 ): PolicyEngine {
   const verified = loadPolicyBundle(bundle);
   const roles = opts.roleBundle ? loadRoleBundle(opts.roleBundle).roles : BASELINE_ROLES;

@@ -20,7 +20,7 @@ import {
   type DenyReason,
   type Principal,
 } from './domain.ts';
-import { type EventLog } from './events.ts';
+import { type EventStore } from './events.ts';
 import { ModelOutputError, type ModelInput, type ModelOutput, type ModelPort, parseModelOutput } from './model.ts';
 import { type AuthorizationService } from './pdp.ts';
 import { type ResourceRegistry } from './registry.ts';
@@ -56,7 +56,7 @@ export interface HttpModelConfig {
   readonly principal: Principal;
   readonly authorization: AuthorizationService;
   readonly registry: ResourceRegistry;
-  readonly eventLog: EventLog;
+  readonly eventLog: EventStore;
   /** Egress classification ceiling. Derived classification above this is refused before the PDP is consulted. */
   readonly ceiling: Classification;
   /** Synthetic provider resource the PDP gates `model.invoke` on. */

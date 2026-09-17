@@ -14,7 +14,7 @@
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
 import { defineResource } from './registry.ts';
 import type { AuthorizationService } from './pdp.ts';
-import type { EventLog } from './events.ts';
+import type { EventStore } from './events.ts';
 import type { ResourceRegistry } from './registry.ts';
 import type { Principal } from './domain.ts';
 import type { Approval } from './policy.ts';
@@ -76,10 +76,10 @@ export class EnvelopeSecretBroker {
   private readonly secrets = new Map<string, EnvelopeSecretRecord>();
   private readonly masterKey: Buffer;
   private readonly authorization: AuthorizationService;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
   private readonly registry: ResourceRegistry;
 
-  constructor(masterKey: Buffer, authorization: AuthorizationService, eventLog: EventLog, registry: ResourceRegistry) {
+  constructor(masterKey: Buffer, authorization: AuthorizationService, eventLog: EventStore, registry: ResourceRegistry) {
     this.masterKey = masterKey;
     this.authorization = authorization;
     this.eventLog = eventLog;

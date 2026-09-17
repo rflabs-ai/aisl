@@ -9,7 +9,7 @@
 
 import type { Approval } from './policy.ts';
 import type { AuthorizationService } from './pdp.ts';
-import { type EventLog } from './events.ts';
+import { type EventStore } from './events.ts';
 import { type Principal } from './domain.ts';
 import { type ResourceRegistry, defineResource } from './registry.ts';
 
@@ -33,9 +33,9 @@ export interface NetworkResult {
 export class NetworkGateway {
   private readonly registry: ResourceRegistry;
   private readonly authorization: AuthorizationService;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
 
-  constructor(registry: ResourceRegistry, authorization: AuthorizationService, eventLog: EventLog) {
+  constructor(registry: ResourceRegistry, authorization: AuthorizationService, eventLog: EventStore) {
     this.registry = registry;
     this.authorization = authorization;
     this.eventLog = eventLog;
@@ -108,9 +108,9 @@ export class SecretBroker {
   private readonly secrets = new Map<string, SecretRecord>();
   private readonly registry: ResourceRegistry;
   private readonly authorization: AuthorizationService;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
 
-  constructor(registry: ResourceRegistry, authorization: AuthorizationService, eventLog: EventLog) {
+  constructor(registry: ResourceRegistry, authorization: AuthorizationService, eventLog: EventStore) {
     this.registry = registry;
     this.authorization = authorization;
     this.eventLog = eventLog;

@@ -83,6 +83,147 @@ export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'even
 export const GENESIS_HASH = '0'.repeat(64);
 
 /**
+ * The evidence-plane port (ADR-018): exactly the public surface of EventLog.
+ * Two implementations: EventLog (SQLite + in-memory, the default for
+ * single-node, on-prem, air-gapped, and every run without DATABASE_URL) and
+ * PostgresEventLog (src/event-store-pg.ts). Consumers that only need the port
+ * are typed against this interface, never the concrete class.
+ */
+export interface EventStore {
+  append(input: EventInput): SecurityEvent;
+  all(): readonly SecurityEvent[];
+  forTenant(tenantId: string): readonly SecurityEvent[];
+  query(filters: AuditFilters): readonly SecurityEvent[];
+  exportFor(filters: AuditFilters): AuditExport;
+  verify(options?: { publicKey?: KeyObject }): ChainVerification;
+  bundle(): string;
+  anchor(): string;
+  close(): void;
+}
+
+/** Append one `<seq>:<eventHash>` line to the anchor file (M3 format). */
+export function appendAnchorLine(anchorPath: string, event: SecurityEvent): void {
+  const dir = dirname(anchorPath);
+  if (dir && dir !== '.' && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(anchorPath, `${event.seq}:${event.eventHash}\n`, 'utf8');
+}
+
+/** Read the full anchor file content. Empty string when unconfigured or absent. */
+export function readAnchor(anchorPath?: string): string {
+  if (!anchorPath) return '';
+  if (!existsSync(anchorPath)) return '';
+  return readFileSync(anchorPath, 'utf8');
+}
+
+/**
+ * In-memory filter semantics shared by both EventStore backends: tenant is
+ * required, seq/time bounds are inclusive/exclusive as documented, and the
+ * limit clamp (default 100, max 1000) matches the SQLite query path.
+ */
+export function filterEvents(
+  events: readonly SecurityEvent[],
+  filters: AuditFilters,
+): readonly SecurityEvent[] {
+  let matches = events.filter((e) => e.tenantId === filters.tenantId);
+  if (filters.fromSeq !== undefined) matches = matches.filter((e) => e.seq >= filters.fromSeq!);
+  if (filters.toSeq !== undefined) matches = matches.filter((e) => e.seq <= filters.toSeq!);
+  if (filters.fromTime !== undefined) matches = matches.filter((e) => e.timestamp >= filters.fromTime!);
+  if (filters.toTime !== undefined) matches = matches.filter((e) => e.timestamp < filters.toTime!);
+  if (filters.actor !== undefined) matches = matches.filter((e) => e.actor === filters.actor);
+  if (filters.action !== undefined && filters.action !== '*') matches = matches.filter((e) => e.action === filters.action);
+  if (filters.decision !== undefined) matches = matches.filter((e) => e.decision === filters.decision);
+  if (filters.resourceId !== undefined) matches = matches.filter((e) => e.resourceId === filters.resourceId);
+  const limit = Math.min(filters.limit ?? 100, 1000);
+  const offset = filters.offset ?? 0;
+  return matches.slice(offset, offset + limit);
+}
+
+/** Build the portable export shape from a filtered event slice. */
+export function exportFromEvents(
+  events: readonly SecurityEvent[],
+  filters: AuditFilters,
+  generatedAt: number,
+): AuditExport {
+  if (events.length === 0) {
+    return {
+      tenantId: filters.tenantId,
+      generatedAt,
+      fromSeq: filters.fromSeq ?? 0,
+      toSeq: filters.toSeq ?? 0,
+      events: [],
+      head: '',
+      previousHead: null,
+    };
+  }
+  const fromSeq = events[0]!.seq;
+  const toSeq = events.at(-1)!.seq;
+  const head = events.at(-1)!.eventHash;
+  const previousHead = events[0]!.seq === 0 ? null : events[0]!.previousEventHash;
+  return {
+    tenantId: filters.tenantId,
+    generatedAt,
+    fromSeq,
+    toSeq,
+    events,
+    head,
+    previousHead,
+  };
+}
+
+/** Recompute the whole hash chain (and signatures when a public key is given). */
+export function verifyChain(
+  events: readonly SecurityEvent[],
+  options: { publicKey?: KeyObject } = {},
+): ChainVerification {
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    const expectedPrev = i === 0 ? GENESIS_HASH : events[i - 1]!.eventHash;
+    if (e.previousEventHash !== expectedPrev) {
+      return { valid: false, count: events.length, firstBrokenSeq: e.seq, detail: 'previous hash mismatch' };
+    }
+    const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
+      seq: e.seq,
+      timestamp: e.timestamp,
+      tenantId: e.tenantId,
+      principal: e.principal,
+      actor: e.actor,
+      actorKind: e.actorKind,
+      action: e.action,
+      resourceId: e.resourceId,
+      decision: e.decision,
+      denyReason: e.denyReason,
+      policyId: e.policyId,
+      capabilityId: e.capabilityId,
+      result: e.result,
+      metadata: e.metadata,
+      previousEventHash: e.previousEventHash,
+    };
+    if (eventHash(body) !== e.eventHash) {
+      return { valid: false, count: events.length, firstBrokenSeq: e.seq, detail: 'event hash mismatch' };
+    }
+    if (options.publicKey) {
+      if (!e.signature) {
+        return { valid: false, count: events.length, firstBrokenSeq: e.seq, detail: 'missing signature' };
+      }
+      if (!verifyEventSignature(e, options.publicKey)) {
+        return { valid: false, count: events.length, firstBrokenSeq: e.seq, detail: 'signature mismatch' };
+      }
+    }
+  }
+  return { valid: true, count: events.length };
+}
+
+/** Portable evidence bundle for offline verification, from a full event list. */
+export function bundleFromEvents(events: readonly SecurityEvent[]): string {
+  return canonicalJson({
+    algorithm: 'sha256-chain-ed25519-v1',
+    genesis: GENESIS_HASH,
+    events,
+    head: events.at(-1)?.eventHash ?? GENESIS_HASH,
+  });
+}
+
+/**
  * Canonical body used for hashing AND signing. Both must cover the same bytes
  * so a verifier can independently recompute both and detect any tamper.
  */
@@ -208,7 +349,7 @@ export function verifyEventSignature(
   return cryptoVerify(null, signatureBody(body), publicKey, sigBuf);
 }
 
-export class EventLog {
+export class EventLog implements EventStore {
   private readonly events: SecurityEvent[] = [];
   private readonly db?: DatabaseSync;
   private readonly insert?: ReturnType<DatabaseSync['prepare']>;
@@ -294,10 +435,7 @@ export class EventLog {
    * the worst case is losing the most recent un-flushed anchor line.
    */
   private appendAnchor(event: SecurityEvent): void {
-    const path = this.anchorPath!;
-    const dir = dirname(path);
-    if (dir && dir !== '.' && !existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(path, `${event.seq}:${event.eventHash}\n`, 'utf8');
+    appendAnchorLine(this.anchorPath!, event);
   }
 
   all(): readonly SecurityEvent[] {
@@ -359,104 +497,25 @@ export class EventLog {
       return rows.map((r) => JSON.parse(r.event) as SecurityEvent);
     }
 
-    // In-memory fallback
-    let matches = this.events.filter((e) => e.tenantId === filters.tenantId);
-    if (filters.fromSeq !== undefined) matches = matches.filter((e) => e.seq >= filters.fromSeq!);
-    if (filters.toSeq !== undefined) matches = matches.filter((e) => e.seq <= filters.toSeq!);
-    if (filters.fromTime !== undefined) matches = matches.filter((e) => e.timestamp >= filters.fromTime!);
-    if (filters.toTime !== undefined) matches = matches.filter((e) => e.timestamp < filters.toTime!);
-    if (filters.actor !== undefined) matches = matches.filter((e) => e.actor === filters.actor);
-    if (filters.action !== undefined && filters.action !== '*') matches = matches.filter((e) => e.action === filters.action);
-    if (filters.decision !== undefined) matches = matches.filter((e) => e.decision === filters.decision);
-    if (filters.resourceId !== undefined) matches = matches.filter((e) => e.resourceId === filters.resourceId);
-    const limit = Math.min(filters.limit ?? 100, 1000);
-    const offset = filters.offset ?? 0;
-    return matches.slice(offset, offset + limit);
+    return filterEvents(this.events, filters);
   }
 
   exportFor(filters: AuditFilters): AuditExport {
-    const events = this.query(filters);
-    const generatedAt = Date.now();
-    if (events.length === 0) {
-      return {
-        tenantId: filters.tenantId,
-        generatedAt,
-        fromSeq: filters.fromSeq ?? 0,
-        toSeq: filters.toSeq ?? 0,
-        events: [],
-        head: '',
-        previousHead: null,
-      };
-    }
-    const fromSeq = events[0]!.seq;
-    const toSeq = events.at(-1)!.seq;
-    const head = events.at(-1)!.eventHash;
-    const previousHead = events[0]!.seq === 0 ? null : events[0]!.previousEventHash;
-    return {
-      tenantId: filters.tenantId,
-      generatedAt,
-      fromSeq,
-      toSeq,
-      events,
-      head,
-      previousHead,
-    };
+    return exportFromEvents(this.query(filters), filters, Date.now());
   }
 
   verify(options: { publicKey?: KeyObject } = {}): ChainVerification {
-    for (let i = 0; i < this.events.length; i++) {
-      const e = this.events[i]!;
-      const expectedPrev = i === 0 ? GENESIS_HASH : this.events[i - 1]!.eventHash;
-      if (e.previousEventHash !== expectedPrev) {
-        return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'previous hash mismatch' };
-      }
-      const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
-        seq: e.seq,
-        timestamp: e.timestamp,
-        tenantId: e.tenantId,
-        principal: e.principal,
-        actor: e.actor,
-        actorKind: e.actorKind,
-        action: e.action,
-        resourceId: e.resourceId,
-        decision: e.decision,
-        denyReason: e.denyReason,
-        policyId: e.policyId,
-        capabilityId: e.capabilityId,
-        result: e.result,
-        metadata: e.metadata,
-        previousEventHash: e.previousEventHash,
-      };
-      if (eventHash(body) !== e.eventHash) {
-        return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'event hash mismatch' };
-      }
-      if (options.publicKey) {
-        if (!e.signature) {
-          return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'missing signature' };
-        }
-        if (!verifyEventSignature(e, options.publicKey)) {
-          return { valid: false, count: this.events.length, firstBrokenSeq: e.seq, detail: 'signature mismatch' };
-        }
-      }
-    }
-    return { valid: true, count: this.events.length };
+    return verifyChain(this.events, options);
   }
 
   /** Read the full anchor file content. Returns empty string if no anchor configured. */
   anchor(): string {
-    if (!this.anchorPath) return '';
-    if (!existsSync(this.anchorPath)) return '';
-    return readFileSync(this.anchorPath, 'utf8');
+    return readAnchor(this.anchorPath);
   }
 
   /** Portable evidence bundle for offline verification. */
   bundle(): string {
-    return canonicalJson({
-      algorithm: 'sha256-chain-ed25519-v1',
-      genesis: GENESIS_HASH,
-      events: this.events,
-      head: this.events.at(-1)?.eventHash ?? GENESIS_HASH,
-    });
+    return bundleFromEvents(this.events);
   }
 
   close(): void {

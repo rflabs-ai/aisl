@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { type Action, type Classification, type Principal } from './domain.ts';
 import { type Capability, type IssueRequest } from './capability.ts';
-import { type EventLog } from './events.ts';
+import { type EventStore } from './events.ts';
 import { type AuthorizationService } from './pdp.ts';
 import { type Approval } from './policy.ts';
 
@@ -48,12 +48,12 @@ export function requestHasNoAuthority(request: CapabilityRequest): boolean {
 
 export class CapabilityRequestService {
   private readonly requests = new Map<string, CapabilityRequest>();
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
   private readonly authorization: AuthorizationService;
   private readonly root: Principal;
   private readonly clock: () => number;
 
-  constructor(eventLog: EventLog, authorization: AuthorizationService, root: Principal, clock: () => number = Date.now) {
+  constructor(eventLog: EventStore, authorization: AuthorizationService, root: Principal, clock: () => number = Date.now) {
     this.eventLog = eventLog;
     this.authorization = authorization;
     this.root = root;

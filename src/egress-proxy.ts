@@ -13,7 +13,7 @@ import { request as httpRequest, type RequestOptions } from 'node:http';
 import { resolve as dnsResolve } from 'node:dns';
 import type { AuthorizationService } from './pdp.ts';
 import type { ResourceRegistry } from './registry.ts';
-import type { EventLog } from './events.ts';
+import type { EventStore } from './events.ts';
 import type { Principal } from './domain.ts';
 import { defineResource } from './registry.ts';
 
@@ -56,7 +56,7 @@ export interface ProxyResult {
 export class EgressProxy {
   private readonly authorization: AuthorizationService;
   private readonly registry: ResourceRegistry;
-  private readonly eventLog: EventLog;
+  private readonly eventLog: EventStore;
   private readonly principal: Principal;
   private readonly dnsPin: boolean;
   private server: Server | undefined;
@@ -66,7 +66,7 @@ export class EgressProxy {
     principal: Principal,
     authorization: AuthorizationService,
     registry: ResourceRegistry,
-    eventLog: EventLog,
+    eventLog: EventStore,
     opts: { dnsPin?: boolean } = {},
   ) {
     this.principal = principal;

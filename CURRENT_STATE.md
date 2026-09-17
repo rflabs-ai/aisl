@@ -1,22 +1,25 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M13 — runtime realism (model provider adapters
-behind a classification egress gate, a command-check verification pipeline,
-zero-dep structured telemetry). M11's authz depth and M10's SLO gate remain the
-non-regression baseline.
+Honest snapshot. Updated after M12 phase 1 — the EventStore port, a Postgres
+event backend (`src/event-store-pg.ts`, `postgres@3.4.9` per ADR-018), a
+forward-only migration framework, and clean Postgres-mode skips without a
+database. M13's runtime realism, M11's authz depth and M10's SLO gate remain
+the non-regression baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~6,600 lines of source across 31 modules
-(`src/` — `model-http.ts`, `check-command.ts`, and `telemetry.ts` are M13's
-additions), 351 tests (`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~7,000 lines of source across 32 modules
+(`src/` — `event-store-pg.ts` is M12's addition), 373 tests (`tests/`,
+`security-tests/`; 365 pass, 8 Postgres-mode tests skip cleanly without
+`DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
 and this documentation set.
 
-Runtime dependencies: **1** (`jose` — JWT/JWK verification, ADR-015). Dev
-dependencies: `typescript`, `@types/node`.
+Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
+`postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps).
+Dev dependencies: `typescript`, `@types/node`.
 
 ## What works
 

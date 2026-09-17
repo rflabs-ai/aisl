@@ -19,7 +19,7 @@ import {
   classificationRank,
 } from './domain.ts';
 import { seal } from './seal.ts';
-import { type EventLog } from './events.ts';
+import { type EventStore } from './events.ts';
 import { type Approval } from './policy.ts';
 import { type AuthorizationService } from './pdp.ts';
 import { type ResourceRegistry, type IngestedData, detectInjectionSignals } from './registry.ts';
@@ -147,7 +147,7 @@ export interface SessionConfig {
   readonly task: string;
   readonly registry: ResourceRegistry;
   readonly authorization: AuthorizationService;
-  readonly eventLog: EventLog;
+  readonly eventLog: EventStore;
   readonly tools: ToolRegistry;
   readonly sandbox: Sandbox;
   readonly content?: ReadonlyMap<string, string>;

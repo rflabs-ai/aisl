@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M4 — authorization lifecycle landed.
+Honest snapshot. Updated after M5 — hierarchical resource matching landed.
 
 ## What exists
 
@@ -72,14 +72,14 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 166 assertions pass. Coverage of the twelve invariants plus M2, M3, M4:
+All 185 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
 decisions logged (2) | 8 tamper-evidence (5) | 9 tenant isolation (3) | 10
 network (3) | 11 secrets (2) | 12 fail closed (3) | **13 no unauthenticated
 principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
-lifecycle (13)**.
+lifecycle (13)** | **M5 hierarchical matching (19)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -147,9 +147,13 @@ Ordered by severity.
 13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
     mode (H15). IdP outage now has a distinct deny reason and health signal.
-14. **Policy cannot express resource hierarchy.** Matching is exact id, type, or
-    classification ceiling — no prefixes or globs, so "all docs under project X"
-    is inexpressible (MEDIUM stage).
+14. ~~**Policy cannot express resource hierarchy.**~~ **M5 closed**:
+    `PolicyRule.resources.idPatterns` supports recursive `tenant/...` and
+    single-segment `prefix*`/`prefix?` globs. Patterns are compiled once at
+    engine construction and cached; pathological patterns (>64 chars, `**`,
+    unsupported chars) throw `PolicyCompilationError`. Hierarchical matching
+    widens which RULES apply; it does not widen which resources a CAPABILITY
+    may reach (`Capability.resourceIds` still lists explicit ids).
 15. **No IdP circuit breaker.** Every request attempts JWKS fetch during outage.
     Rate limiting is left to the deployment.
 
@@ -185,6 +189,20 @@ Ordered by severity.
    approval mints a single-use capability scoped to exactly what was approved.
    Request events (`capability.request`, `capability.approve`, `capability.deny`)
    are recorded in the event log as evidence.
+
+## What M5 closed
+
+1. ~~**Policy cannot express resource hierarchy.**~~ `PolicyRule.resources.idPatterns`
+   matches hierarchical ids without enumerating them. `tenant/...` matches any
+   id strictly under `tenant/` (slash is the boundary — `acme-other` does not
+   match `acme/...`). `prefix*` and `prefix?` match a single non-slash segment.
+   Patterns are compiled once at engine construction and cached by string
+   (`Map<string, IdPatternMatcher>` in `src/policy.ts`); pathological patterns
+   (>64 chars, `**`, unsupported chars) throw `PolicyCompilationError`. The
+   hot path never compiles; a defensive cache miss falls back to literal match
+   and emits one stderr warning. Hierarchical matching widens which RULES
+   apply; it does not widen which resources a CAPABILITY may reach —
+   `Capability.resourceIds` still lists explicit ids.
 
 ## Known assumptions
 

@@ -12,7 +12,8 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runAttackCorpus } from './attacks.ts';
-import { type Approval } from './policy.ts';
+import { createPolicyEngine, type Approval } from './policy.ts';
+import { type Resource } from './domain.ts';
 import { buildWorld, summarizeRepoModel, TENANT_A } from './scenario.ts';
 import { detectInjectionSignals } from './registry.ts';
 import { mockAuth } from './testing.ts';
@@ -104,6 +105,17 @@ function demo(): void {
   console.log(`  signature chain verification: ${signed.valid ? 'VALID' : 'INVALID'}`);
   console.log(`  offline verifier (no DB): ${offline.valid ? 'VALID' : 'INVALID'} (${offline.eventCount} events)`);
   console.log(`  anchor file: ${anchorContent ? `${anchorContent.trim().split('\n').length} lines, head match: ${offline.anchorMatch ? 'yes' : 'NO'}` : 'not configured (set EVENT_ANCHOR_PATH to enable external witness)'}`);
+
+  heading('12. M5: hierarchical resource matching (idPatterns)');
+  const m5Policy = createPolicyEngine([
+    { id: 'allow-acme-tree', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['read'], resources: { idPatterns: ['acme/...'] } },
+  ]);
+  const deep: Resource = { id: 'acme/project/sub/file', type: 'document', tenantId: TENANT_A, classification: 'internal', attributes: {} };
+  const flat: Resource = { id: 'acme-other', type: 'document', tenantId: TENANT_A, classification: 'internal', attributes: {} };
+  const allowDeep = m5Policy.evaluate({ principal: world.agent, resource: deep, action: 'read', now: world.clock.now() });
+  const denyFlat = m5Policy.evaluate({ principal: world.agent, resource: flat, action: 'read', now: world.clock.now() });
+  line('recursive acme/... allows acme/project/sub/file', allowDeep.effect === 'allow' ? 'ALLOW' : 'DENY', allowDeep.reason);
+  line('recursive acme/... denies acme-other (boundary)', denyFlat.effect === 'allow' ? 'ALLOW' : 'DENY', denyFlat.reason);
 }
 
 function attack(): void {

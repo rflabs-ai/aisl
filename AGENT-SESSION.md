@@ -2,10 +2,10 @@
 
 Per-repo tracker for AI agent sessions. Each entry records what happened, what
 was left, and what the next session should pick up.
-
 ## Format
 
 ```
+
 ### SESSION <id> — <date> — <agent/model>
 
 **Did:**
@@ -21,6 +21,76 @@ was left, and what the next session should pick up.
 **Evidence:**
 - Test count, benchmark results, commit hashes
 ```
+
+---
+
+### SESSION 5 — 2026-09-17 — opencode/m5-implementation
+
+**Did:**
+- M5: Hierarchical resource matching landed.
+  - `PolicyRule.resources.idPatterns?: readonly string[]` in `src/policy.ts:28`.
+    Grammar: `tenant/...` (recursive, slash boundary), `prefix*` and `prefix?`
+    (single-segment glob), literal (exact). Header comment in `src/policy.ts`
+    documents the grammar and the boundary semantics.
+  - `compileIdPattern(pattern): IdPatternMatcher` exported. Rejects patterns
+    > 64 chars, `**`, unsupported characters, and recursive forms without a
+    trailing `/` (e.g. `acme...`) — all throw `PolicyCompilationError`.
+  - `matchesIdPattern(resourceId, matcher)` exported. Pure function over the
+    compiled matcher; literal uses `===`, recursive uses `startsWith` with a
+    length check (boundary at the slash), glob uses a regex built once and
+    cached.
+  - `createPolicyEngine` now compiles every unique `idPatterns` entry into a
+    `Map<string, IdPatternMatcher>` at construction time and threads the map
+    into `matchesResource`. Hot path never compiles. Defensive cache miss
+    falls back to literal match + one stderr warning (ponytail: keeps the
+    PDP answering even on a bug; documented ceiling).
+  - `matchesResource` extended so `ids` and `idPatterns` OR-combine within
+    one rule, and a rule with only `idPatterns` matches only by pattern.
+    Default-deny, deny-overrides, classification ceilings, and tenant
+    isolation are unchanged.
+  - `_compileCacheSize(): number` exposed on the engine for the hot-path test
+    (asserts the cache does not grow across `evaluate()` calls). Not part of
+    the `PolicyEngine` interface; test-only seam.
+- Demo (`src/cli.ts`) extended with section 12: a standalone policy with
+  `idPatterns: ['acme/...']` allows `acme/project/sub/file` and denies
+  `acme-other` at the boundary.
+- Docs updated: ROADMAP Stage 1 hierarchical resource matching flipped to
+  `[DONE]`; CURRENT_STATE known-vulnerability item 14 struck through and
+  moved to a new "What M5 closed" section with the grammar and the
+  boundary semantics; SECURITY_CLAIMS Claim 6 "Known limitations" notes that
+  hierarchical matching widens rule selection, not capability scope;
+  CURRENT_STATE test count 166 → 185.
+
+**Left:**
+- The hot-path test uses `_compileCacheSize()` because the existing test
+  files have no spy pattern. The method is a single line of test-only
+  surface — if a richer introspection API is needed (e.g. to confirm which
+  specific patterns were compiled), the same map can be exposed.
+- A `+` glob quantifier (`a+b`) was deliberately rejected at compile time.
+  If operators need "one or more of the previous character", that is an
+  additive grammar change with a test; nothing prevents it but the ceiling
+  is documented.
+- Cross-rule OR (a rule whose `idPatterns` succeeds but whose `types` fails
+  matches if another rule also matches by type) is already correct — the
+  loop is per-rule — but no test asserts it explicitly. If the test
+  surface grows, add one.
+
+**Next session should:**
+- Per `AGENTS.md` discipline: the next MEDIUM-stage item per ROADMAP is
+  whichever open item the operator picks next. Candidates still on the
+  board: policy testing framework (NEXT), sandbox lifecycle management,
+  configuration management (versioned, reviewable, attributable policy —
+  closes B10 partially), audit query/export API, or a fresh EASY item
+  (REST API surface, project/task/session persistence, basic document
+  ingestion, basic Git integration, minimal UI, developer setup script).
+
+**Evidence:**
+- 185 tests, 0 failures, typecheck clean
+- 12/12 attack cases, 20/20 denied, audit completeness 100%
+- Demo: 12 sections; new section 12 demonstrates `acme/...` allowing
+  `acme/project/sub/file` and denying `acme-other` at the boundary
+- Benchmark: results regenerated; numbers unchanged modulo `generatedAt`
+  and `head`
 
 ---
 

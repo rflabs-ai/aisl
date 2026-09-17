@@ -67,7 +67,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Audit query + export API | customers read their own evidence | events | M | MVP | **[ ]** |
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[ ]** |
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
-| Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[ ]** |
+| Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
 
 ---

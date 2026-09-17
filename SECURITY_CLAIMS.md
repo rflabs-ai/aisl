@@ -171,7 +171,12 @@ so a revoked capability fails before signature or scope verification.
 
 **Known limitations:** attenuation is checked against a declared authority
 object, not a cryptographically chained delegation. A capability does not yet
-carry its parent's signature.
+carry its parent's signature. Hierarchical matching (`PolicyRule.resources.idPatterns`,
+M5) adds a way to express a scope ceiling without enumerating ids, but it does
+not weaken attenuation: the matcher still respects the per-rule resource
+ceiling and the per-capability `resourceIds` array. If a capability lists
+specific resource ids, the matcher only succeeds against those ids; patterns in
+the rule do not expand the set of ids the capability may reach.
 
 **Residual risk:** forged delegation chains until full chain-of-custody signing
 lands (HARD stage).

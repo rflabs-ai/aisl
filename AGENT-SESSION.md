@@ -66,19 +66,42 @@ was left, and what the next session should pick up.
   corrected. Tickets
   `.scratch/session-audit/2026-09-17-m12-phase0-adr/issues/{01,02,03}`.
 - ROADMAP M12 marker updated (Phase 0 done, Phase 1 next).
+- **Phase 1 (Subagent A) landed and verified (commit `ff533d7`):**
+  - `EventStore` port extracted from `EventLog`'s public surface (append/all/
+    forTenant/query/exportFor/verify/bundle/anchor/close); `EventLog` implements
+    it; shared helpers (chain verify, filter, export, bundle, anchor IO)
+    extracted into `src/events.ts` and reused — zero behavior change.
+  - `src/event-store-pg.ts` (`PostgresEventLog implements EventStore`):
+    forward-only hash-recorded migrations (id+sha256(sql) in `migrations`,
+    tampered hash → fail closed, one `store.migrate` event per applied batch
+    via the store itself), chain rehydrate + verify on connect, append via the
+    same signing/hash helpers, anchor-file parity, `whenReady()` readiness
+    (`buildWorld()` is sync; `whenWorldReady()` in scenario.ts + cli wiring —
+    appends before ready fail closed), URL/credentials redacted from every
+    error (secret-scan test pins it).
+  - **Second runtime dependency admitted per ADR-018/ADR-015:**
+    `postgres@^3.4.9` — zero transitive deps verified in the lockfile, SBOM
+    covers it.
+  - Tests: 373 total — 365 pass, 8 Postgres-mode skips (no `DATABASE_URL`);
+    parity loop runs the core evidence behaviors against memory + SQLite
+    always-on; migrations/fail-closed/secret suites are PG-only skips.
+  - **Honest gap:** Postgres is NOT installed locally (and Docker daemon
+    unavailable this session) — the 8 PG tests have never run against a live
+    server yet. Milestone acceptance requires a disposable container run
+    (`DATABASE_URL`) before the M12 close-out.
+  - Two `ponytail:` markers added in `event-store-pg.ts` (append-time
+    timestamp; mirror-reads instead of SQL-side filtering until the port goes
+    async / reader-role server-side filtering in Phase 2).
 
 **Left:**
-- Phase 1 not started (needs Postgres install or container for local runs;
-  tests skip without `DATABASE_URL` either way).
-- Full docs sweep (CURRENT_STATE counts, DEPLOYMENT, SECURITY_CLAIMS) is the
-  main-session close-out when the milestone lands, not per-phase.
-
-**Next session should:**
-- Phase 1 (Subagent A): extract the `EventStore` port from `EventLog`'s
-  public surface, implement `src/event-store-pg.ts` + the migrations
-  framework exactly per ADR-018's schema block; parity suite over both
-  backends. B (RLS + per-tenant keys) and C (backup/restore + persistence)
-  wait on A's schema.
+- Phase 2 not started: B (RLS roles + policies + per-tenant keys in `src/seal.ts`)
+  and C (backup/restore + `capability_requests`/`projects`/`tasks`/
+  `agent_sessions` persistence) may now run in PARALLEL — both consume A's
+  migrations (append migration ids 2+).
+- Postgres parity suite needs a live-DB run (Docker container or install)
+  before milestone close-out; currently skip-only.
+- Full docs sweep (ROADMAP rows → [DONE], DEPLOYMENT, SECURITY_CLAIMS,
+  CURRENT_STATE full update) is the main-session close-out.
 
 **Evidence:**
 - Docs-only phase; `npm run typecheck` clean; `npm test` 351/351 unchanged.

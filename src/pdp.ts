@@ -394,6 +394,8 @@ export class AuthorizationService {
         );
       }
 
+      // M6 (Claim 21): audit.export is implied by query.audit in capability scope;
+      // mirrors verifyCapability in src/capability.ts. Keep the two in sync.
       const candidates = this.capabilitiesFor(principal.id).filter(
         (c) =>
           c.resourceIds.includes(resourceId) &&

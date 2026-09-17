@@ -67,11 +67,13 @@ export interface AuditFilters {
 export interface AuditExport {
   readonly tenantId: string;
   readonly generatedAt: number;
+  /** seq of the first event actually returned (a result bound, not the requested filter bound). */
   readonly fromSeq: number;
+  /** seq of the last event actually returned (a result bound, not the requested filter bound). */
   readonly toSeq: number;
   readonly events: readonly SecurityEvent[];  // includes signature + eventHash
   readonly head: string;                        // eventHash of the last event in events
-  readonly previousHead: string | null;         // eventHash of the event immediately before fromSeq, or null
+  readonly previousHead: string | null;         // eventHash of the event preceding the first returned event; null when the slice starts at seq 0
 }
 
 export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'eventHash' | 'timestamp' | 'signature'> & {

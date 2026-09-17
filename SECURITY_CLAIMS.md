@@ -679,11 +679,18 @@ signatures and event hashes for offline `verifyBundle()` verification.
 **Mechanism:** `AuditQueryService` (`src/audit-query.ts`) validates service-side
 query bounds (time range ≤ 90 days, limit ≤ 1000, offset ≥ 0); authorizes via
 `AuthorizationService.queryAudit` (`src/pdp.ts`); synthetic resource
-`audit-log:<tenantId>` (`ResourceType: 'audit-log'`, never ingested into the
-resource registry); `query.audit` and `audit.export` actions in `KnownAction`;
-storage query via `EventLog.query()` (`src/events.ts`) executing parameterized
-SQL against `security_events`; offline slice verification via `verifyBundle()`
-using `previousHead`.
+`audit-log:<tenantId>` (`ResourceType: 'audit-log'`) is registered on demand as
+an authorization target when audit access is first authorized (mirrors
+`evidence-key:<classification>` in `revealEvidence`); it carries no content and
+is never part of the tenant's resource inventory. A capability holding
+`query.audit` also authorizes `audit.export` (`verifyCapability` in
+`src/capability.ts` and the candidate filter in `src/pdp.ts:evaluate()`), while
+policy still lists both actions explicitly — the distinction between the two is
+policy-side. Storage query via `EventLog.query()` (`src/events.ts`) executes
+parameterized SQL against `security_events`; `AuditExport.fromSeq` / `toSeq`
+are the seq values of the first and last events actually returned (result
+bounds, not the requested filter bounds), so `previousHead` is the in-chain
+predecessor of the slice and `verifyBundle()` can validate it offline.
 
 **Threat model:** TM-004 (evidence store as a target), TM-003 (one store, many tenants).
 
@@ -701,7 +708,10 @@ parity, and sealed content confidentiality.
 
 **Known limitations:** in-process query only; multi-node audit aggregation and
 distributed query federation are H13. Sealed outputs stay sealed; plaintext
-inspection requires a separate `evidence.decrypt` authorization.
+inspection requires a separate `evidence.decrypt` authorization. The
+`audit.export`-implied-by-`query.audit` rule is encoded in two code sites
+(`verifyCapability` and the PDP candidate filter); a future third audit action
+must be handled in both, or the rule factored into one shared helper.
 
 **Residual risk:** LOW. Audit query is read-only and gated by the same capability
 and policy engine as all other actions.

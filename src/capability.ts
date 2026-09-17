@@ -234,7 +234,9 @@ export function verifyCapability(cap: Capability, ctx: VerificationContext): Cap
     return { ok: false, reason: 'capability-scope', detail: `resource ${ctx.resourceId} outside capability scope` };
   }
   if (!cap.actions.includes(ctx.action)) {
-    // M6: single capability covers query.audit and audit.export; distinction is policy-side only
+    // M6 (Claim 21): a capability holding query.audit also authorizes audit.export;
+    // policy still lists both actions explicitly. Mirror of the candidate filter in
+    // src/pdp.ts evaluate() — keep the two in sync.
     if (!(ctx.action === 'audit.export' && cap.actions.includes('query.audit'))) {
       return { ok: false, reason: 'capability-scope', detail: `action ${ctx.action} outside capability scope` };
     }

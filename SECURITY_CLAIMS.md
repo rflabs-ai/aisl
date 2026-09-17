@@ -663,3 +663,163 @@ distributed-coordination mechanism yet — this is H13.
 
 **Residual risk:** revocation window in multi-node deployments until broadcast
 is implemented.
+
+---
+
+## Claim 21 — Audit query + export is authorized and tenant-scoped (M6)
+
+**Claim:** Operators can read and export their own tenant's evidence plane
+records without cross-tenant leakage. Any audit query or export requires an
+authenticated principal, an explicit capability granting `query.audit` on the
+synthetic `audit-log:<tenantId>` resource, and a matching policy allow rule.
+Tenant scope is derived strictly from the authenticated principal; cross-tenant
+queries fail closed (`tenant-mismatch`). Exported bundles preserve Ed25519
+signatures and event hashes for offline `verifyBundle()` verification.
+
+**Mechanism:** `AuditQueryService` (`src/audit-query.ts`) validates service-side
+query bounds (time range ≤ 90 days, limit ≤ 1000, offset ≥ 0); authorizes via
+`AuthorizationService.queryAudit` (`src/pdp.ts`); synthetic resource
+`audit-log:<tenantId>` (`ResourceType: 'audit-log'`, never ingested into the
+resource registry); `query.audit` and `audit.export` actions in `KnownAction`;
+storage query via `EventLog.query()` (`src/events.ts`) executing parameterized
+SQL against `security_events`; offline slice verification via `verifyBundle()`
+using `previousHead`.
+
+**Threat model:** TM-004 (evidence store as a target), TM-003 (one store, many tenants).
+
+**Assumptions:** the PDP process is the single point of entry; the synthetic
+resource id derivation cannot be overridden by caller input.
+
+**Evidence:** `tests/m6-audit-query.test.ts` (20 cases) covering: unauthenticated
+denial, tenant-mismatch denial, capability requirement, default deny, policy
+matching, filter parity (actor, action, decision, resourceId, time range,
+limit/offset), empty matches, bad filter bounds, tenant isolation invariant,
+export shape, chain slice verification, decision audit completeness, SQLite
+parity, and sealed content confidentiality.
+
+**Test:** `tests/m6-audit-query.test.ts`.
+
+**Known limitations:** in-process query only; multi-node audit aggregation and
+distributed query federation are H13. Sealed outputs stay sealed; plaintext
+inspection requires a separate `evidence.decrypt` authorization.
+
+**Residual risk:** LOW. Audit query is read-only and gated by the same capability
+and policy engine as all other actions.
+
+---
+
+## Claim 22 — Policy rules are unit-testable (M7)
+
+**Claim:** A policy rule is a unit-testable artifact. Operators author
+fixtures (`{ scenarios, expected }` JSON), run them through the engine via
+`simulate()`, and diff against a baseline via `diffDecisions()`. A change
+that flips a decision in the scenario set is the surface the operator
+reviews — before the rule reaches a live PDP.
+
+**Mechanism:** `src/policy-testing.ts` exports `simulate(engine, scenarios)`,
+`diffDecisions(before, after, scenarios)`, and `loadFixtures(dir)` with
+validator (rejects malformed JSON, missing fields, action outside
+`KnownAction`, principal kind outside `domain.ts` vocabulary, cross-tenant
+scenarios). `src/policy-diff.ts` is the `npm run policy:diff` entry point:
+argv glue (5 lines), diffs `BASELINE_POLICY` against an optional overlay
+file, prints `"<n> changed"` plus per-scenario before/after.
+
+**Threat model:** TM-001 (rule authoring — a typo in a rule is detectable),
+TM-003 (cross-tenant via scenario validator).
+
+**Assumptions:** the operator has the `BASELINE_POLICY` reachable (exported
+from `src/policy.ts`); JSON is the only fixture format (per spec; no DSL).
+
+**Evidence:** `tests/policy-harness.test.ts` — 12 cases covering simulate
+returns one decision per scenario in input order with typed reasons;
+diffDecisions surfaces effect, ruleId, and reason changes separately;
+adding a no-op allow rule produces zero diff entries; loadFixtures rejects
+malformed JSON / missing fields / action outside vocabulary / cross-tenant
+scenarios; three migrated fixtures pass against the unmodified baseline and
+remain green under a one-line no-op overlay. `npm run policy:diff` with no
+overlay prints `0 changed`; with a `deny-agent-read` overlay, prints the
+changed scenarios with before/after rule ids and reasons.
+
+**Test:** `tests/policy-harness.test.ts`.
+
+**Known limitations:** validators cover `KnownAction`/`PrincipalKind`/
+`ResourceType`/`KnownClassification` plus a shape check on action strings
+(action must be non-empty and free of whitespace); the validator does not
+enforce a closed vocabulary because both `Action` and `ResourceType` are
+extensible via the `string & {}` brand in `domain.ts`. Operators who
+introduce new vocabulary should extend the validator's allowlists.
+
+**Residual risk:** LOW. A passing fixture suite proves the operator's
+intended rules behave as documented; it does not prove the rules are
+sufficient or correct in production.
+
+---
+
+## Claim 23 — Delivered claims are evidence-bound or annotated (M7/M8)
+
+**Claim:** Every response with status `delivered` carries either a verbatim
+citation to a real ingested source, or it carries no consequential claim.
+Every other response is marked `flagged`, `repaired`, or `withheld` with the
+flag list sealed into the evidence store. A response containing a canary or
+secret value is withheld and never delivered. The guard exposes no
+authority handle, and the PDP does not import it.
+
+**Mechanism:** `src/guard.ts` — `ResponseGuard` interface; `GroundedResponseGuard`
+implements D2 (claim-source binding: verbatim span verification), D3
+(session-fact consistency: "I <verb>ed X" matches a `StepRecord` action), D4
+(numeric recomputation against step output), D5 (prose leak check — skips
+ladder, withholds immediately); D6 stub (critic model hook, telemetry only).
+The fallback ladder (`runLadder`) is pure: `flags + repairFn + regenerateFn
+→ GuardedResponse`, with rungs Repair → Regenerate → Abstain → Escalate
+(Escalate gated on `classificationRank >= 'confidential'`). `AgentSession.run()`
+calls the guard between `model.complete()` and trace return; `SessionTrace.guarded`
+is the user-facing result and `metadata.sealed` on the `session.guard` event
+holds the encrypted original (AES-256-GCM via `src/seal.ts`). D5 leaks skip
+the ladder entirely — strikethrough is not a secrecy control.
+
+**Threat model:** TM-001 (compromised model asserting unverified claims),
+TM-004 (withheld text leaking flagged spans or canaries via the evidence
+store).
+
+**Assumptions:** the guard module is invoked once per `run()`; the
+classification passed to the guard determines whether the Escalate rung is
+reachable (today: `'public'` for v1; per-session classification derivation
+is a future enhancement); `GuardContext.context` carries the ingested
+content keyed by `resourceId`.
+
+**Evidence:** `tests/guard.test.ts` — 18 cases covering D2 (cited-and-real,
+cited-and-forged, cited-but-span-missing, uncited number), D3
+(action-claim-mismatch and its inverse), D4 (numeric-mismatch), D5 leak
+(skips ladder, withholds), ladder repair (success and abort-on-empty),
+abstain, escalate (reached for confidential+), escalate NOT reached for
+low classification, fail-closed when guard throws, R3 structural assertion
+on `GuardContext` keys + dependency-direction between `src/pdp.ts` and
+`src/guard.ts`. `security-tests/guard-invariants.test.ts` — 8 cases: R1
+false-claim budget (100/100 honest sessions delivered cleanly on the
+`summarizeRepoModel` corpus; `falseClaimRate = 0`); R2 withhold scan (four
+hostile cases: forged citation, action-claim-mismatch, prose leak,
+poisoned source — first three withhold/repair; poisoned source is
+correctly delivered and documents the D2 ceiling); R3 no-authority
+(`GuardContext` keys clean, `pdp.ts` and `guard.ts` do not import each
+other). Benchmark `guardLatencyP99Ms` measured per run.
+
+**Test:** `tests/guard.test.ts`, `security-tests/guard-invariants.test.ts`.
+
+**Known limitations:** verifies *support*, not *truth* — a poisoned source
+yields a well-cited lie (TM-002 residual). Uncited-but-true claims are
+flagged as `unverified-claim` (false-positive budget applies; on the
+current corpus `falseClaimRate = 0`). The `action-claim-mismatch` check
+matches by verb only (deleted→delete, wrote→write); a noun-vs-resource
+match is a future enhancement. The classification passed to the guard is
+`'public'` in v1; per-session classification derivation is the next step.
+D5 takes the *first* canary match and stops the ladder; future versions
+may enumerate all matches and surface them. The guard does not retry on
+`regenerateFn` in v1 (the hook exists but no caller); re-running the guard
+on the post-`steps` trace would catch action-claim-mismatch on a second
+pass and is documented as a follow-up.
+
+**Residual risk:** LOW for the four cases the test suite exercises. MEDIUM
+in production because generative models hallucinate by construction
+(IMPOSSIBLE+ row in ROADMAP): the guard's mitigation is requiring evidence
+for consequential claims, not detecting all hallucinations.
+

@@ -1,0 +1,32 @@
+{
+  "id": "classification-ceiling",
+  "name": "classification ceiling blocks a resource above the granted ceiling",
+  "rules": [
+    {
+      "id": "allow-low",
+      "effect": "allow",
+      "principals": { "kinds": ["agent"] },
+      "actions": ["read"],
+      "resources": {},
+      "maxClassification": "internal"
+    }
+  ],
+  "scenarios": [
+    {
+      "principal": { "id": "agent:a", "kind": "agent", "tenantId": "acme", "roles": [], "attributes": {} },
+      "resource": { "id": "d1", "type": "document", "tenantId": "acme", "classification": "internal", "attributes": {} },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": { "id": "agent:a", "kind": "agent", "tenantId": "acme", "roles": [], "attributes": {} },
+      "resource": { "id": "d2", "type": "document", "tenantId": "acme", "classification": "confidential", "attributes": {} },
+      "action": "read",
+      "now": 1748736000000
+    }
+  ],
+  "expected": [
+    { "effect": "allow", "ruleId": "allow-low" },
+    { "effect": "deny", "ruleId": null, "reason": "no matching allow rule; default deny" }
+  ]
+}

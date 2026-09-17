@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-17T00:25:32.856Z",
+  "generatedAt": "2026-09-17T02:49:26.059Z",
   "node": "v24.18.0",
   "policyEngine": "in-process-rego-free-v1",
   "adversarial": {
@@ -19,12 +19,17 @@
     "falseDenialRate": 0
   },
   "evidence": {
-    "events": 53,
-    "decisionEvents": 22,
-    "expectedDecisions": 22,
+    "events": 2065,
+    "decisionEvents": 2022,
+    "guardVerdictEvents": 11,
+    "expectedDecisions": 2022,
     "auditCompleteness": 1,
     "hashChainValid": true,
-    "head": "6cd4ef068af968d7d9e9e29642e342c61b182be6debee7839d90a84b8eb145cb"
+    "head": "b334d363ba071afc8358659bfc2c59c27fb06d15570b724ebb72fa42047e7e07",
+    "auditQueryLatencyP99Ms": 0.262,
+    "auditExportLatencyP99Ms": 0.282,
+    "policyDiffLatencyMs": 0.119,
+    "guardLatencyP99Ms": 0.005
   },
   "corpus": {
     "documents": 4,

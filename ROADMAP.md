@@ -51,7 +51,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Item | Purpose | Dependencies | Complexity | Class | Status |
 | --- | --- | --- | --- | --- | --- |
 | Granular RBAC | roles compose with capabilities | identity | M | MVP | **[ ]** |
-| Policy testing framework | unit-test rules, simulate and diff changes | policy | M | MVP | **[NEXT]** |
+| Policy testing framework | unit-test rules, simulate and diff changes | policy | M | MVP | **[DONE]** (M7: `src/policy-testing.ts`, JSON fixtures, `npm run policy:diff`; Claim 22) |
 | Approval workflow | separation of duties as a first-class object | identity, policy | M | MVP | **[DONE]** |
 | Capability request flow | agent asks, human grants, narrow | approval, PDP | M | MVP | **[DONE]** |
 | Classification propagation | labels flow to derived artifacts | registry, ingestion | L | P | **[ ]** |
@@ -64,11 +64,12 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Verification pipeline | tests, linters, SAST on agent output | verification | M | P | **[ ]** |
 | Structured telemetry (OTel) | observability without ad-hoc logs | — | M | P | **[ ]** |
 | Postgres schema + migrations | multi-node control plane | ADR-010 | M | P | **[ ]** |
-| Audit query + export API | customers read their own evidence | events | M | MVP | **[ ]** |
+| Audit query + export API | customers read their own evidence | events | M | MVP | **[DONE]** (M6: authorized, tenant-scoped, offline verifyBundle, Claim 21) |
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[ ]** |
 | Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
+| Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23) |
 
 ---
 

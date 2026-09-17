@@ -1,0 +1,38 @@
+{
+  "id": "deny-overrides-allow",
+  "name": "deny overrides allow",
+  "rules": [
+    {
+      "id": "allow-all",
+      "effect": "allow",
+      "principals": {},
+      "actions": ["*"],
+      "resources": {}
+    },
+    {
+      "id": "deny-delete",
+      "effect": "deny",
+      "principals": {},
+      "actions": ["delete"],
+      "resources": {}
+    }
+  ],
+  "scenarios": [
+    {
+      "principal": { "id": "agent:a", "kind": "agent", "tenantId": "acme", "roles": [], "attributes": {} },
+      "resource": { "id": "d", "type": "document", "tenantId": "acme", "classification": "public", "attributes": {} },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": { "id": "agent:a", "kind": "agent", "tenantId": "acme", "roles": [], "attributes": {} },
+      "resource": { "id": "d", "type": "document", "tenantId": "acme", "classification": "public", "attributes": {} },
+      "action": "delete",
+      "now": 1748736000000
+    }
+  ],
+  "expected": [
+    { "effect": "allow", "ruleId": "allow-all" },
+    { "effect": "deny", "ruleId": "deny-delete", "reason": "denied by rule deny-delete" }
+  ]
+}

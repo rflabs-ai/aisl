@@ -1,0 +1,11 @@
+{
+  "rules": [
+    {
+      "id": "deny-agent-read-all-overlay",
+      "effect": "deny",
+      "principals": { "kinds": ["agent"] },
+      "actions": ["read"],
+      "resources": {}
+    }
+  ]
+}

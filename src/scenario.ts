@@ -17,6 +17,7 @@ import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from './runtime.t
 import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 import { type IdPHealth } from './identity.ts';
+import { AuditQueryService } from './audit-query.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -74,6 +75,7 @@ export interface World {
   readonly foreignAgent: Principal;
   readonly clock: Clock;
   readonly resources: Readonly<Record<string, string>>;
+  readonly audit: AuditQueryService;
   /** Set IdP health status for degraded-mode testing */
   setIdPHealth(status: IdPHealth): void;
   session(model: ModelPort, overrides?: Partial<SessionOverrides>): AgentSession;
@@ -120,6 +122,16 @@ export const EGRESS_ALLOWLIST_RULE: PolicyRule = {
   conditions: [{ kind: 'network-host-in', hosts: ['api.internal.example.com'] }],
 };
 
+/** Customer policy extension: users may query and export the audit log for their tenant. */
+export const AUDIT_POLICY_RULE: PolicyRule = {
+  id: 'allow-user-audit',
+  description: 'Users may query and export the audit log for their tenant with capability.',
+  effect: 'allow',
+  principals: { kinds: ['user'] },
+  actions: ['query.audit', 'audit.export'],
+  resources: { types: ['audit-log'] },
+};
+
 export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
@@ -134,7 +146,7 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
   registry.add(defineResource({ id: RESOURCE_IDS.prodDb, type: 'system', tenantId: TENANT_A, classification: 'restricted' }));
   registry.add(defineResource({ id: RESOURCE_IDS.foreignDoc, type: 'document', tenantId: TENANT_B, classification: 'confidential' }));
 
-  const policy = createPolicyEngine([...BASELINE_POLICY, ...(options.policies ?? [EGRESS_ALLOWLIST_RULE])]);
+  const policy = createPolicyEngine([...BASELINE_POLICY, ...(options.policies ?? [EGRESS_ALLOWLIST_RULE, AUDIT_POLICY_RULE])]);
 
   // Default IdP health: healthy. Tests can override via the returned idpHealth setter.
   let idpHealthStatus: IdPHealth = { status: 'healthy', lastChecked: 0 };
@@ -221,6 +233,8 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
     provenance: { source: 'policy-grant', note: 'internal billing API only' },
   });
 
+  const audit = new AuditQueryService(authorization, eventLog, clock.now);
+
   return {
     registry,
     eventLog,
@@ -237,6 +251,7 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
     foreignAgent,
     clock,
     resources: RESOURCE_IDS,
+    audit,
     setIdPHealth(status) {
       idpHealthStatus = status;
     },
@@ -254,6 +269,7 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
         content,
         approvals: overrides?.approvals,
         checks: overrides?.checks ?? [secretLeakCheck(secretValues)],
+        canaries: secretValues,
         now: clock.now,
       });
     },

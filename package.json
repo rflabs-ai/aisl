@@ -12,6 +12,7 @@
     "demo": "node src/cli.ts demo",
     "benchmark": "node src/cli.ts benchmark",
     "attack": "node src/cli.ts attack",
+    "policy:diff": "node src/policy-diff.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

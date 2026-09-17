@@ -23,6 +23,7 @@ import { type AuthorizationService } from './pdp.ts';
 import { type ResourceRegistry, type IngestedData, detectInjectionSignals } from './registry.ts';
 import { type ModelPort } from './model.ts';
 import { type Check, type Verification, runVerifications } from './verification.ts';
+import { type GuardedResponse, type ResponseGuard, GroundedResponseGuard } from './guard.ts';
 
 export interface ExecutionContext {
   readonly sessionId: string;
@@ -96,11 +97,14 @@ export interface SessionTrace {
   readonly principal: string;
   readonly agentId: string;
   readonly modelId: string;
+  /** Raw model output, sealed into evidence via `guarded.originalSealed`; the user-facing text is `guarded.text` when present, otherwise this raw string. */
   readonly modelText: string;
   readonly steps: readonly StepRecord[];
   readonly injectionSignals: readonly { resourceId: string; signals: readonly string[] }[];
   readonly startedAt: number;
   readonly endedAt: number;
+  /** Result of the output reliability guard. `undefined` only when guard is disabled (cfg.guard === null). */
+  readonly guarded?: GuardedResponse;
 }
 
 export interface SessionConfig {
@@ -118,6 +122,10 @@ export interface SessionConfig {
   readonly approvals?: readonly Approval[];
   readonly now?: () => number;
   readonly sessionId?: string;
+  /** Output reliability guard. `undefined` (default) = `new GroundedResponseGuard()`; `null` = guard disabled (tests only). */
+  readonly guard?: ResponseGuard | null;
+  /** Canary / secret values the guard must never let through to prose. Defaults to []. */
+  readonly canaries?: readonly string[];
 }
 
 export class AgentSession {
@@ -231,8 +239,46 @@ export class AgentSession {
       availableActions: this.cfg.tools.names() as Action[],
     });
 
+    // ponytail: guard runs pre-execution on the model's first-pass text. Re-running after `steps` would catch
+    // action-claim-mismatch on a second pass; that's a future enhancement, not a v1 requirement.
+    const guard = this.cfg.guard === null ? null : (this.cfg.guard ?? new GroundedResponseGuard());
+    const guarded = guard === null ? null : guard.guard({
+      sessionId: this.sessionId,
+      modelText: modelOutput.text,
+      context: this.cfg.content ?? new Map<string, string>(),
+      steps: [],
+      canaries: this.cfg.canaries ?? [],
+      classification: 'public',
+    });
+
     const steps = modelOutput.requests.map((r) => this.attempt(r));
     const endedAt = this.clock();
+
+    if (guarded !== null) {
+      const outputDigest = guarded.text === null
+        ? null
+        : createHash('sha256').update(guarded.text).digest('hex');
+      this.cfg.eventLog.append({
+        tenantId: this.cfg.principal.tenantId,
+        principal: this.cfg.principal.id,
+        actor: this.cfg.agentId,
+        actorKind: this.cfg.principal.kind,
+        action: 'session.guard',
+        result: guarded.status === 'withheld' ? 'error' : 'success',
+        decision: 'allow',
+        metadata: {
+          phase: 'guard',
+          sessionId: this.sessionId,
+          guardId: guarded.guardId,
+          status: guarded.status,
+          flags: guarded.flags,
+          citations: guarded.citations,
+          outputDigest,
+          sealed: guarded.originalSealed,
+          ladderRung: null,
+        },
+      });
+    }
 
     this.cfg.eventLog.append({
       tenantId: this.cfg.principal.tenantId,
@@ -255,11 +301,12 @@ export class AgentSession {
       principal: this.cfg.principal.id,
       agentId: this.cfg.agentId,
       modelId: this.cfg.model.id,
-      modelText: modelOutput.text,
+      modelText: guarded !== null ? guarded.text : modelOutput.text,
       steps,
       injectionSignals,
       startedAt,
       endedAt,
+      ...(guarded !== null ? { guarded } : {}),
     };
   }
 

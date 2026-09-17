@@ -79,7 +79,7 @@ describe('deriveClassification', () => {
 });
 
 describe('second-pass guard', () => {
-  test('first and second pass agree → exactly one session.guard event', () => {
+  test('first and second pass agree → exactly one session.guard event', async () => {
     const world = testWorld();
     const model = new ScriptedModel('scripted-summarizer-v1', [
       {
@@ -87,7 +87,7 @@ describe('second-pass guard', () => {
         requests: [{ action: 'read', resourceId: world.resources.repoA! }],
       },
     ]);
-    const trace = world.session(model).run([]);
+    const trace = await world.session(model).run([]);
 
     const events = guardEvents(world);
     assert.equal(events.length, 1);
@@ -95,7 +95,7 @@ describe('second-pass guard', () => {
     assert.equal(trace.guarded!.status, 'delivered');
   });
 
-  test('second pass clears a first-pass action-claim-mismatch', () => {
+  test('second pass clears a first-pass action-claim-mismatch', async () => {
     const world = testWorld();
     const model = new ScriptedModel('scripted-read-claim-v1', [
       {
@@ -106,7 +106,7 @@ describe('second-pass guard', () => {
         requests: [{ action: 'read', resourceId: world.resources.repoA! }],
       },
     ]);
-    const trace = world.session(model).run([]);
+    const trace = await world.session(model).run([]);
 
     const events = guardEvents(world);
     assert.equal(events.length, 2);
@@ -117,7 +117,7 @@ describe('second-pass guard', () => {
     assert.equal(trace.guarded!.status, 'delivered');
   });
 
-  test('second pass does not double-queue an escalate request', () => {
+  test('second pass does not double-queue an escalate request', async () => {
     const world = testWorld();
     const service = new CapabilityRequestService(world.eventLog, world.authorization, world.root);
     const model = new ScriptedModel('scripted-false-delete-v1', [
@@ -126,7 +126,7 @@ describe('second-pass guard', () => {
         requests: [{ action: 'read', resourceId: world.resources.repoA! }],
       },
     ]);
-    const trace = world.session(model, { capabilityRequestService: service }).run([]);
+    const trace = await world.session(model, { capabilityRequestService: service }).run([]);
 
     assert.equal(service.all().length, 1);
     const events = world.eventLog.all();

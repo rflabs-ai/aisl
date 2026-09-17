@@ -459,9 +459,9 @@ describe('secret value unreachable from inside sandbox', () => {
 // ── Attack corpus still passes ───────────────────────────────────────────────
 
 describe('M1 enforcement: attack corpus passes with real backends', () => {
-  test('all attack cases behave as required', () => {
+  test('all attack cases behave as required', async () => {
     const world = testWorld();
-    const results = runAttackCorpus(world, join(ROOT, 'security-attacks'));
+    const results = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
     for (const r of results) {
       assert.ok(r.passed, `${r.testCase.id} failed`);
     }

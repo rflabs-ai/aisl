@@ -27,6 +27,8 @@ import { type ModelPort } from './model.ts';
 import { type Check, type Verification, runVerifications } from './verification.ts';
 import { type GuardedResponse, type ResponseGuard, GroundedResponseGuard } from './guard.ts';
 import { type CapabilityRequestService } from './capability-request.ts';
+import { denyReasonCounts } from './telemetry.ts';
+import { type TelemetryPort } from './telemetry.ts';
 
 export interface ExecutionContext {
   readonly sessionId: string;
@@ -157,6 +159,7 @@ export interface SessionConfig {
   readonly guard?: ResponseGuard | null;
   /** Canary / secret values the guard must never let through to prose. Defaults to []. */
   readonly canaries?: readonly string[];
+  readonly telemetry?: TelemetryPort;
   readonly capabilityRequestService?: CapabilityRequestService;
 }
 
@@ -250,8 +253,9 @@ export class AgentSession {
   }
 
   /** One turn: give the model the task and untrusted context, then enforce its requests. */
-  run(data: readonly IngestedData[], prompt = this.cfg.task): SessionTrace {
+  async run(data: readonly IngestedData[], prompt = this.cfg.task): Promise<SessionTrace> {
     const startedAt = this.clock();
+    this.cfg.telemetry?.emit('session.start', { sessionId: this.sessionId, principal: this.cfg.principal.id, agentId: this.cfg.agentId, model: this.cfg.model.id });
     this.cfg.eventLog.append({
       tenantId: this.cfg.principal.tenantId,
       principal: this.cfg.principal.id,
@@ -281,10 +285,11 @@ export class AgentSession {
       }
     }
 
-    const modelOutput = this.cfg.model.complete({
+    const modelOutput = await this.cfg.model.complete({
       prompt,
       context: data.map((d) => d.content),
       availableActions: this.cfg.tools.names() as Action[],
+      contextResourceIds: data.map((d) => d.resourceId),
     });
 
     // ponytail: classification is the max over ALL principal capabilities + the whole
@@ -354,6 +359,17 @@ export class AgentSession {
         denied: steps.filter((s) => s.decision.decision === 'deny').length,
       },
     });
+
+    this.cfg.telemetry?.emit('session.end', {
+      sessionId: this.sessionId, principal: this.cfg.principal.id, agentId: this.cfg.agentId, model: this.cfg.model.id,
+      durationMs: endedAt - startedAt, requests: steps.length,
+      allowed: steps.filter((s) => s.decision.decision === 'allow').length,
+      denied: steps.filter((s) => s.decision.decision === 'deny').length,
+    });
+    const denyCounts = denyReasonCounts(steps.map((s) => s.decision));
+    if (Object.keys(denyCounts).length > 0) {
+      this.cfg.telemetry?.emit('pdp.denyReasons', { sessionId: this.sessionId, counts: denyCounts });
+    }
 
     return {
       sessionId: this.sessionId,

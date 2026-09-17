@@ -25,9 +25,9 @@ describe('adversarial attack corpus', () => {
   });
 
   for (const testCase of cases) {
-    test(`${testCase.id} ${testCase.name} -> ${testCase.expect}`, () => {
+    test(`${testCase.id} ${testCase.name} -> ${testCase.expect}`, async () => {
       const world = testWorld();
-      const result = runAttackCase(world, testCase);
+      const result = await runAttackCase(world, testCase);
       const detail = result.outcomes
         .map((o) => `${o.request.action}@${o.request.resourceId} => ${o.decision}${o.denyReason ? ` (${o.denyReason})` : ''}${o.executed ? ' EXECUTED' : ''}`)
         .join(' | ');
@@ -42,10 +42,10 @@ describe('adversarial attack corpus', () => {
     });
   }
 
-  test('a denied attack never yields resource content', () => {
+  test('a denied attack never yields resource content', async () => {
     const world = testWorld();
     for (const testCase of cases.filter((c) => c.expect === 'denied')) {
-      const result = runAttackCase(world, testCase);
+      const result = await runAttackCase(world, testCase);
       for (const o of result.outcomes) {
         const leaked = typeof o.output === 'string' && o.output.length > 0;
         assert.equal(leaked, false, `${testCase.id} leaked content: ${String(o.output)}`);
@@ -53,9 +53,9 @@ describe('adversarial attack corpus', () => {
     }
   });
 
-  test('the evidence chain is intact after running the whole corpus', () => {
+  test('the evidence chain is intact after running the whole corpus', async () => {
     const world = testWorld();
-    for (const testCase of cases) runAttackCase(world, testCase);
+    for (const testCase of cases) await runAttackCase(world, testCase);
     const verification = world.eventLog.verify();
     assert.equal(verification.valid, true, JSON.stringify(verification));
     assert.ok(world.eventLog.all().length > cases.length);
@@ -66,9 +66,9 @@ describe('legitimate workload', () => {
   const cases = loadAttackCorpus(join(ROOT, 'security-fixtures'));
 
   for (const testCase of cases) {
-    test(`${testCase.id} ${testCase.name} -> allowed`, () => {
+    test(`${testCase.id} ${testCase.name} -> allowed`, async () => {
       const world = testWorld();
-      const result = runAttackCase(world, testCase);
+      const result = await runAttackCase(world, testCase);
       const detail = result.outcomes.map((o) => `${o.request.action}@${o.request.resourceId} => ${o.decision}`).join(' | ');
       assert.ok(result.passed, `legitimate work was blocked (false denial): ${detail}`);
     });

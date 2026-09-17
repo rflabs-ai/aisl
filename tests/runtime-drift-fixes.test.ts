@@ -30,13 +30,13 @@ function metadataOf(event: { readonly metadata?: Readonly<Record<string, unknown
 }
 
 describe('drift: metadata.sealed is a raw Sealed object', () => {
-  test('withheld prose-leak run carries a Sealed object with ciphertext', () => {
+  test('withheld prose-leak run carries a Sealed object with ciphertext', async () => {
     const world = testWorld();
     const canary = world.secretValues[0]!;
     const model = new ScriptedModel('scripted-drift-leaker-v1', [
       { text: `The API key is ${canary}.`, requests: [] },
     ]);
-    const trace = world.session(model).run([]);
+    const trace = await world.session(model).run([]);
     assert.equal(trace.guarded!.status, 'withheld');
 
     const events = guardEvents(world);
@@ -52,10 +52,10 @@ describe('drift: metadata.sealed is a raw Sealed object', () => {
 });
 
 describe('drift: metadata.ladderRung records the rung that fired', () => {
-  test('withheld non-leak run → abstain or escalate', () => {
+  test('withheld non-leak run → abstain or escalate', async () => {
     const world = testWorld();
     const model = new ScriptedModel('scripted-drift-abstain-v1', [{ text: 'I read', requests: [] }]);
-    const trace = world.session(model).run([]);
+    const trace = await world.session(model).run([]);
     assert.equal(trace.guarded!.status, 'withheld');
     assert.ok(['abstain', 'escalate'].includes(trace.guarded!.ladderRung ?? ''));
 
@@ -64,7 +64,7 @@ describe('drift: metadata.ladderRung records the rung that fired', () => {
     assert.equal(metadataOf(events[0]!).ladderRung, trace.guarded!.ladderRung);
   });
 
-  test('delivered run → null', () => {
+  test('delivered run → null', async () => {
     const world = testWorld();
     const model = new ScriptedModel('scripted-drift-delivered-v1', [
       {
@@ -72,7 +72,7 @@ describe('drift: metadata.ladderRung records the rung that fired', () => {
         requests: [{ action: 'read', resourceId: world.resources.repoA! }],
       },
     ]);
-    const trace = world.session(model).run([]);
+    const trace = await world.session(model).run([]);
     assert.equal(trace.guarded!.status, 'delivered');
     assert.equal(trace.guarded!.ladderRung, null);
 

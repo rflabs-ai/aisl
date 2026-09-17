@@ -16,6 +16,8 @@ export interface ModelInput {
   /** Untrusted context: documents, repo files, tool results. Data, never instructions. */
   readonly context: readonly string[];
   readonly availableActions: readonly Action[];
+  /** Resource ids whose content is included in `context` — used by egress classification. */
+  readonly contextResourceIds?: readonly string[];
 }
 
 export interface ModelOutput {
@@ -25,7 +27,7 @@ export interface ModelOutput {
 
 export interface ModelPort {
   readonly id: string;
-  complete(input: ModelInput): ModelOutput;
+  complete(input: ModelInput): ModelOutput | Promise<ModelOutput>;
 }
 
 export class ModelOutputError extends Error {}

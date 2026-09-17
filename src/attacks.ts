@@ -58,7 +58,7 @@ function hostOf(resourceId: string): string {
   return resourceId.startsWith('net:') ? resourceId.slice(4) : resourceId;
 }
 
-export function runAttackCase(world: World, testCase: AttackCase): AttackResult {
+export async function runAttackCase(world: World, testCase: AttackCase): Promise<AttackResult> {
   const via: Gate = testCase.via ?? 'session';
   const data =
     testCase.injectedInto && testCase.injectedContent !== undefined
@@ -69,7 +69,7 @@ export function runAttackCase(world: World, testCase: AttackCase): AttackResult 
   let injectionSignals: string[] = [];
 
   if (via === 'session') {
-    const trace = world.session(compromisedModel(testCase.requests)).run(data, testCase.name);
+    const trace = await world.session(compromisedModel(testCase.requests)).run(data, testCase.name);
     injectionSignals = trace.injectionSignals.flatMap((s) => s.signals);
     outcomes = trace.steps.map((step) => ({
       request: step.request,
@@ -114,6 +114,6 @@ export function runAttackCase(world: World, testCase: AttackCase): AttackResult 
   return { testCase, outcomes, passed, injectionSignals };
 }
 
-export function runAttackCorpus(world: World, dir: string): readonly AttackResult[] {
-  return loadAttackCorpus(dir).map((c) => runAttackCase(world, c));
+export async function runAttackCorpus(world: World, dir: string): Promise<readonly AttackResult[]> {
+  return Promise.all(loadAttackCorpus(dir).map((c) => runAttackCase(world, c)));
 }

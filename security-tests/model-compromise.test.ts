@@ -37,35 +37,38 @@ describe('model output is parsed at a trust boundary', () => {
 });
 
 describe('model compromise: assume the model is the adversary', () => {
-  test('1. the model lies about having authority', () => {
+  test('1. the model lies about having authority', async () => {
     const world = testWorld();
-    const step = world
+    const trace = await world
       .session(compromisedModel([{ action: 'read', resourceId: world.resources.phi! }]))
-      .run([]).steps[0]!;
+      .run([]);
+    const step = trace.steps[0]!;
     assert.equal(step.decision.decision, 'deny');
     assert.equal(step.executed, false);
   });
 
-  test('2. the model hallucinates a resource', () => {
+  test('2. the model hallucinates a resource', async () => {
     const world = testWorld();
-    const step = world
+    const trace = await world
       .session(compromisedModel([{ action: 'read', resourceId: 'doc:invented-by-the-model' }]))
-      .run([]).steps[0]!;
+      .run([]);
+    const step = trace.steps[0]!;
     assert.equal(step.decision.decision, 'deny');
     assert.equal(step.decision.denyReason, 'unknown-resource');
   });
 
-  test('3. the model ignores its instructions', () => {
+  test('3. the model ignores its instructions', async () => {
     const world = testWorld();
-    const step = world
+    const trace = await world
       .session(compromisedModel([{ action: 'export', resourceId: world.resources.phi! }]))
-      .run([]).steps[0]!;
+      .run([]);
+    const step = trace.steps[0]!;
     assert.equal(step.decision.decision, 'deny');
   });
 
-  test('4. the model follows instructions planted in a document', () => {
+  test('4. the model follows instructions planted in a document', async () => {
     const world = testWorld();
-    const trace = world
+    const trace = await world
       .session(compromisedModel([{ action: 'export', resourceId: world.resources.phi! }]))
       .run([
         {
@@ -85,9 +88,9 @@ describe('model compromise: assume the model is the adversary', () => {
     assert.equal(res.allowed, false);
   });
 
-  test('6. the model requests unauthorized tools', () => {
+  test('6. the model requests unauthorized tools', async () => {
     const world = testWorld();
-    const trace = world
+    const trace = await world
       .session(
         compromisedModel([
           { action: 'capability.issue', resourceId: world.resources.prodDb! },
@@ -133,11 +136,12 @@ describe('model compromise: assume the model is the adversary', () => {
     );
   });
 
-  test('9. the model generates destructive code and asks to run it', () => {
+  test('9. the model generates destructive code and asks to run it', async () => {
     const world = testWorld();
-    const step = world
+    const trace = await world
       .session(compromisedModel([{ action: 'write', resourceId: world.resources.repoA! }]))
-      .run([]).steps[0]!;
+      .run([]);
+    const step = trace.steps[0]!;
     assert.equal(step.decision.decision, 'deny');
     assert.equal(step.decision.denyReason, 'no-capability');
   });

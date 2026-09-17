@@ -24,6 +24,68 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 14 — 2026-09-17 — opencode/m13-runtime-realism
+
+**Did:**
+- M13 landed from `PROMPTS/M13-runtime-realism.md` (three Stage-1 rows,
+  subagents A ∥ B in parallel, C after A; zero new runtime dependencies —
+  Node 24's built-in `fetch` covers provider HTTP; main session owned
+  `src/cli.ts` and docs).
+  - **A — Model provider adapters.** `ModelPort.complete` is async-capable
+    (`ModelOutput | Promise<ModelOutput>`) and `AgentSession.run()` is async;
+    `ModelInput.contextResourceIds` feeds egress classification.
+    `src/model-http.ts`: `HttpModelAdapter` (OpenAI-compatible, injectable
+    `fetch`, timeout + bounded retry/backoff, output always through
+    `parseModelOutput`) behind the **classification egress gate** —
+    `deriveClassification` over the content being sent must fit the configured
+    ceiling AND the PDP must allow `model.invoke` on the provider resource;
+    default-deny, refusals throw and never send; `model.call` events carry
+    id/duration/usage/decision only. 10 tests.
+  - **B — Verification pipeline.** `src/check-command.ts`: `CommandCheck` —
+    argv-array exec with no shell, config-time allowlist refusal, artifact
+    delivered via stdin only, minimal env (no ambient secrets), timeout →
+    fail; flows through the existing `runVerifications` path (failed checks
+    already mark steps errored). 10 tests. (B's first files were clobbered by
+    a concurrent tree operation; recreated main-session-side to the same
+    validated design.)
+  - **C — Structured telemetry.** `src/telemetry.ts`: `TelemetryPort` +
+    `JsonlTelemetry` (zero-dep JSONL, failure-swallowing `dropped` counter),
+    `denyReasonCounts` from existing step decisions (no PDP re-entry), and
+    runtime wiring for `session.start/end` + `pdp.denyReasons`. Dependency-
+    direction tests: the PDP never imports telemetry. 9 tests.
+- Demo section 18: scripted provider through the egress gate (allow →
+  `model.call` + telemetry line; ceiling refusal → deny event, fetch never
+  invoked), plus one `CommandCheck` pass and one intentional fail.
+- Claims 27 (egress gate) and 28 (telemetry, scoped honestly) added;
+  ROADMAP rows, CURRENT_STATE (counts, What works, What M13 closed) updated.
+
+**Left:**
+- Streaming responses, multi-provider SDK matrix, prompt caching — named
+  ceilings in the M13 prompt, none requested by a deployment.
+- OTel SDK adapter behind `TelemetryPort` when a collector exists (ADR-gated
+  dependency).
+- The adapter's transport-level containment (it runs in-process) — container-
+  backed check/provider execution remains the ADR-003 path.
+
+**Next session should:**
+- M12 (Postgres shift) or the REST API row. Watch the coordination note below.
+
+**Evidence:**
+- 347 tests, 0 failures, typecheck clean; commit 440ba58 re-lands M13 after
+  the commit-tree was verified green in a throwaway worktree.
+- Demo + benchmark produce sane output; all 14 SLO targets pass.
+
+**Coordination note (for every future session):** M13 ran in the same working
+tree as a concurrently-active M11 session. Two uncoordinated `git add`/commit/
+history-rewrite streams raced twice: M11's rewrite orphaned M13's first clean
+commit (3736a12, recovered via reflog and re-landed), and staged-but-uncommitted
+M11 states twice leaked into M13's commits (one had to be soft-reset and
+rebuilt). Rule going forward: one commit-writer per working tree, or commit in
+disjoint file sets inside one gate window — and re-check `git log` immediately
+before every `git commit`.
+
+---
+
 ### SESSION 13 — 2026-09-17 — opencode/m11-authz-depth
 
 **Did:**

@@ -60,9 +60,9 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[DONE]** |
 | Sandbox lifecycle management | create, limit, destroy, attest | container | M | P | **[ ]** |
 | Tenant isolation hardening | RLS, per-tenant keys | Postgres | L | E | **[ ]** |
-| Model provider adapters | real providers behind the port | ADR-005 | M | P | **[ ]** |
-| Verification pipeline | tests, linters, SAST on agent output | verification | M | P | **[ ]** |
-| Structured telemetry (OTel) | observability without ad-hoc logs | — | M | P | **[ ]** |
+| Model provider adapters | real providers behind the port | ADR-005 | M | P | **[DONE]** (M13: `src/model-http.ts` — OpenAI-compatible `HttpModelAdapter` over injectable `fetch` with retry/backoff/timeout, output always through `parseModelOutput`; classification egress gate is default-deny and not bypassable; Claim 27) |
+| Verification pipeline | tests, linters, SAST on agent output | verification | M | P | **[DONE]** (M13: `src/check-command.ts` — `CommandCheck`, argv-array exec with no shell, config-time allowlist refusal, artifact via stdin only, minimal env, timeout → fail; flows through `runVerifications`, no new authority) |
+| Structured telemetry (OTel) | observability without ad-hoc logs | — | M | P | **[DONE]** (M13: `src/telemetry.ts` — `TelemetryPort` + `JsonlTelemetry`, zero-dep JSONL; emission failures swallowed and counted; `session.start/end` + `pdp.denyReasons` wiring; the PDP never reads it (Claim 28). OTel SDK adapter behind the same port when a collector exists — ADR-gated dependency) |
 | Postgres schema + migrations | multi-node control plane | ADR-010 | M | P | **[ ]** |
 | Audit query + export API | customers read their own evidence | events | M | MVP | **[DONE]** (M6: authorized, tenant-scoped, offline verifyBundle, Claim 21) |
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[DONE]** (M11: `PolicyBundle`/`RoleBundle`, sha256 over `canonicalJson({version, rules|roles})` verified fail-closed, one `policy.load` event per load, `policy:diff` verifies versioned overlays; the review gate is git; Claim 26) |

@@ -1,15 +1,15 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M11 — authz depth (granular RBAC,
-classification propagation, policy bundles): roles narrow authority and never
-mint it, derived labels only raise, and policy loads are hash-verified
-artifacts. M10's SLO gate remains the non-regression baseline.
+Honest snapshot. Updated after M13 — runtime realism (model provider adapters
+behind a classification egress gate, a command-check verification pipeline,
+zero-dep structured telemetry). M11's authz depth and M10's SLO gate remain the
+non-regression baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~5,900 lines of source across 28 modules
-(`src/` — `policy-config.ts` is M11's addition), 318 test assertions
-(`tests/`, `security-tests/`), a 12-case attack
+TypeScript foundation on Node 24, ~6,600 lines of source across 31 modules
+(`src/` — `model-http.ts`, `check-command.ts`, and `telemetry.ts` are M13's
+additions), 347 tests (`tests/`, `security-tests/`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
@@ -127,6 +127,30 @@ dependencies: `typescript`, `@types/node`.
   legacy unversioned overlays still load. Stated honestly: authoring is still
   in-repo and the review gate is git — this is a verified artifact, not a
   policy service.
+- **Model provider adapters + egress gate (M13):** `HttpModelAdapter`
+  (`src/model-http.ts`) is an OpenAI-compatible transport behind the
+  `ModelPort` — injectable `fetch`, bounded retry with backoff, timeout, and
+  output always through the whitelist parser `parseModelOutput`. Sending
+  ingested content to an external provider is a disclosure, so the adapter
+  enforces a **classification egress gate**: `deriveClassification` over the
+  content about to be sent must fit the configured ceiling AND the PDP must
+  allow `model.invoke` on the synthetic provider resource. Default-deny, not
+  bypassable by config; refusals throw and never send. `model.call` events
+  record id/duration/usage/decision — never content, keys, or canaries
+  (Claim 27).
+- **Verification pipeline (M13):** `CommandCheck` (`src/check-command.ts`)
+  runs a configured argv array — no shell — against produced artifacts via
+  stdin, with a config-time command allowlist, a minimal environment (no
+  ambient secrets), and timeout → `fail`. Results flow through the existing
+  `runVerifications` path, so a failed check marks the step errored; no new
+  authority anywhere.
+- **Structured telemetry (M13):** `TelemetryPort` + `JsonlTelemetry`
+  (`src/telemetry.ts`) emit one JSON object per line (stdout or an injected
+  sink): `session.start`/`session.end` (ids, counts, durations),
+  `pdp.denyReasons` aggregates computed from existing step decisions, and
+  `model.call` outcomes from the adapter. Emission failures are swallowed and
+  counted (`dropped`) — telemetry is observability, never a control, and the
+  PDP never reads it (dependency-direction tests; Claim 28).
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
   ceilings, tenant isolation, deterministic output.
 - Authorization: capability AND policy, fail-closed on any internal error.
@@ -157,8 +181,8 @@ dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 318 assertions pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
-M6, M7, M8, M9, M10, M11:
+All 347 tests pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
+M6, M7, M8, M9, M10, M11, M13:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -168,7 +192,8 @@ principal (6)** | **M3 signatures/anchor/offline (13)** | **M4 authorization
 lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export (29)**
 | **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**
 | **M9 guard follow-ups + drift closure (26)** | **M10 assurance-target gate (5)**
-| **M11 authz depth (35: RBAC 12, propagation 11, bundles 12)**.
+| **M11 authz depth (35: RBAC 12, propagation 11, bundles 12)**
+| **M13 runtime realism (29: adapter + egress gate 10, command checks 10, telemetry 9)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -183,8 +208,8 @@ Measured this run (`benchmarks/results.json`):
 - Prompt-injection-driven requests: 4; successes: 0.
 - Legitimate tasks: 2/2 allowed; false-denial rate 0.
 - Audit completeness: 2122/2122 decisions recorded; hash chain valid.
-- Audit query latency p99: 0.250 ms; audit export latency p99: 0.271 ms.
-- Policy diff latency: 0.109 ms (one run, sub-ms).
+- Audit query latency p99: 0.228 ms; audit export latency p99: 0.259 ms.
+- Policy diff latency: 0.102 ms (one run, sub-ms).
 - Guard latency p99: 0.006 ms (1000 runs of a small honest input).
 - `falseClaimRate` 0 over 101 legitimate responses (fixture guard verdicts +
   100 honest R1-style sessions; target ≤ 1%).
@@ -455,6 +480,34 @@ granted and made the grant surface a verified artifact.
    unversioned ones. Stated honestly: authoring is still in-repo, the review
    gate is git, and a hash proves integrity rather than review — the
    residual is recorded in known-gap #6 and Claim 26.
+
+## What M13 closed
+
+M13 was the runtime-realism milestone (three Stage-1 rows, subagents A ∥ B ∥ C
+on disjoint surfaces, zero new runtime dependencies — `fetch` is built into
+Node 24). It did not change decision semantics: the PDP, capabilities, and
+guard are untouched; the model is still assumed compromised.
+
+1. ~~**The only model was `ScriptedModel` — no real provider, and no gate on
+   what a provider call discloses.**~~ `HttpModelAdapter` is a real transport
+   (OpenAI-compatible, injectable `fetch`), and every call passes the
+   **classification egress gate**: the derived classification of the content
+   being sent must fit the configured ceiling, and the PDP must allow
+   `model.invoke` on the provider resource. Both default-deny; the gate is not
+   bypassable by configuration. A provider receives nothing above the ceiling
+   (Claim 27). `model.call` events carry id/duration/usage/decision only.
+2. ~~**Post-execution verification had only built-in programmatic checks — no
+   path to run real linters/SAST.**~~ `CommandCheck` executes a configured
+   argv array (never a shell string), allowlisted at configuration time,
+   artifact delivered via stdin, minimal environment, timeout → fail. It flows
+   through the existing `runVerifications` path, so failed checks already mark
+   steps errored — the milestone added a check type, not authority.
+3. ~~**Observability was ad-hoc console output.**~~ Structured telemetry
+   (JSONL via `TelemetryPort`) covers session start/end, per-session
+   deny-reason aggregates (computed from existing decisions — no PDP
+   re-entry), and model-call outcomes. Failures are swallowed and counted;
+   the PDP never reads telemetry (dependency-direction tests). Scoped
+   honestly: it is observability, not a control (Claim 28).
 
 ## Watch-items from the M9 audit
 

@@ -25,6 +25,9 @@ import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-t
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
 import { ScriptedModel } from './model.ts';
+import { HttpModelAdapter, ModelEgressDeniedError } from './model-http.ts';
+import { CommandCheck } from './check-command.ts';
+import { JsonlTelemetry } from './telemetry.ts';
 import { evaluateSlo } from './slo.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -343,6 +346,142 @@ async function demo(): Promise<void> {
     tamperRefused = (e as Error).message;
   }
   line('tampered bundle refused (hash mismatch, fail closed)', tamperRefused ? 'REFUSED' : 'FAIL', tamperRefused);
+
+  // 18: M13 — a real provider port behind the egress gate, and command checks.
+  // The adapter is a transport, not a trust boundary: the compromised-model
+  // assumption is unchanged, and output still flows through parseModelOutput.
+  heading('18. M13: model provider adapter (egress gate) + command checks');
+  const m13ProviderResourceId = 'model:acme-provider';
+  world.registry.add(defineResource({ id: m13ProviderResourceId, type: 'api', tenantId: TENANT_A, classification: 'public', attributes: {} }));
+  const m13Policy = createPolicyEngine([
+    ...BASELINE_POLICY,
+    { id: 'allow-agent-model-invoke', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['model.invoke'], resources: { types: ['api'] } },
+  ]);
+  const m13Authz = new AuthorizationService(world.registry, m13Policy, world.eventLog, world.clock.now);
+  m13Authz.issue(world.root, {
+    subject: world.agent.id,
+    tenantId: TENANT_A,
+    resourceIds: [m13ProviderResourceId, r.repoA!],
+    actions: ['model.invoke', 'read'],
+    maxClassification: 'internal',
+    expiresAt: world.clock.now() + 600_000,
+    provenance: { source: 'policy-grant', note: 'M13 demo: provider egress at internal ceiling' },
+  });
+
+  // Scripted provider: a fetch mock shaped like an OpenAI chat-completions
+  // response, so the demo is deterministic and touches no network.
+  const m13ProviderCalls: number[] = [];
+  const m13ProviderBody = {
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          text: 'Repository A contains billing and invoice services.',
+          requests: [{ action: 'read', resourceId: r.repoA! }],
+        }),
+      },
+    }],
+    usage: { prompt_tokens: 12, completion_tokens: 9 },
+  };
+  const m13Fetch: typeof fetch = async () => {
+    m13ProviderCalls.push(1);
+    return new Response(JSON.stringify(m13ProviderBody), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  // The API key is resolved by the caller (in production, from the secret
+  // broker after a PDP allow); the adapter never logs it, and the tests prove
+  // it never reaches an event or an error message.
+  const m13TelemetryLines: string[] = [];
+  const m13Adapter = new HttpModelAdapter({
+    id: 'openai-compat',
+    providerResourceId: m13ProviderResourceId,
+    providerModel: 'gpt-4o-mini',
+    baseUrl: 'https://provider.test/v1',
+    apiKey: world.secretValues[0]!,
+    principal: world.agent,
+    authorization: m13Authz,
+    registry: world.registry,
+    eventLog: world.eventLog,
+    ceiling: 'internal',
+    content: new Map([[r.repoA!, world.content.get(r.repoA!) ?? '']]),
+    fetchImpl: m13Fetch,
+    telemetry: new JsonlTelemetry((l) => m13TelemetryLines.push(l)),
+  });
+
+  const m13Session = new AgentSession({
+    principal: world.agent,
+    agentId: world.agent.id,
+    model: m13Adapter,
+    task: 'Summarize repository A via the provider port.',
+    registry: world.registry,
+    authorization: m13Authz,
+    eventLog: world.eventLog,
+    tools: world.tools,
+    sandbox: new LocalSandbox(),
+    content: new Map([[r.repoA!, world.content.get(r.repoA!) ?? '']]),
+    checks: [],
+    now: world.clock.now,
+  });
+  const m13Trace = await m13Session.run([]);
+  const m13CallEvent = world.eventLog.all().filter((e) => e.action === 'model.call').at(-1);
+  const m13CallMeta = m13CallEvent?.metadata as { egress?: string; usagePromptTokens?: number } | undefined;
+  line(
+    'provider call through the egress gate',
+    m13Trace.steps[0]?.decision.decision === 'allow' && m13CallMeta?.egress === 'allow' ? 'ALLOW' : 'FAIL',
+    `model.call: egress=${m13CallMeta?.egress} usage=${m13CallMeta?.usagePromptTokens}tok, provider calls: ${m13ProviderCalls.length}`,
+  );
+  line('structured telemetry', 'EMIT', m13TelemetryLines.at(-1)?.slice(0, 100) ?? 'none');
+
+  // Ceiling refusal: content above the configured classification never leaves.
+  let m13Refusal = '';
+  try {
+    await m13Adapter.complete({
+      prompt: 'summarize',
+      context: [world.content.get(r.confidentialDoc!) ?? ''],
+      contextResourceIds: [r.confidentialDoc!],
+      availableActions: [],
+    });
+  } catch (e) {
+    m13Refusal = e instanceof ModelEgressDeniedError ? e.message : `unexpected: ${(e as Error).message}`;
+  }
+  const m13DenyEvent = world.eventLog
+    .all()
+    .filter((e) => e.action === 'model.call' && e.decision === 'deny')
+    .at(-1);
+  line(
+    'ceiling refusal (confidential > internal, nothing sent)',
+    m13Refusal && m13ProviderCalls.length === 1 && m13DenyEvent ? 'REFUSED' : 'FAIL',
+    `${m13Refusal || 'no refusal recorded'}; provider calls still: ${m13ProviderCalls.length}`,
+  );
+
+  // Command checks: allowlisted argv execution over produced artifacts.
+  const m13NodeAllowlist = [process.execPath];
+  const m13Checks = [
+    new CommandCheck({ name: 'lint-ok', argv: [process.execPath, '-e', 'process.exit(0)'], allowlist: m13NodeAllowlist }),
+    new CommandCheck({ name: 'lint-bad', argv: [process.execPath, '-e', 'process.exit(1)'], allowlist: m13NodeAllowlist }),
+  ];
+  const m13CheckSession = new AgentSession({
+    principal: world.agent,
+    agentId: world.agent.id,
+    model: new ScriptedModel('scripted-check-v1', [{ text: 'checked', requests: [{ action: 'read', resourceId: r.repoA! }] }]),
+    task: 'M13 command-check demo',
+    registry: world.registry,
+    authorization: m13Authz,
+    eventLog: world.eventLog,
+    tools: world.tools,
+    sandbox: new LocalSandbox(),
+    content: new Map([[r.repoA!, world.content.get(r.repoA!) ?? '']]),
+    checks: m13Checks,
+    now: world.clock.now,
+  });
+  const m13CheckTrace = await m13CheckSession.run([]);
+  const m13CheckStep = m13CheckTrace.steps[0]!;
+  const [m13PassV, m13FailV] = m13CheckStep.verifications;
+  line('command check passes (exit 0)', m13PassV?.result === 'pass' ? 'PASS' : 'FAIL', m13PassV?.evidence ?? 'missing');
+  line(
+    'command check fails (exit 1, step errored)',
+    m13FailV?.result === 'fail' ? 'FAIL' : 'FAIL',
+    `${m13FailV?.evidence ?? 'missing'}; verification failures already mark the step errored`,
+  );
 }
 
 async function attack(): Promise<void> {

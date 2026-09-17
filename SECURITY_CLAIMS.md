@@ -1065,3 +1065,120 @@ with a recomputed hash; the defense is the same one that guards every other
 line in the repo — review — plus the `policy.load` evidence trail, which makes
 the load attributable and detectable after the fact.
 
+## Claim 27 — A provider receives nothing above the configured classification ceiling (M13)
+
+**Claim:** When a session's content is sent to an external model provider
+through `HttpModelAdapter`, the egress gate refuses the call unless (a) the
+classification derived over the content being sent (`deriveClassification`
+over the session's capabilities, content map, registry, and the context
+resource ids) fits the adapter's configured ceiling, AND (b) the PDP allows
+`model.invoke` on the synthetic provider resource for the acting principal.
+The gate is default-deny and not bypassable by configuration: no capability
+issued, or content above the ceiling, means no bytes leave the process.
+
+**Mechanism:** `src/model-http.ts` — `complete()` first computes
+`deriveClassification(...)` over what is about to be sent and compares ranks
+against the configured `ceiling`; above it, the adapter appends a `model.call`
+event with `decision: 'deny'`, emits telemetry, throws
+`ModelEgressDeniedError`, and the injected `fetch` is never invoked. It then
+consults the PDP (`authorize` on a `model.invoke` action against the
+`providerResourceId`); a PDP deny produces the same refusal (the PDP appends
+its own audit event). Provider responses are untrusted: the body's message
+content is `JSON.parse`d and flows through `parseModelOutput` — the whitelist
+parser that drops unrecognized fields — and any malformed output fails closed
+(error event + throw, no fabricated output). Transport is injectable `fetch`
+with a timeout and bounded retry/backoff; non-retryable HTTP statuses fail
+immediately. `model.call` events record model id, duration, token usage, and
+the egress decision — never prompt, context, output text, API key, or
+canaries (parse/HTTP error messages are static strings so a hostile provider
+echoing canaries cannot leak them into events). The adapter is a transport,
+not a trust boundary: the compromised-model assumption is unchanged, and the
+session's guard still polices the text channel.
+
+**Threat model:** H7 (exfiltration via model prompt — the model call is itself
+an egress), H4 (model output is hostile input; the whitelist parser bounds
+what a hostile provider response can smuggle).
+
+**Assumptions:** the classification labels on the registry resources and the
+content map are truthful (garbage in, garbage out — the gate is only as good
+as the labels); the ceiling is configured by the operator, not the agent; the
+provider resource and `model.invoke` capability are issued through the
+normal issuance pipeline.
+
+**Evidence:** `tests/model-http.test.ts` — 10 cases: allow path (fetch called
+once, correct Authorization header, parsed output, usage recorded); ceiling
+refusal above `internal` (fetch NOT called, `model.call` deny event, throws);
+PDP deny with no capability issued (fetch not called, deny recorded,
+default-deny); retry on 5xx then success and bounded failure; malformed
+provider output (prose content, missing `choices`) fails closed with an error
+event and no output; timeout path; a scan of the full event log and every
+error message for the API key and a planted canary — neither appears
+anywhere; end-to-end through `AgentSession.run()`. The demo's scripted
+provider section exercises allow and refusal end-to-end.
+
+**Test:** `tests/model-http.test.ts`.
+
+**Known limitations:** the ceiling is derived coarsely (max over the session's
+content map and context ids — conservative by design, more withholding, never
+less; same ceiling doctrine as Claim 23). The gate covers the adapter's HTTP
+call only: a deployment that hands the model provider's SDK to a tool bypasses
+it, so the deployment rule is "all provider traffic goes through the
+adapter". No content-level DLP inside the prompt (a canary planted by the
+ingestion layer in a public-classification document would still be sent —
+that is H7's volume/semantic layer, not this ceiling). Streaming responses
+are out of scope; a streaming adapter must apply the same gate before the
+first byte.
+
+**Residual risk:** a provider operator sees and retains everything sent —
+that is inherent to cloud inference (IMPOSSIBLE+ table: confidentiality
+against a compromised provider is not claimable; customer-hosted inference is
+the answer). The claim is only: nothing above the configured ceiling is sent
+at all.
+
+## Claim 28 — Structured telemetry is observability, never a control (M13)
+
+**Claim:** Telemetry emission (session start/end with durations and counts,
+per-session PDP deny-reason aggregates, model-call outcomes) never changes an
+authorization decision, never blocks or fails a request, and never carries
+secrets, canaries, or unsealed model text. The PDP never reads telemetry, and
+telemetry code never re-enters the PDP for its aggregates.
+
+**Mechanism:** `src/telemetry.ts` — `TelemetryPort.emit(name, attrs)` writes
+one JSON object per line via `JsonlTelemetry` (stdout by default, injected
+sink for tests). Both serialization and the sink call are wrapped: an
+emission failure increments a `dropped` counter and never throws into the
+request path — a broken telemetry sink degrades evidence, not behavior.
+Aggregates come from `denyReasonCounts` over the step decisions the session
+already made — no re-entry into the PDP, no second evaluation. Runtime wiring
+emits only ids, counts, durations, and model ids. Two dependency-direction
+tests enforce the doctrine structurally: `src/pdp.ts` contains no telemetry
+import, and `src/runtime.ts` imports only the type.
+
+**Threat model:** H14/H15 adjacent (the health-signal gap); R3 spirit (the
+evidence/telemetry plane must not feed the decision plane).
+
+**Assumptions:** the JSONL consumer (stdout, collector) is outside the trust
+boundary — treat emitted lines as potentially readable by anyone with host
+access, which is exactly why the attribute discipline exists.
+
+**Evidence:** `tests/telemetry.test.ts` — 9 cases: lines are valid JSON with
+`ts`/`name` and intact attrs; sink throws → caller unaffected, `dropped`
+increments; unserializable attrs are dropped, not thrown; session wiring
+emits `session.start`/`session.end` (durationMs ≥ 0, allowed/denied counts
+correct) and `pdp.denyReasons` with the observed deny reason; a leakage scan
+over all emitted lines for canaries, model text, and task text — none appear;
+dependency-direction assertions (pdp.ts clean, runtime type-only).
+
+**Test:** `tests/telemetry.test.ts`.
+
+**Known limitations:** telemetry is best-effort by design — it is NOT
+evidence; the tamper-evident event log (Claims 8/19/21) remains the only
+record with integrity guarantees. A dropped line is lost forever; nothing
+buffers or retries. There is no sampling, batching, or export pipeline, and
+no OTel SDK — an adapter behind the same port is the upgrade path when a
+collector exists (that dependency needs its own ADR).
+
+**Residual risk:** an operator mistaking telemetry for evidence and acting on
+it in an incident. The claim itself is the guard: any use of telemetry as a
+control would violate this document and the dependency-direction tests.
+

@@ -114,6 +114,10 @@ export async function runAttackCase(world: World, testCase: AttackCase): Promise
   return { testCase, outcomes, passed, injectionSignals };
 }
 
+/** Sequential on purpose: every case shares one world, so evidence order must
+ *  stay corpus-deterministic even when a case's model returns real promises. */
 export async function runAttackCorpus(world: World, dir: string): Promise<readonly AttackResult[]> {
-  return Promise.all(loadAttackCorpus(dir).map((c) => runAttackCase(world, c)));
+  const results: AttackResult[] = [];
+  for (const c of loadAttackCorpus(dir)) results.push(await runAttackCase(world, c));
+  return results;
 }

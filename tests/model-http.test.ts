@@ -281,6 +281,77 @@ describe('HttpModelAdapter: egress classification ceiling (default-deny)', () =>
   });
 });
 
+describe('HttpModelAdapter: egress gate scans the payload, not just declared ids', () => {
+  test('confidential content in context with NO declared ids is refused, fetch not called', async () => {
+    const world = modelWorld();
+    registerProviderResource(world);
+    issueModelInvoke(world, 'restricted');
+    const { fetch: fetchImpl, calls } = recordingFetch([() => okResponse({ text: 'should never happen', requests: [] })]);
+    const a = adapter(world, fetchImpl, { ceiling: 'internal' });
+
+    await assert.rejects(
+      a.complete({
+        prompt: 'summarize',
+        context: [world.content.get('doc:acme-merger')!],
+        contextResourceIds: [],
+        availableActions: [],
+      }),
+      ModelEgressDeniedError,
+    );
+    assert.equal(calls.length, 0, 'undeclared above-ceiling content must never reach fetch');
+    const ev = modelCallEvents(world)[0]!;
+    assert.equal(ev.decision, 'deny');
+    assert.equal(ev.denyReason, 'classification-ceiling');
+    assert.equal((ev.metadata ?? {}).egress, 'refused-above-ceiling');
+  });
+
+  test('a fragment of map-covered classified content with no declared ids is refused', async () => {
+    const world = modelWorld();
+    registerProviderResource(world);
+    issueModelInvoke(world, 'restricted');
+    const { fetch: fetchImpl, calls } = recordingFetch([() => okResponse({ text: 'should never happen', requests: [] })]);
+    const a = adapter(world, fetchImpl, { ceiling: 'internal' });
+
+    await assert.rejects(
+      a.complete({
+        prompt: 'summarize',
+        context: ['acquire Northwind at 4.2x EBITDA'],
+        availableActions: [],
+      }),
+      ModelEgressDeniedError,
+    );
+    assert.equal(calls.length, 0);
+  });
+
+  test('context present with no content map is refused as unclassifiable', async () => {
+    const world = modelWorld();
+    registerProviderResource(world);
+    issueModelInvoke(world, 'restricted');
+    const { fetch: fetchImpl, calls } = recordingFetch([() => okResponse({ text: 'should never happen', requests: [] })]);
+    const a = adapter(world, fetchImpl, { content: undefined });
+
+    await assert.rejects(
+      a.complete({ prompt: 'summarize', context: ['anything at all'], availableActions: [] }),
+      ModelEgressDeniedError,
+    );
+    assert.equal(calls.length, 0);
+    const ev = modelCallEvents(world)[0]!;
+    assert.equal(ev.decision, 'deny');
+    assert.equal((ev.metadata ?? {}).egress, 'refused-unclassifiable');
+  });
+
+  test('empty context with no content map still reaches the PDP gate', async () => {
+    const world = modelWorld();
+    registerProviderResource(world);
+    issueModelInvoke(world, 'restricted');
+    const { fetch: fetchImpl } = recordingFetch([() => okResponse({ text: 'ok', requests: [] })]);
+    const a = adapter(world, fetchImpl, { content: undefined });
+
+    const out = await a.complete({ prompt: 'task', context: [], availableActions: [] });
+    assert.equal(out.text, 'ok');
+  });
+});
+
 describe('HttpModelAdapter: PDP default-deny', () => {
   test('no model.invoke capability: egress denied, fetch not called, both events recorded', async () => {
     const world = modelWorld();

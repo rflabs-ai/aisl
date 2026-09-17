@@ -72,6 +72,10 @@ src/
   policy-diff.ts      `npm run policy:diff` entry point
   guard.ts            output reliability layer: D2-D5, fallback ladder, sealed originals
   capability-request.ts agent request -> human approval -> narrow capability (M4)
+  policy-config.ts    versioned, hash-verified policy/role bundles (M11, Claim 26)
+  model-http.ts       OpenAI-compatible provider adapter + classification egress gate (M13, Claim 27)
+  check-command.ts    allowlisted argv command checks for the verification plane (M13)
+  telemetry.ts        TelemetryPort + zero-dep JSONL sink; observability, never a control (M13, Claim 28)
   slo.ts              assurance-target catalog + gate (ADR-014, M10)
   attacks.ts          declarative adversarial harness
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)

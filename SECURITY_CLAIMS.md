@@ -1080,7 +1080,12 @@ issued, or content above the ceiling, means no bytes leave the process.
 `deriveClassification(...)` over what is about to be sent and compares ranks
 against the configured `ceiling`; above it, the adapter appends a `model.call`
 event with `decision: 'deny'`, emits telemetry, throws
-`ModelEgressDeniedError`, and the injected `fetch` is never invoked. It then
+`ModelEgressDeniedError`, and the injected `fetch` is never invoked. The
+derivation takes the max over the WHOLE content map, so classified content a
+caller forgot to declare in `contextResourceIds` is still caught; a non-empty
+context with NO content map is refused as unclassifiable
+(`egress: 'refused-unclassifiable'`) — there is no adapter configuration that
+sends context without a classification oracle. It then
 consults the PDP (`authorize` on a `model.invoke` action against the
 `providerResourceId`); a PDP deny produces the same refusal (the PDP appends
 its own audit event). Provider responses are untrusted: the body's message
@@ -1105,9 +1110,12 @@ as the labels); the ceiling is configured by the operator, not the agent; the
 provider resource and `model.invoke` capability are issued through the
 normal issuance pipeline.
 
-**Evidence:** `tests/model-http.test.ts` — 10 cases: allow path (fetch called
+**Evidence:** `tests/model-http.test.ts` — 14 cases: allow path (fetch called
 once, correct Authorization header, parsed output, usage recorded); ceiling
-refusal above `internal` (fetch NOT called, `model.call` deny event, throws);
+refusal above `internal` (fetch NOT called, `model.call` deny event, throws),
+including map-covered confidential content and fragments sent with NO declared
+context ids; non-empty context with no content map refused as unclassifiable
+(fetch not called); empty context with no map still reaches the PDP gate;
 PDP deny with no capability issued (fetch not called, deny recorded,
 default-deny); retry on 5xx then success and bounded failure; malformed
 provider output (prose content, missing `choices`) fails closed with an error
@@ -1120,14 +1128,19 @@ provider section exercises allow and refusal end-to-end.
 
 **Known limitations:** the ceiling is derived coarsely (max over the session's
 content map and context ids — conservative by design, more withholding, never
-less; same ceiling doctrine as Claim 23). The gate covers the adapter's HTTP
-call only: a deployment that hands the model provider's SDK to a tool bypasses
-it, so the deployment rule is "all provider traffic goes through the
-adapter". No content-level DLP inside the prompt (a canary planted by the
+less; same ceiling doctrine as Claim 23). The gate's classification oracle is
+the adapter's content map plus the declared context ids: text that appears in
+neither — a derived summary, a fragment rewritten by the caller, hostile
+injected content — is free text and goes unexamined, exactly like the `prompt`
+field itself. That is not a configuration bypass (the coarse whole-map max
+catches undeclared ids for anything the map covers, and a missing map denies
+the call), it is the absence of content-level DLP: a canary planted by the
 ingestion layer in a public-classification document would still be sent —
-that is H7's volume/semantic layer, not this ceiling). Streaming responses
-are out of scope; a streaming adapter must apply the same gate before the
-first byte.
+H7's volume/semantic layer, the upgrade path. The deployment rule stands:
+construct the adapter with the session's content map, and route all provider
+traffic through the adapter — a deployment that hands the model provider's SDK
+to a tool bypasses the gate entirely. Streaming responses are out of scope; a
+streaming adapter must apply the same gate before the first byte.
 
 **Residual risk:** a provider operator sees and retains everything sent —
 that is inherent to cloud inference (IMPOSSIBLE+ table: confidentiality

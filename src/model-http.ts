@@ -61,7 +61,11 @@ export interface HttpModelConfig {
   readonly ceiling: Classification;
   /** Synthetic provider resource the PDP gates `model.invoke` on. */
   readonly providerResourceId: string;
-  /** Same content map the session holds — input to egress classification. */
+  /**
+   * Same content map the session holds — the egress gate's classification
+   * oracle. REQUIRED whenever context is sent: no map + non-empty context is
+   * refused as unclassifiable (default-deny).
+   */
   readonly content?: ReadonlyMap<string, string>;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
@@ -75,7 +79,7 @@ const SYSTEM_INSTRUCTION =
   + '{"text":string,"requests":[{"action":string,"resourceId":string,"justification"?:string}]}. '
   + 'No prose, no markdown fences, no extra fields.';
 
-type Egress = 'allow' | 'refused-above-ceiling' | 'pdp-denied' | 'provider-error' | 'parse-error';
+type Egress = 'allow' | 'refused-above-ceiling' | 'refused-unclassifiable' | 'pdp-denied' | 'provider-error' | 'parse-error';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -125,12 +129,31 @@ export class HttpModelAdapter implements ModelPort {
     const startedAt = Date.now();
 
     // 1. Egress classification — a security measure, never simplified away.
+    // `deriveClassification` takes the max over the WHOLE content map, so
+    // classified content the caller forgot to declare is still caught — as long
+    // as a content map exists. No map + non-empty context = a payload with no
+    // classification oracle: default-deny (text absent from the map is free
+    // text, same class as `prompt` — that is H7's content-level DLP, Claim 27
+    // limitations; hostile ingested text MUST stay sendable, its actions are
+    // what the PDP gates).
     const derived = deriveClassification({
       capabilities: this.cfg.authorization.capabilitiesFor(this.cfg.principal.id),
       content: this.cfg.content,
       registry: this.cfg.registry,
       requestedResourceIds: input.contextResourceIds ?? [],
     });
+    if (!this.cfg.content && input.context.length > 0) {
+      this.record({
+        startedAt,
+        decision: 'deny',
+        denyReason: 'classification-ceiling',
+        egress: 'refused-unclassifiable',
+        classification: derived,
+      });
+      throw new ModelEgressDeniedError(
+        'model egress refused: context present but the adapter has no content map to classify it',
+      );
+    }
 
     // 2. Ceiling check: default-deny. Refuse BEFORE the PDP consult and before
     // any fetch, so content above the ceiling never leaves the process.

@@ -24,6 +24,62 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 15 — 2026-09-17 — opencode/m12-prep-audit-closure
+
+**Did:**
+- Closed all four findings from the M11/M13 session audits
+  (`.scratch/session-audit/`), the prerequisites for M12:
+  - **Egress gate (M13-01):** the audit's proposed value-scan turned out to be
+    subsumed by existing behavior — `deriveClassification` already maxes over
+    the WHOLE content map, so map-covered confidential content with undeclared
+    `contextResourceIds` was always refused (two regression tests now pin it,
+    incl. a fragment case). The real residual — non-empty context with NO
+    content map — now fails closed (`egress: 'refused-unclassifiable'`, deny
+    event, fetch never invoked). Deny-on-unmatched-text was rejected by
+    design: hostile ingested content MUST stay sendable (the PDP gates its
+    actions, not its bytes); free text absent from the map is the same class
+    as `prompt` = H7 DLP, and Claim 27's limitations now say exactly that.
+    4 new tests (`tests/model-http.test.ts` 10 → 14).
+  - **Corpus ordering (M13-02):** `runAttackCorpus` restored to a sequential
+    `for ... await` loop (one line + invariant comment) — shared world,
+    corpus-deterministic evidence order, no accidental `Promise.all`
+    interleaving once a harness model returns real promises.
+  - **Docs drift (M11-01):** CURRENT_STATE "Measured this run" no longer
+    copies the four advisory latency digits (every `npm test` regenerates
+    `results.json` via `tests/slo.test.ts`, so copies are stale by
+    construction); it cites stable facts only and points at the artifact.
+  - **File map (M11-02):** PROJECT_CONTEXT map += `policy-config.ts`,
+    `model-http.ts`, `check-command.ts`, `telemetry.ts` — now matches src/
+    (31 modules).
+  - Drive-by: demo line 'command check fails' printed `FAIL` even when
+    behaving correctly (both ternary branches were 'FAIL'); now prints
+    `EXPECTED-FAIL`.
+- Docs: Claim 27 mechanism + limitations + evidence (SECURITY_CLAIMS),
+  CURRENT_STATE (counts 351, M13 suite 33, egress-gate wording ×2),
+  PROJECT_CONTEXT map, all four audit issue files → resolved with reasoning.
+
+**Left:**
+- Claim 27's free-text residual (content absent from the map, like `prompt`)
+  stays open until H7 content-level DLP — documented, not hidden.
+- Working tree left uncommitted for the operator (code + docs + regenerated
+  `benchmarks/results.json` + resolved audit files under untracked
+  `.scratch/`).
+
+**Next session should:**
+- Commit this closure sweep, then start M12 Phase 0: the Postgres ADR is
+  **ADR-018** (017 is taken by the M11 role model — the M12 prompt says
+  "verify in DECISIONS.md"). Phase 0 is docs-only (driver choice, schema,
+  RLS model, per-tenant key derivation, fail-closed-on-DB-down, SQLite stays
+  default behind an EventStore port).
+
+**Evidence:**
+- `npm run typecheck` clean; `npm test` 351/351 (99 suites); `npm run demo`
+  sane (egress allow + ceiling refusal + EXPECTED-FAIL lines); benchmark
+  regenerated last, exit 0, `slo.pass = true`, 0 hard failures of 14 targets,
+  audit completeness 2122/2122, `falseClaimRate` 0/101 — no SLO regression.
+
+---
+
 ### SESSION 14 — 2026-09-17 — opencode/m13-runtime-realism
 
 **Did:**

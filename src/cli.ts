@@ -479,7 +479,7 @@ async function demo(): Promise<void> {
   line('command check passes (exit 0)', m13PassV?.result === 'pass' ? 'PASS' : 'FAIL', m13PassV?.evidence ?? 'missing');
   line(
     'command check fails (exit 1, step errored)',
-    m13FailV?.result === 'fail' ? 'FAIL' : 'FAIL',
+    m13FailV?.result === 'fail' ? 'EXPECTED-FAIL' : 'FAIL',
     `${m13FailV?.evidence ?? 'missing'}; verification failures already mark the step errored`,
   );
 }

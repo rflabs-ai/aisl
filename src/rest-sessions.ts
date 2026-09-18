@@ -158,25 +158,30 @@ export function registerSessionRoutes(api: RestApi, deps: SessionRouteDeps): voi
       }
       scope = parsed;
     }
+    // Persist BEFORE consuming the single-use capability: if persist fails,
+    // the in-memory service is untouched and the capability is never minted.
+    // A stale persisted row (persist succeeded, service threw) is acceptable —
+    // no capability was consumed, so no permanent data loss (audit ticket 01).
+    if (deps.requestsStore) {
+      await deps.requestsStore.updateCapabilityRequestStatus(
+        ctx.principal.tenantId,
+        id,
+        'approved',
+        ctx.principal.id,
+      );
+    }
+    let approved;
     try {
-      const approved = deps.requests.approve(id, ctx.principal, scope);
-      if (deps.requestsStore) {
-        await deps.requestsStore.updateCapabilityRequestStatus(
-          ctx.principal.tenantId,
-          id,
-          'approved',
-          ctx.principal.id,
-        );
-      }
-      return {
-        status: 201,
-        body: { request: projectRequest(approved.request), capability: projectCapability(approved.capability) },
-      };
+      approved = deps.requests.approve(id, ctx.principal, scope);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('not found')) throw new RestRejection(404, 'not-found');
       if (message.includes('not pending')) throw new RestRejection(409, 'not-pending');
       throw new RestRejection(403, 'capability-request-denied');
     }
+    return {
+      status: 201,
+      body: { request: projectRequest(approved.request), capability: projectCapability(approved.capability) },
+    };
   });
 }

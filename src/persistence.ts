@@ -17,8 +17,14 @@
 
 import postgres, { type TransactionSql } from 'postgres';
 import { type StoreMigration } from './event-store-pg.ts';
+import { type CapabilityRequestStatus } from './capability-request.ts';
 
 type Sql = ReturnType<typeof postgres>;
+
+/** Matches the typed `CapabilityRequestStatus` in capability-request.ts. */
+const VALID_CAPABILITY_REQUEST_STATUSES: ReadonlySet<string> = new Set([
+  'pending', 'approved', 'denied', 'expired',
+]);
 
 /** JSON-serializable value: writable state is validated by construction. */
 type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: undefined | JsonValue };
@@ -432,6 +438,9 @@ export class PersistenceStore {
     status: string,
     decidedBy: string,
   ): Promise<CapabilityRequestRow | undefined> {
+    if (!VALID_CAPABILITY_REQUEST_STATUSES.has(status)) {
+      throw new Error(`invalid capability request status: ${JSON.stringify(status)} (expected one of: ${[...VALID_CAPABILITY_REQUEST_STATUSES].join(', ')})`);
+    }
     return this.run(tenantId, async (tx) => {
       const rows = await tx`
         UPDATE capability_requests

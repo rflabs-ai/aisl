@@ -266,22 +266,42 @@ and a capability issued in tenant A cannot be used by a tenant B principal.
 
 **Mechanism:** `src/pdp.ts:273` tenant equality check before policy;
 `@tenant-isolation` deny inside the engine; issuance refuses cross-tenant
-subjects; capabilities bind `tenantId`.
+subjects; capabilities bind `tenantId`. **M12 (Postgres mode):** the
+DATABASE enforces isolation on the control-plane tables — `ENABLE`+`FORCE
+ROW LEVEL SECURITY` with deny-by-default per-role policies
+(`src/tenant-rls.ts`, `src/persistence.ts`): `app_reader` sees only rows
+whose `tenant_id` equals the per-transaction context
+(`set_config('app.tenant_id', ..., is_local := true)`), unset context →
+NULL → false → **zero rows against hostile queries** (tested via
+`SET LOCAL ROLE app_reader` from a superuser connection — superuser itself
+is not the proof); per-tenant evidence keys (`sealFor`/`openFor`,
+`evidence-key:v2:<tenant>:<level>`) bind decryption to tenant identity, so
+one tenant's sealed evidence does not open under another tenant's key.
 
 **Threat model:** TM-003.
 
 **Assumptions:** single control-plane process; resource records carry the
-correct tenant id.
+correct tenant id; in Postgres mode the app connects as the non-superuser
+`app_rw` role (superuser bypass is operator discipline, enforced by
+DEPLOYMENT.md's role setup).
 
-**Evidence:** invariant 9 tests (three cases); ATK-003.
+**Evidence:** invariant 9 tests (three cases); ATK-003; M12 live-DB RLS
+proofs (17 tests against a real Postgres: zero rows without context, zero
+cross-tenant rows, INSERT with wrong context rejected, no cross-tenant
+seal opening); SQLite-mode parity suite (memory + SQLite backends).
 
-**Test:** `tests/invariants.test.ts` invariant 9.
+**Test:** `tests/invariants.test.ts` invariant 9;
+`tests/tenant-rls.test.ts` (live-DB RLS proofs);
+`tests/event-store-pg.test.ts` (backend parity).
 
-**Known limitations:** logical isolation only. All tenants share one process, one
-memory space, and one SQLite table.
+**Known limitations:** logical isolation only. All tenants share one
+process and one memory space. In SQLite mode they share one SQLite table
+(app-level checks are the only control); SQL-level isolation exists only
+in Postgres mode (`EVENT_STORE=postgres`), where it covers the database —
+not the shared process memory.
 
-**Residual risk:** memory-disclosure or serialization bugs cross the boundary;
-SQL-level isolation does not yet exist.
+**Residual risk:** memory-disclosure or serialization bugs cross the
+boundary in both modes; a superuser connection bypasses RLS entirely.
 
 ---
 

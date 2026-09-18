@@ -1,17 +1,20 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M12 phase 1 — the EventStore port, a Postgres
-event backend (`src/event-store-pg.ts`, `postgres@3.4.9` per ADR-018), a
-forward-only migration framework, and clean Postgres-mode skips without a
-database. M13's runtime realism, M11's authz depth and M10's SLO gate remain
-the non-regression baseline.
+Honest snapshot. Updated after M12 — Postgres control plane (ADR-018): the
+EventStore port, a Postgres event backend (`src/event-store-pg.ts`,
+`postgres@3.4.9`), a forward-only hash-recorded migration framework,
+database-enforced tenant isolation (RLS + per-tenant evidence keys), a
+persistence service, and a rehearsed backup/restore drill — all verified
+against a live Postgres container. SQLite default unchanged. M13's runtime
+realism, M11's authz depth and M10's SLO gate remain the non-regression
+baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~7,000 lines of source across 32 modules
-(`src/` — `event-store-pg.ts` is M12's addition), 373 tests (`tests/`,
-`security-tests/`; 365 pass, 8 Postgres-mode tests skip cleanly without
-`DATABASE_URL`), a 12-case attack
+TypeScript foundation on Node 24, ~7,600 lines of source across 34 modules
+(`src/` — `event-store-pg.ts`, `tenant-rls.ts`, and `persistence.ts` are
+M12's additions), 387 tests (`tests/`, `security-tests/`; 374 pass, 13
+Postgres-mode tests skip cleanly without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
@@ -151,13 +154,11 @@ Dev dependencies: `typescript`, `@types/node`.
   ambient secrets), and timeout → `fail`. Results flow through the existing
   `runVerifications` path, so a failed check marks the step errored; no new
   authority anywhere.
-- **Structured telemetry (M13):** `TelemetryPort` + `JsonlTelemetry`
-  (`src/telemetry.ts`) emit one JSON object per line (stdout or an injected
-  sink): `session.start`/`session.end` (ids, counts, durations),
-  `pdp.denyReasons` aggregates computed from existing step decisions, and
-  `model.call` outcomes from the adapter. Emission failures are swallowed and
-  counted (`dropped`) — telemetry is observability, never a control, and the
-  PDP never reads it (dependency-direction tests; Claim 28).
+- **Structured telemetry (M13):** `TelemetryPort` + `JsonlTelemetry` (`src/telemetry.ts`) emit one JSON object per line (stdout or an injected sink): `session.start`/`session.end` (ids, counts, durations), `pdp.denyReasons` aggregates computed from existing step decisions, and `model.call` outcomes from the adapter. Emission failures are swallowed and counted (`dropped`) — telemetry is observability, never a control, and the PDP never reads it (dependency-direction tests; Claim 28).
+- **Postgres event backend (M12):** `EventStore` port (exactly `EventLog`'s public surface) with two implementations — `EventLog` (SQLite + in-memory, the default) and `PostgresEventLog` (`src/event-store-pg.ts`, `postgres@3.4.9`, zero transitive deps, raw SQL via tagged templates, no ORM/pooling). Forward-only, versioned, sha256-recorded migrations (ids 1–3, wired from `tenant-rls.ts`/`persistence.ts`); a recorded id with a changed hash refuses to open (tamper). Chain rehydrate + verify on connect (resume parity with `EventLog.resume()`); appends persist through the same signing/hash helpers; the migrate event is persisted before `whenReady()` resolves. Opt-in via `EVENT_STORE=postgres` + `DATABASE_URL` (ambient `DATABASE_URL` alone flips nothing). Fail-closed: appends before ready throw, a failed write closes the store, and error messages redact the URL/credentials (secret-scan test).
+- **Database-enforced tenant isolation (M12, Postgres mode):** `FORCE RLS` + deny-by-default per-role policies on the control-plane tables (`src/tenant-rls.ts` for `security_events`, `src/persistence.ts` for the state tables). `app_reader` is tenant-scoped via the per-transaction context (`set_config('app.tenant_id', ..., is_local := true)`): unset context → zero rows, hostile queries → zero rows, wrong context → only that tenant (proven live via `SET LOCAL ROLE app_reader` — superuser is not the proof); per-tenant evidence keys (`sealFor`/`openFor`, `evidence-key:v2:<tenant>:<level>`) bind decryption to tenant identity with **no silent re-encryption** of legacy seals. SQLite mode stays app-level (Claim 9 updated).
+- **Backup + restore (M12):** `tools/backup.ps1` (plain-SQL `pg_dump`, host pg_dump preferred with docker fallback; password via `PGPASSWORD` env, never argv/logs) and a rehearsed restore test — dump → restore into a scratch db → chain `verify()` + signature check + `verifyBundle()` + persistence row parity all pass live.
+- **Persistence (M12):** `PersistenceStore` (`src/persistence.ts`) — RLS'd `projects`/`tasks`/`agent_sessions` (+ `capability_requests` table per ADR-018) with tenant-bound CRUD, upserted resumable session state, defense-in-depth cross-tenant refusals, roundtrip + restart tests live.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
   ceilings, tenant isolation, deterministic output.
 - Authorization: capability AND policy, fail-closed on any internal error.
@@ -188,8 +189,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 351 tests pass. Coverage of the twelve invariants plus M2, M3, M4, M5,
-M6, M7, M8, M9, M10, M11, M13:
+All 387 tests pass (374 green; 13 Postgres-mode tests skip without
+`DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
+live at 28 + 17 + 5 tests against a disposable container). Coverage of the
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -200,7 +203,8 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M7 policy testing framework (12)** | **M8 reliability layer + R1-R3 (26)**
 | **M9 guard follow-ups + drift closure (26)** | **M10 assurance-target gate (5)**
 | **M11 authz depth (35: RBAC 12, propagation 11, bundles 12)**
-| **M13 runtime realism (33: adapter + egress gate 14, command checks 10, telemetry 9)**.
+| **M13 runtime realism (33: adapter + egress gate 14, command checks 10, telemetry 9)**
+| **M12 platform shift (50: backend parity 28, tenant RLS + keys 17, persistence/restore 5)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -235,6 +239,15 @@ code. They are not evidence of security against a competent adversary.
   `capabilityId` attribution field, and a self-referential `world` initialization.
 - `tsc` initially rejected `.ts` import extensions until
   `allowImportingTsExtensions` was enabled.
+- **M12:** the migrate event initially raced `close()` — `whenReady()` resolved
+  after connect but before the event's persist was queued to land, losing the
+  record (fixed: connect awaits its own persist directly; no double-persist via
+  the append queue). The first flip-on-`DATABASE_URL` construction seam broke
+  every in-process test world (fixed: opt-in via `EVENT_STORE=postgres`,
+  ADR-018 amended). A live-DB run then surfaced: migration id 3 was not
+  idempotent on re-apply (fixed: `IF NOT EXISTS`, matching id 1's posture) and
+  the backend tamper test needed to disarm the new append-only trigger first
+  (fixed, mirroring the SQLite tamper posture).
 
 No M3-relevant test failure was suppressed. Nothing was skipped or marked
 `todo` to make the suite green.
@@ -269,7 +282,10 @@ Ordered by severity.
    next step (H10/H12 territory).
 7. **Shared process for all tenants.** Logical isolation only; one memory-safety
    bug crosses every boundary. Container sandbox isolates per-task when Docker is
-   available.
+   available. **M12 (Postgres mode) narrows the data blast radius: the database
+   enforces tenant isolation on stored rows (RLS) and per-tenant keys bind
+   sealed-evidence decryption to tenant identity — but the shared PROCESS
+   remains (both modes).**
 8. **No transport security** because there is no transport.
 9. **Detector risk.** `detectInjectionSignals` could be mistaken for a control by
    a future maintainer. It is telemetry.
@@ -278,10 +294,15 @@ Ordered by severity.
     caller supplies; a caller can overstate it. Delegation must carry the
     parent's signature (ADR-002, H1).
 12. **No multi-node capability revocation broadcast.** In-process revocation is
-    immediate; a multi-node deployment needs a revocation channel (H13).
+    immediate; a multi-node deployment needs a revocation channel (H13). M12
+    gives Postgres mode the storage it needs (one writer is still enforced:
+    `PostgresEventLog` is single-process, single-writer — a second node must
+    land the revocation channel first).
 13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
     mode (H15). IdP outage now has a distinct deny reason and health signal.
+    **M12 adds a third: an unreachable/mid-migration Postgres denies with
+    `store-unavailable` and a loud event — the degraded mode is explicit.**
 14. ~~**Policy cannot express resource hierarchy.**~~ **M5 closed**:
     `PolicyRule.resources.idPatterns` supports recursive `tenant/...` and
     single-segment `prefix*`/`prefix?` globs. Patterns are compiled once at
@@ -518,6 +539,40 @@ guard are untouched; the model is still assumed compromised.
    re-entry), and model-call outcomes. Failures are swallowed and counted;
    the PDP never reads telemetry (dependency-direction tests). Scoped
    honestly: it is observability, not a control (Claim 28).
+
+## What M12 closed
+
+M12 was the platform-shift milestone (ADR-018, Postgres control plane;
+Phase 0 ADR → Phase 1 backend → Phase 2 B ∥ C on disjoint surfaces; the
+second runtime dependency ever admitted, per the ADR-015 policy). Decision
+semantics did not change: capability AND policy still gate every action.
+
+1. ~~**There is no multi-node state store.**~~ ADR-018 lands the Postgres
+   control plane: `EventStore` port with `PostgresEventLog`
+   (`src/event-store-pg.ts`) beside the default SQLite `EventLog`;
+   forward-only, versioned, sha256-recorded migrations (ids 1–3) that
+   refuse a tampered hash; opt-in via `EVENT_STORE=postgres` +
+   `DATABASE_URL`; fail-closed on unreachable store (`store-unavailable`)
+   with no silent fallback. Postgres mode is verified live (backend parity
+   28 tests); SQLite default unchanged (ADR-010's air-gapped install
+   remains a feature, not a deprecation).
+2. ~~**Tenant isolation is app-code only (known-gap #7, partially).**~~ The
+   database now enforces it in Postgres mode: `FORCE RLS` +
+   deny-by-default per-role policies — the `app_reader` role reads only its
+   tenant's rows, hostile queries read zero rows (live-tested via
+   `SET LOCAL ROLE`; the superuser connection is not the proof). Per-tenant
+   evidence keys (`evidence-key:v2:<tenant>:<level>`) bind sealed-evidence
+   decryption to tenant identity, no silent re-encryption. What remains
+   true: the shared process, and that all of this is Postgres-mode only.
+3. ~~**Backups were assumed, not rehearsed.**~~ `tools/backup.ps1`
+   (`pg_dump`, plain SQL, docker fallback) plus a restore test that dumps,
+   restores into a scratch database, and proves the restored chain verifies
+   (`verify()` + signatures + `verifyBundle()` + persistence parity) live.
+4. ~~**Nothing survives restart except events.**~~ `PersistenceStore`
+   (`src/persistence.ts`) keeps `projects`/`tasks`/`agent_sessions` under
+   RLS with tenant-bound CRUD and upserted resumable session state
+   (roundtrip + restart tests live). The `capability_requests` table
+   exists per ADR-018; its API is a future seam.
 
 ## Watch-items from the M9 audit
 

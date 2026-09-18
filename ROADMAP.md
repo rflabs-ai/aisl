@@ -33,7 +33,7 @@ where it exists today.
 | Benchmark runner | measured, not claimed | harness | S | MVP | **[DONE]** |
 | Architecture / threat / claims docs | claim discipline | — | M | MVP | **[DONE]** |
 | REST API surface | real clients | PDP, session | M | P | **[ ]** |
-| Project / task / session persistence | survive restart | Postgres | M | P | **[ ]** |
+| Project / task / session persistence | survive restart | Postgres | M | P | **[DONE]** (M12: `src/persistence.ts` — RLS'd `projects`/`tasks`/`agent_sessions` tables + tenant-bound CRUD API, upserted resumable session state; roundtrip + restart tests live) |
 | Basic document ingestion | chunk, label, classify | registry | M | P | **[ ]** |
 | Basic Git integration | read-only repo access | sandbox | M | P | **[ ]** |
 | Minimal UI (task + evidence view) | operator usability | REST API | M | P | **[ ]** |
@@ -59,14 +59,14 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[DONE]** |
 | Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[DONE]** |
 | Sandbox lifecycle management | create, limit, destroy, attest | container | M | P | **[ ]** |
-| Tenant isolation hardening | RLS, per-tenant keys | Postgres | L | E | **[ ]** |
+| Tenant isolation hardening | RLS, per-tenant keys | Postgres | L | E | **[DONE]** (M12: `FORCE RLS` + deny-by-default per-role policies on the control-plane tables — `app_reader` tenant-scoped, hostile queries read zero rows (live-DB tested, superuser not the proof); per-tenant evidence keys `evidence-key:v2:<tenant>:<level>`, no silent re-encryption; Postgres mode only — SQLite mode stays app-level; Claim 9) |
 | Model provider adapters | real providers behind the port | ADR-005 | M | P | **[DONE]** (M13: `src/model-http.ts` — OpenAI-compatible `HttpModelAdapter` over injectable `fetch` with retry/backoff/timeout, output always through `parseModelOutput`; classification egress gate is default-deny and not bypassable; Claim 27) |
 | Verification pipeline | tests, linters, SAST on agent output | verification | M | P | **[DONE]** (M13: `src/check-command.ts` — `CommandCheck`, argv-array exec with no shell, config-time allowlist refusal, artifact via stdin only, minimal env, timeout → fail; flows through `runVerifications`, no new authority) |
 | Structured telemetry (OTel) | observability without ad-hoc logs | — | M | P | **[DONE]** (M13: `src/telemetry.ts` — `TelemetryPort` + `JsonlTelemetry`, zero-dep JSONL; emission failures swallowed and counted; `session.start/end` + `pdp.denyReasons` wiring; the PDP never reads it (Claim 28). OTel SDK adapter behind the same port when a collector exists — ADR-gated dependency) |
-| Postgres schema + migrations | multi-node control plane | ADR-010 | M | P | **[ ]** |
+| Postgres schema + migrations | multi-node control plane | ADR-010 | M | P | **[DONE]** (M12: ADR-018 — `postgres@3.4.9` zero-transitive-dep driver, `EventStore` port over `EventLog` (SQLite default) and `PostgresEventLog` (`src/event-store-pg.ts`), forward-only hash-recorded migrations (ids 1–3) with tamper refusal, opt-in via `EVENT_STORE=postgres` + `DATABASE_URL`, fail-closed `store-unavailable` denyReason) |
 | Audit query + export API | customers read their own evidence | events | M | MVP | **[DONE]** (M6: authorized, tenant-scoped, offline verifyBundle, Claim 21) |
 | Configuration management | versioned, reviewable, attributable | policy | M | P | **[DONE]** (M11: `PolicyBundle`/`RoleBundle`, sha256 over `canonicalJson({version, rules|roles})` verified fail-closed, one `policy.load` event per load, `policy:diff` verifies versioned overlays; the review gate is git; Claim 26) |
-| Backup + restore | availability of evidence | Postgres | M | E | **[ ]** |
+| Backup + restore | availability of evidence | Postgres | M | E | **[DONE]** (M12: `tools/backup.ps1` — plain-SQL `pg_dump` (host pg_dump preferred, docker fallback), restore rehearsed in a test: restored chain `verify()` + signature check + `verifyBundle()` + persistence row parity all pass live) |
 | Hierarchical resource matching | "all docs under project X" — prefixes/globs, not exact ids | policy | M | P | **[DONE]** |
 | Capability revocation | revoke a capability and have it take effect everywhere | PDP | M | MVP | **[DONE (in-process); multi-node broadcast = H13]** |
 | Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23; M9: Escalate wired to M4, classification derived per session, second-pass guard) |
@@ -82,13 +82,13 @@ pipeline, structured telemetry — **done**; ran concurrently with M11 on
 disjoint module surfaces, zero new runtime dependencies),
 `PROMPTS/M12-platform-shift.md`
 (Postgres ADR-018 + schema/migrations + tenant isolation + backup/restore —
-**[NEXT]**; Phase 0 **[DONE]**: ADR-018 written into DECISIONS.md — driver
-chosen (`postgres.js`; pinned when the dependency lands in Phase 1), schema,
-RLS model (two roles: runtime global-chain read, reader tenant-scoped),
-per-tenant key derivation, fail-closed
-reason named. Phase 1 (EventStore port + `src/event-store-pg.ts` + migrations
-framework) is the next move; B and C wait on it). M10 ran
-first — it set the SLO baseline every later milestone must not regress.
+**[DONE]**; Phase 0: ADR-018 (driver `postgres.js` pinned as `postgres@3.4.9`,
+schema, two-role RLS model, per-tenant key derivation, fail-closed
+`store-unavailable`); Phase 1: `EventStore` port + `PostgresEventLog` +
+migrations framework; Phase 2: B (RLS policies + per-tenant keys) ∥ C
+(backup/restore + persistence) ran in parallel on disjoint surfaces. All
+verified against a live Postgres container; SQLite default unchanged).
+M10 ran first — it set the SLO baseline every later milestone must not regress.
 
 ---
 

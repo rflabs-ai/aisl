@@ -281,8 +281,11 @@ describe('M12 EventStore persistence parity: postgres', () => {
     await a.whenReady();
     a.close();
 
-    // Privileged direct-SQL tamper (no triggers until Phase 2): the resume
-    // chain check must refuse the store.
+    // Privileged direct-SQL tamper: the append-only guard (migration id 2)
+    // must be disarmed by the same privileged actor that tampers, exactly
+    // like the SQLite file-level tamper this test mirrors — the resume
+    // chain check must then refuse the store.
+    await pgAdmin!`DROP TRIGGER IF EXISTS security_events_no_update ON security_events`;
     await pgAdmin!`UPDATE security_events SET event = replace(event, '"result":"success"', '"result":"error"')`;
 
     const b = new PostgresEventLog({ url: DATABASE_URL! });

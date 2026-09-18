@@ -13,6 +13,8 @@
 import { createHash } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import postgres from 'postgres';
+import { RLS_MIGRATION } from './tenant-rls.ts';
+import { PERSISTENCE_MIGRATION } from './persistence.ts';
 import {
   type AuditFilters,
   type AuditExport,
@@ -57,6 +59,13 @@ export const MIGRATIONS: readonly StoreMigration[] = [
       CREATE INDEX IF NOT EXISTS security_events_tenant_seq ON security_events (tenant_id, seq);
     `,
   },
+  // ADR-018 phase 2: database-enforced tenant isolation on the evidence
+  // table (deny-by-default per-role policies, append-only triggers), wired
+  // from src/tenant-rls.ts so RLS owns its own DDL.
+  RLS_MIGRATION,
+  // ADR-018 phase 2: control-plane state tables (persistence + their RLS),
+  // wired from src/persistence.ts.
+  PERSISTENCE_MIGRATION,
 ];
 
 interface AppliedMigration {

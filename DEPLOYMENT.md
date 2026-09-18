@@ -34,6 +34,57 @@ backups, DR, admin access, customer responsibility, vendor responsibility.
 - **Admin access:** named accounts, MFA, dual control for policy changes.
 - **Customer:** host, accounts, physical. **Vendor:** software, updates.
 
+### Postgres mode (multi-node control plane — M12, opt-in)
+
+The default stays SQLite (ADR-010's single-process mode). Postgres mode is
+**opt-in**: set `EVENT_STORE=postgres` **and** `DATABASE_URL`. An ambient
+`DATABASE_URL` alone does nothing.
+
+- **Provisioning:**
+  1. Postgres 16 (container or native). Create a database for the runtime,
+     e.g. `docker run -d --name sec-layer-pg -e POSTGRES_PASSWORD=... -p 5433:5432 postgres:16`.
+  2. Set `DATABASE_URL=postgres://...` (the runtime role connection; the URL
+     is a secret — inject via secret broker/env, never log it, never in argv).
+  3. First connect with `MIGRATION_DATABASE_URL` set to a DDL-capable
+     (superuser or owner) connection: the runner bootstraps the `migrations`
+     bookkeeping table, the cluster-level `app_rw`/`app_reader` roles
+     (NOLOGIN, no passwords in DDL), then applies forward-only migrations
+     ids 1–3, each sha256-recorded. A recorded id with a changed hash is a
+     tamper signal and refuses to open.
+  4. Operator out-of-band (migration framework never does this): grant
+     `LOGIN` + passwords to `app_rw` (runtime) and `app_reader` (audit path)
+     with the documented privileges, set `pg_hba` to TLS-only from the
+     runtime's hosts, and restrict the DDL role to the migration runner.
+  5. Run the runtime as `app_rw` only. **A superuser connection bypasses
+     row-level security entirely** — that bypass is operator discipline,
+     not a control.
+- **Row-level security (what the database enforces):** all control-plane
+  tables are `FORCE RLS` with deny-by-default per-role policies. The runtime
+  role (`app_rw`) reads the whole evidence chain (global seq, one signer)
+  and appends; the audit role (`app_reader`) is tenant-scoped via the
+  per-transaction context (`set_config('app.tenant_id', ..., is_local :=
+  true)`): unset context reads **zero rows**, a hostile query without
+  context reads **zero rows**, wrong context reads only that tenant. The
+  live-DB test suite proves this against a real server
+  (`tests/tenant-rls.test.ts`).
+- **Backup cadence:** `tools/backup.ps1` — plain-SQL `pg_dump` (host
+  `pg_dump` on PATH preferred, docker-exec fallback; password via
+  `PGPASSWORD` env, never argv, never logged). Cadence: at minimum daily,
+  plus before every upgrade; the head-hash anchor file (M3) is NOT part of
+  the dump and must be backed up separately on its own schedule — it is the
+  external witness that makes a restored store trustworthy.
+- **Restore drill:** rehearsed in CI by test
+  (`tests/persistence-restore.test.ts`: dump → restore into a scratch
+  database → chain `verify()` + signature check + `verifyBundle()` +
+  persistence row parity). Manual drill: restore the dump into a scratch
+  database, run the verifier against it, compare the chain head against the
+  anchor file, THEN promote. A restore that does not pass `verify()` is not
+  a restore.
+- **Fail-closed:** an unreachable, unauthenticatable, or mid-migration
+  Postgres denies every decision that needs the store with
+  `denyReason: 'store-unavailable'` and one loud health event (H15). There
+  is no silent fallback.
+
 ### SaaS multi-tenant
 
 - **Trust boundary:** tenant isolation is logical and must be tested continuously.

@@ -89,19 +89,57 @@ was left, and what the next session should pick up.
     unavailable this session) — the 8 PG tests have never run against a live
     server yet. Milestone acceptance requires a disposable container run
     (`DATABASE_URL`) before the M12 close-out.
-  - Two `ponytail:` markers added in `event-store-pg.ts` (append-time
-    timestamp; mirror-reads instead of SQL-side filtering until the port goes
-    async / reader-role server-side filtering in Phase 2).
+- Two `ponytail:` markers added in `event-store-pg.ts` (append-time
+  timestamp; mirror-reads instead of SQL-side filtering until the port goes
+  async / reader-role server-side filtering in Phase 2).
+- **Phase 2 landed — B ∥ C in parallel on disjoint surfaces, then main-session
+  wiring:**
+  - **B — tenant isolation:** `src/tenant-rls.ts` (migration id 2:
+    `FORCE RLS` + deny-by-default per-role policies on `security_events` —
+    `app_rw` global read/insert, `app_reader` tenant-scoped via
+    `set_config('app.tenant_id', ..., is_local := true)`, revoked
+    UPDATE/DELETE + raising triggers); per-tenant evidence keys in
+    `src/seal.ts` (`sealFor`/`openFor`, `evidence-key:v2:<tenant>:<level>`,
+    legacy ids still open, no silent re-encryption, collision analysis in
+    the file header). Live: 17/17 (hostile queries read ZERO rows via
+    `SET LOCAL ROLE app_reader` — superuser not the proof).
+  - **C — backup/restore + persistence:** `src/persistence.ts` (migration
+    id 3: RLS'd `capability_requests`/`projects`/`tasks`/`agent_sessions` +
+    tenant-bound CRUD with upserted resumable session state);
+    `tools/backup.ps1` (plain-SQL pg_dump, host preferred/docker fallback,
+    password via `PGPASSWORD` env never argv); rehearsed restore test
+    (dump → scratch restore → `verify()` + signatures + `verifyBundle()` +
+    row parity). Live: 5/5.
+  - **Main-session wiring:** both migrations into the shared `MIGRATIONS`
+    array (direct spread — no indirections); the backend tamper test drops
+    the new append-only trigger first (mirrors the SQLite tamper posture);
+    `EVENT_STORE=postgres` opt-in seam (ADR-018 amended).
+- **Live-DB run (first real Postgres run):** user provided a disposable
+  container (`sec-layer-pg`, port 5433). It exposed three real bugs, all
+  fixed: (1) migrate event lost to a `whenReady()`/`close()` race (connect
+  now awaits its own persist directly, no double-persist); (2) first
+  flip-on-`DATABASE_URL` construction seam broke every in-process test
+  world (fixed: explicit opt-in, ADR-018 amended); (3) migration id 3 not
+  idempotent on re-apply after partial batches (`IF NOT EXISTS`, matching
+  id 1's posture). All three live suites re-run green post-fix (28 + 17 +
+  5).
+- Docs sweep: ROADMAP 4 rows → [DONE] (Stage-0 persistence, Stage-1
+  Postgres schema + tenant hardening + backup/restore) + M12 paragraph;
+  Claim 9 mechanism/limitations updated (RLS + per-tenant keys, honest
+  residuals: shared process, superuser bypass, SQLite mode app-level);
+  DEPLOYMENT.md Postgres-mode section (provisioning, RLS role setup,
+  backup cadence, restore drill, fail-closed); CURRENT_STATE full update
+  (387 tests / 34 modules / counts + What-M12-closed + failed-record +
+  gap updates #7 #12 #13).
 
 **Left:**
-- Phase 2 not started: B (RLS roles + policies + per-tenant keys in `src/seal.ts`)
-  and C (backup/restore + `capability_requests`/`projects`/`tasks`/
-  `agent_sessions` persistence) may now run in PARALLEL — both consume A's
-  migrations (append migration ids 2+).
-- Postgres parity suite needs a live-DB run (Docker container or install)
-  before milestone close-out; currently skip-only.
-- Full docs sweep (ROADMAP rows → [DONE], DEPLOYMENT, SECURITY_CLAIMS,
-  CURRENT_STATE full update) is the main-session close-out.
+- M12 milestone complete; the remaining open seam is the `capability_requests`
+  table's API methods (table exists per ADR-018; no CRUD yet).
+- Postgres mode in CI: the live-DB suites run only when `DATABASE_URL` (and
+  `RESTORE_DATABASE_URL` for restore) point at a disposable container — a
+  CI job to do that routinely is a follow-up.
+- Full default gate: 387 tests — 374 pass, 13 skips (Postgres-mode),
+  0 fail; demo + benchmark exit 0 (all 14 assurance targets pass).
 
 **Evidence:**
 - Docs-only phase; `npm run typecheck` clean; `npm test` 351/351 unchanged.

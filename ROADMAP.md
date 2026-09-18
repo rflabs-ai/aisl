@@ -32,7 +32,7 @@ where it exists today.
 | Attack harness + corpus | adversarial tests from day one | scenario | M | MVP | **[DONE]** |
 | Benchmark runner | measured, not claimed | harness | S | MVP | **[DONE]** |
 | Architecture / threat / claims docs | claim discipline | — | M | MVP | **[DONE]** |
-| REST API surface | real clients | PDP, session | M | P | **[ ]** |
+| REST API surface | real clients | PDP, session | M | P | **[DONE]** (M14: ADR-019 — `node:http` whitelist router, zero new runtime dependencies; bearer-JWT authn over `IdentityProvider.verifyToken` + registered-principal resolver, tenant derived from the verified principal only, whitelist body/response parsing with size cap, fail-closed mapping, `GET /healthz` (H15); endpoints: authorize, sessions, capability-requests, audit, tasks — every endpoint routes through the one existing decision path; `src/rest-api.ts` + `src/rest-sessions.ts` + `src/rest-audit.ts`) |
 | Project / task / session persistence | survive restart | Postgres | M | P | **[DONE]** (M12: `src/persistence.ts` — RLS'd `projects`/`tasks`/`agent_sessions` tables + tenant-bound CRUD API, upserted resumable session state; roundtrip + restart tests live) |
 | Basic document ingestion | chunk, label, classify | registry | M | P | **[ ]** |
 | Basic Git integration | read-only repo access | sandbox | M | P | **[ ]** |

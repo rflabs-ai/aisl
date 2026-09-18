@@ -24,6 +24,63 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 17 — 2026-09-17 — opencode/m14-rest-api
+
+**Did:**
+- M14 landed end to end: **ADR-019** (Phase 0) written into `DECISIONS.md`
+  — `node:http` whitelist router, no framework, bearer-JWT-only identity,
+  tenant-from-verified-principal, whitelist body/response parsing with a
+  1 MiB pre-parse 413 cap, fail-closed mapping (PDP deny → 403
+  `{ denyReason }`; handler throw → 500 + `evaluation-error` deny event;
+  unlisted method+path → connection destroyed), loopback bind, `GET
+  /healthz` → `{ idp, store }`, rate limiting/CORS/WebSockets/streaming
+  named out-of-scope.
+- Phase 1 (subagent A): `src/rest-api.ts` — router + auth middleware +
+  `/v1/authorize` + `/healthz` + whitelist helpers (`str`/`strArray`/
+  `optStr`, prototype-pollution-safe param copies) +
+  `tests/m14-rest-api.test.ts` (20 tests: authn matrix incl. expired/
+  revoked tokens, identity-header structural invariant, body cap/garbage,
+  fail-closed 500 + event, unhandled-path connection close, healthz,
+  no-token-in-responses).
+- Phase 2 (subagents B ∥ C on disjoint surfaces): `src/rest-sessions.ts`
+  (sessions create/revoke — owner-only revocation ceiling; capability-
+  request submit/list/approve — MFA enforced at the boundary, narrowing
+  allowed, mint exactly M4's) + `tests/m14-rest-sessions.test.ts` (18);
+  `src/rest-audit.ts` (audit query through `AuditQueryService` unchanged —
+  client `tenantId` param passes through so the service denies AND records
+  `tenant-mismatch`, invariant-7 parity; tasks through the ONE
+  `AgentSession.run()` path, whitelisted trace summary) +
+  `tests/m14-rest-audit.test.ts` (12).
+- Main-session wiring: `createRestApi()` assembly in `src/rest-api.ts` (one
+  edit). No runtime dependencies added (`node:http` only; SBOM diff clean,
+  H10). Docs sweep: ROADMAP row → [DONE], CURRENT_STATE (counts, what-works,
+  known-gap #8 honest update), DEPLOYMENT.md (TLS-termination-at-proxy
+  section), this entry.
+
+**Left:**
+- THREAT_MODEL.md still says "no transport" and COMPLIANCE.md rows mark
+  transmission security absent — both predate the M14 surface; sweep them
+  when that doc set is next touched (loopback bind is the honest story,
+  TLS termination is DEPLOYMENT.md's).
+- `POST /v1/tasks` needs a deployment-supplied `TaskRunner` (the embedder
+  wires `AgentSession`); no route consumer exists yet — M15's minimal UI is
+  the first client.
+- No demo API section: demo/benchmark intentionally unchanged.
+
+**Next session should:**
+- M15 (`PROMPTS/M15-stage0-cleanup.md`): document ingestion ∥ Git read-only,
+  the M12 capability-request persistence seam, setup script, and the
+  minimal UI served by `createRestApi` — the M14 server is the mount point.
+- Coordinate with the concurrent H15/store-unavailable refactor observed
+  editing pdp/events/domain/scenario/cli mid-session (gate re-verified green
+  on the merged tree, but the two sessions shared the working tree).
+
+**Evidence:**
+- 439 tests (426 pass, 13 Postgres-mode skips, 0 fail); 50 new M14 tests.
+- `npm run typecheck` clean; `npm run demo` exit 0; `npm run benchmark`
+  exit 0 (SLO gate pass). Files: `src/rest-{api,sessions,audit}.ts`,
+  `tests/m14-rest-{api,sessions,audit}.test.ts`.
+
 ### SESSION 16 — 2026-09-17 — opencode/m12-phase0-adr
 
 **Did:**

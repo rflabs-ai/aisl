@@ -779,9 +779,10 @@ not a flag.
 An unreachable, unauthenticatable, or mid-migration Postgres denies every
 decision that needs the store with the distinct `denyReason:
 'store-unavailable'` (new union member in `src/domain.ts`, beside
-`'idp-unavailable'`) and one loud health event — no silent fallback to
-in-memory, no retry-until-allow. The degraded mode is explicit and
-operator-visible, per H15's methodology.
+`'idp-unavailable'`, mapped by a typed `StoreUnavailableError` from the
+backend) and one loud health event — no silent fallback to in-memory, no
+retry-until-allow. The degraded mode is explicit and operator-visible, per
+H15's methodology.
 
 Append semantics around readiness: appends issued **before the store is
 open** fail closed with the typed error — a PG-mode runtime must construct
@@ -845,3 +846,135 @@ key (ADR-013 path) with per-tenant envelope keys; revocation broadcast over
 LISTEN/NOTIFY or a queue (H13); object-storage anchoring of the head hash
 (M3 path). Multi-node active-active and pooling tuning stay out until a
 second node runs.
+
+---
+
+## ADR-019: REST API surface — `node:http` transport as the platform's network trust boundary
+
+**Context:** M14. The platform has never had a network ingress: every
+decision surface so far is in-process (PDP, `AuditQueryService`,
+`CapabilityRequestService`, `AgentSession`). The minimal UI (ROADMAP row 39)
+and real customer integrations need an HTTP surface. This is the first
+network trust boundary the platform admits, so AGENTS rule 4 applies: one
+structural invariant test per boundary (identity headers cannot mint a
+principal; a request tenant field cannot override the principal's tenant).
+Defect-class requirement per SECURITY_PRINCIPLES.md: input validation at
+this boundary is not a tradeoff.
+
+**Decision:**
+
+### Transport: Node builtin `node:http`, no framework
+
+Express/Fastify are runtime dependencies whose middleware ecosystem we do
+not control — rejected under ADR-012's supply-chain posture. **Zero new
+runtime dependencies.** Routing is a **whitelist of literal method+path
+pairs**; there is no route pattern language beyond `:param` segments. An
+unhandled method+path combination is not "404 with a body" — the server
+closes the connection (nothing to advertise).
+
+The server binds loopback by default; TLS terminates at the deployment
+(reverse proxy / load balancer, DEPLOYMENT.md). TLS-in-process remains a
+documented gap (known-gap #8 updated honestly: a transport now exists;
+in-process TLS does not; it is the operator's termination job).
+
+### Identity contract
+
+`Authorization: Bearer <JWT>` **only**. The principal is derived from jose
+token verification through `IdentityProvider.verifyToken` (ADR-016) plus a
+deployment-configured resolver from the verified `AuthContext` to a
+registered `Principal`. **Never from client-supplied `X-*` identity
+headers** (the egress-proxy test already proves that pattern in
+`src/egress-proxy.ts`). No token → 401; garbage/expired/revoked token → 403;
+both carry `denyReason: 'unauthenticated-principal'` — fail closed.
+
+### Tenant derivation
+
+The tenant comes from the verified principal only. A request field that
+names a tenant (e.g. a `tenantId` audit-query parameter) is passed to the
+underlying service as-is and **validated against the principal's tenant by
+the same in-process path** (`queryAudit` denies with `tenant-mismatch` and
+appends the deny event — invariant 7 parity: the REST surface must produce
+exactly the events the in-process path produces, never fewer, never
+extra-side-channel).
+
+### Request parsing = whitelist parser
+
+`parseModelOutput` style (src/model.ts:42): a fresh object is constructed
+from a field whitelist; unknown fields from a hostile client are **dropped,
+not ignored-with-a-warning**. Wrong-typed required fields are structured
+rejections (400), never crashes. Body size is capped (1 MiB) and rejected
+with a **distinct status (413) before parsing**. Garbage JSON → 400
+structured rejection, server keeps serving.
+
+### Response construction = whitelist too
+
+Every response is a freshly constructed object from explicit fields — no
+stack traces, no database URLs, no token contents beyond what
+`identity.ts` already records. `denyReason` surfaces as a structured code
+on 403. Error text is never echoed from exceptions; handler failures map
+to a fixed body.
+
+### Fail-closed mapping
+
+- The PDP returning a deny (including `evaluation-error` — the PDP converts
+  its own internal errors to denies, invariant 12) is `403 { denyReason }`
+  — never an allow-shaped response.
+- An unexpected throw inside a handler → `500 { error: 'internal-error' }`
+  plus an appended deny event with `denyReason: 'evaluation-error'` (token
+  contents and raw error text never included).
+- An unhandled path closes the connection.
+
+### Health + named non-goals
+
+- `GET /healthz` → `{ idp, store }` (H15's first operator-facing health
+  endpoint since M2): IdP health status and evidence-store status; no
+  secrets, no internals.
+- **Rate limiting: NOT in scope** (H15/deployment territory) — named so the
+  gap cannot hide. CORS: not needed (same-origin loopback/deployment).
+  No WebSockets, no streaming.
+
+### Endpoint contract (implementation must match this or amend this)
+
+| Method + path | Purpose | Path through existing code |
+| --- | --- | --- |
+| `GET /healthz` | operator health | none (reads IdP + store status) |
+| `POST /v1/authorize` | PDP decision surface | `AuthorizationService.authorize()` unchanged |
+| `POST /v1/sessions` | create bound session | `SessionManager.create()` (MFA required at IdP) |
+| `DELETE /v1/sessions/:id` | revoke session | `SessionManager.revoke()` (immediate propagation) |
+| `POST /v1/capability-requests` | agent submits request | `CapabilityRequestService.submit()` (M4) |
+| `GET /v1/capability-requests` | reviewer's pending list | `CapabilityRequestService.all()` filtered to tenant + pending |
+| `POST /v1/capability-requests/:id/approvals` | human approves (narrowing allowed; MFA enforced) | `CapabilityRequestService.approve()` — the mint stays exactly what M4 mints |
+| `GET /v1/audit?...` | tenant-scoped evidence query | `AuditQueryService.query()` unchanged (≤ 90 days, ≤ 1000 enforced at service boundary) |
+| `POST /v1/tasks` | execute a task, return trace summary | the ONE existing `AgentSession.run()` path; no new execution path |
+
+**Alternatives:**
+- **Express/Fastify** — dependency + uncontrolled middleware supply chain
+  (rejected, ADR-012 posture).
+- **OpenAPI codegen / schema validation libs** — new dependency; the
+  whitelist parsers are the validation (defect-bar compliant, ~100 lines).
+- **Trusting `X-Forwarded-*`/`X-Principal-*` identity headers** — the
+  exact pattern the egress-proxy tests refuse; rejected structurally.
+
+**Reasoning:** The API is a translation layer over existing, tested
+decision paths — every endpoint routes into code that already enforces
+authn, tenant, and evidence rules. The trust boundary is therefore narrow:
+parse hostile bytes into whitelist objects, bind them to a verified
+principal, and let the PDP decide. The defect bar is met by construction:
+a field that is not whitelisted cannot reach the runtime.
+
+**Security implications:** New attack surface: the network listener
+itself (request flooding — rate limiting is out of scope and named;
+parser bugs — bounded by whitelists and the size cap; TLS is not
+in-process — loopback bind + deployment termination). The structural
+invariant test asserts identity headers cannot mint a principal and that
+no endpoint obeys a client-supplied tenant.
+
+**Tradeoffs:** Hand-rolled routing and parsing (we own correctness);
+single-threaded request handling (no clustering — one writer is the
+Postgres-mode constraint anyway, ADR-018); no CORS/rate limiting/streaming
+until a real deployment demands them.
+
+**Future migration path:** Rate limiting + connection budgets (H15);
+TLS-in-process if a deployment cannot terminate at a proxy; OpenAPI
+description generated from the route table when a customer integration
+demands it.

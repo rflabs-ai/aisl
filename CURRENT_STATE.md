@@ -1,19 +1,18 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M12 — Postgres control plane (ADR-018): the
-EventStore port, a Postgres event backend (`src/event-store-pg.ts`,
-`postgres@3.4.9`), a forward-only hash-recorded migration framework,
-database-enforced tenant isolation (RLS + per-tenant evidence keys), a
-persistence service, and a rehearsed backup/restore drill — all verified
-against a live Postgres container. SQLite default unchanged. M13's runtime
-realism, M11's authz depth and M10's SLO gate remain the non-regression
-baseline.
+Honest snapshot. Updated after M14 — REST API surface (ADR-019): the
+platform's first network ingress, a `node:http` whitelist router with
+bearer-JWT authn, tenant-from-principal derivation, whitelist body/response
+parsing, and a fail-closed error mapping over the ONE existing decision
+path — zero new runtime dependencies. M12's Postgres control plane, M13's
+runtime realism, M11's authz depth and M10's SLO gate remain the
+non-regression baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~7,700 lines of source across 34 modules
-(`src/` — `event-store-pg.ts`, `tenant-rls.ts`, and `persistence.ts` are
-M12's additions), 439 tests (`tests/`, `security-tests/`; 426 pass, 13
+TypeScript foundation on Node 24, ~8,160 lines of source across 37 modules
+(`src/` — `rest-api.ts`, `rest-sessions.ts`, and `rest-audit.ts` are M14's
+additions), 439 tests (`tests/`, `security-tests/`; 426 pass, 13
 Postgres-mode tests skip cleanly without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -169,6 +168,32 @@ Dev dependencies: `typescript`, `@types/node`.
 - **Egress proxy** (`src/egress-proxy.ts`): HTTP proxy that intercepts traffic,
   blocks IP literals, and routes every request through the PDP before forwarding.
   Sessions have no route out except through the proxy.
+- **REST API surface (M14):** the platform's first network ingress
+  (`src/rest-api.ts`, ADR-019) — a `node:http` whitelist router of literal
+  method+path pairs; unlisted method+path combinations close the connection,
+  nothing is advertised. Identity: `Authorization: Bearer <JWT>` verified by
+  `IdentityProvider.verifyToken` (ADR-016) + a deployment-registered
+  principal resolver — **client-supplied `X-*` headers are never read for
+  identity** (structural test mirrors the egress-proxy proof). Tenant comes
+  from the verified principal; a request field naming a tenant is passed
+  through the same in-process validation path (`tenant-mismatch` deny WITH
+  its event — invariant 7 parity). Bodies: whitelist parsers
+  (`parseModelOutput` style), 1 MiB cap rejected with a distinct 413 before
+  parsing, prototype-pollution-safe param copies, garbage JSON → structured
+  400, server keeps serving. Responses are whitelist-built (no stack traces,
+  no URLs, no token contents). Fail-closed: a throwing handler → 500 + a
+  deny event with `denyReason: 'evaluation-error'`; PDP denies surface as
+  `403 { denyReason }`. Endpoints (all routing through the ONE existing
+  decision paths, no new execution path): `POST /v1/authorize` (PDP),
+  `POST/DELETE /v1/sessions` (`SessionManager`), `POST/GET
+  /v1/capability-requests` + `POST /v1/capability-requests/:id/approvals`
+  (`CapabilityRequestService`, MFA enforced at the boundary, narrowing
+  allowed, mint unchanged), `GET /v1/audit` (`AuditQueryService` unchanged),
+  `POST /v1/tasks` (the one `AgentSession.run()` path, trace summary
+  returned), `GET /healthz` → `{ idp, store }` (H15's first operator health
+  endpoint since M2). Named non-goals: rate limiting (H15/deployment), CORS
+  (same-origin loopback), TLS-in-process (loopback bind; termination is the
+  deployment's job — DEPLOYMENT.md), WebSockets, streaming.
 - **Envelope encryption** (`src/envelope-secrets.ts`): AES-256-GCM envelope
   encryption with HKDF-derived DEKs. Secrets are never stored in plaintext.
   Evidence records get a redacted placeholder.
@@ -189,10 +214,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 387 tests pass (374 green; 13 Postgres-mode tests skip without
+All 439 tests pass (426 green; 13 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -205,6 +230,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M11 authz depth (35: RBAC 12, propagation 11, bundles 12)**
 | **M13 runtime realism (33: adapter + egress gate 14, command checks 10, telemetry 9)**
 | **M12 platform shift (50: backend parity 28, tenant RLS + keys 17, persistence/restore 5)**.
+| **M14 REST API (50: server core + authn/whitelist/fail-closed 20, sessions + capability requests 18, audit + tasks 12)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -294,7 +320,12 @@ Ordered by severity.
    enforces tenant isolation on stored rows (RLS) and per-tenant keys bind
    sealed-evidence decryption to tenant identity — but the shared PROCESS
    remains (both modes).**
-8. **No transport security** because there is no transport.
+8. **No transport security in-process.** M14 gives the platform its first
+   network ingress (REST API, ADR-019): a `node:http` whitelist router bound
+   to loopback with bearer-JWT authn and whitelist parsing. TLS-in-process is
+   still not implemented and stays a documented gap — TLS terminates at the
+   deployment (reverse proxy/balancer, DEPLOYMENT.md); loopback bind is the
+   in-process story. Rate limiting is named not-implemented (H15/deployment).
 9. **Detector risk.** `detectInjectionSignals` could be mistaken for a control by
    a future maintainer. It is telemetry.
 10. **Unknown-unknowns in the corpus.** 12 cases is a start, not coverage.

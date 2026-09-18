@@ -85,6 +85,31 @@ The default stays SQLite (ADR-010's single-process mode). Postgres mode is
   `denyReason: 'store-unavailable'` and one loud health event (H15). There
   is no silent fallback.
 
+### REST API exposure (M14, ADR-019)
+
+The REST surface (`src/rest-api.ts`) is the platform's first network
+ingress. Its own in-process story is deliberately modest: it binds
+**loopback only** and does no TLS.
+
+- **TLS terminates at the deployment** — reverse proxy / load balancer in
+  front of the API (operator-owned, same discipline as `pg_hba` TLS above).
+  Never expose the Node process directly on an untrusted network; there is
+  no in-process TLS and no rate limiting (H15/deployment territory) — a
+  proxy that terminates TLS and applies connection budgets/rate limits is
+  the required front door.
+- **Identity:** clients authenticate with `Authorization: Bearer <JWT>` from
+  the trusted IdP (ADR-016). The deployment registers the principal table
+  the resolver maps verified tokens onto — tokens decide *who*; the
+  registration decides *what they may reach*. `X-*` identity headers are
+  ignored by construction.
+- **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }` —
+  wire your monitor to it; IdP `unreachable` or store `unavailable` means
+  every decision is failing closed (H15).
+- **Client bodies:** the server rejects >1 MiB bodies with 413 before
+  parsing and returns structured errors on garbage — treat the whitelist
+  contract as part of the deployment story: nothing client-supplied is
+  interpreted beyond the whitelisted fields (ADR-019).
+
 ### SaaS multi-tenant
 
 - **Trust boundary:** tenant isolation is logical and must be tested continuously.

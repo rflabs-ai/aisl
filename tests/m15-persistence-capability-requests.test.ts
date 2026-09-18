@@ -70,4 +70,26 @@ describe('capability_requests persistence API (ADR-020)', () => {
       store.close();
     }
   });
+
+  test('replay guard: an already-decided request is never re-decided (audit ticket 01)', { skip: PG_SKIP }, async () => {
+    const store = await seededStore(DATABASE_URL!);
+    try {
+      await store.createCapabilityRequest('t1', 'req-r', 'agent:summarizer-1', {}, new Date(Date.now() + 300_000));
+      const first = await store.updateCapabilityRequestStatus('t1', 'req-r', 'approved', 'user:alice');
+      assert.equal(first?.status, 'approved');
+      assert.equal(first?.decidedBy, 'user:alice');
+
+      // A replayed approve (double-approve / self-approve: the service refuses
+      // it, but the REST mirror runs BEFORE the service) must not overwrite
+      // the recorded decision with the refused reviewer.
+      const replay = await store.updateCapabilityRequestStatus('t1', 'req-r', 'approved', 'user:mallory');
+      assert.equal(replay, undefined, 'replayed decision affects zero rows');
+
+      const after = await store.getCapabilityRequest('t1', 'req-r');
+      assert.equal(after?.decidedBy, 'user:alice', 'decision attribution is unchanged on replay');
+      assert.equal(after?.decidedAt?.getTime(), first?.decidedAt?.getTime(), 'decision time is unchanged on replay');
+    } finally {
+      store.close();
+    }
+  });
 });

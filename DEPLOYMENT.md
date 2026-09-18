@@ -18,6 +18,12 @@ backups, DR, admin access, customer responsibility, vendor responsibility.
 - **Backups / DR:** none.
 - **Admin access:** filesystem.
 - **Customer responsibility:** n/a. **Vendor:** n/a.
+- **Setup (M15, ADR-020):** `scripts/setup.ps1` / `scripts/setup.sh` — a
+  reproducible, offline environment: Node ≥ 22.5 / git / npm checks, `npm
+  install`, typecheck, and tests, exiting nonzero on the first failed check.
+  No `curl | bash`, no remote fetches, no privilege escalation — the repo is
+  the review gate. `-WithPostgres` / `--with-postgres` optionally bootstraps
+  the disposable Postgres 16 container from the M12 workflow below.
 
 ### Single-node private (one organization)
 
@@ -105,6 +111,11 @@ ingress. Its own in-process story is deliberately modest: it binds
 - **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }` —
   wire your monitor to it; IdP `unreachable` or store `unavailable` means
   every decision is failing closed (H15).
+- **Minimal UI (M15):** the static operator page (`tools/ui/index.html`) is
+  served by the same loopback server when the embedder wires it via
+  `staticPages` (`GET /ui`, `GET /`). It is a plain client of `/v1` — the
+  bearer-JWT contract and every PDP rule apply unchanged; the page embeds no
+  secrets (the token is typed at runtime).
 - **Client bodies:** the server rejects >1 MiB bodies with 413 before
   parsing and returns structured errors on garbage — treat the whitelist
   contract as part of the deployment story: nothing client-supplied is

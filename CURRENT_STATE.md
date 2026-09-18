@@ -1,23 +1,23 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M14 — REST API surface (ADR-019): the
-platform's first network ingress, a `node:http` whitelist router with
-bearer-JWT authn, tenant-from-principal derivation, whitelist body/response
-parsing, and a fail-closed error mapping over the ONE existing decision
-path — zero new runtime dependencies. M12's Postgres control plane, M13's
-runtime realism, M11's authz depth and M10's SLO gate remain the
-non-regression baseline.
+Honest snapshot. Updated after M15 — Stage-0 closure (ADR-020): deterministic
+document ingestion, read-only Git integration, the M12 capability-request
+persistence seam, the developer setup scripts, and the minimal UI served by
+the M14 server — zero new runtime dependencies, Stage 0 fully [DONE]. M14's
+REST API, M12's Postgres control plane, M13's runtime realism, M11's authz
+depth and M10's SLO gate remain the non-regression baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~8,160 lines of source across 37 modules
-(`src/` — `rest-api.ts`, `rest-sessions.ts`, and `rest-audit.ts` are M14's
-additions), 439 tests (`tests/`, `security-tests/`; 426 pass, 13
-Postgres-mode tests skip cleanly without `DATABASE_URL`), a 12-case attack
+TypeScript foundation on Node 24, ~8,540 lines of source across 39 modules
+(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 462 tests
+(`tests/`, `security-tests/`; 448 pass, 14 Postgres-mode tests skip cleanly
+without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
-and this documentation set.
+a static operator UI (`tools/ui/index.html`), developer setup scripts
+(`scripts/setup.ps1`, `scripts/setup.sh`), and this documentation set.
 
 Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
 `postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps).
@@ -194,6 +194,49 @@ Dev dependencies: `typescript`, `@types/node`.
   endpoint since M2). Named non-goals: rate limiting (H15/deployment), CORS
   (same-origin loopback), TLS-in-process (loopback bind; termination is the
   deployment's job — DEPLOYMENT.md), WebSockets, streaming.
+- **Document ingestion (M15):** `src/ingestion.ts` (ADR-020) — deterministic
+  boundary-aware chunking (no model in the loop), chunk ids
+  `doc/<documentId>/chunk/<n>`, every chunk a registry resource carrying the
+  source id as `derivedFrom`; labels flow through the M11 machinery
+  (`propagateClassification` for the derived label, raise-only re-ingest via
+  `raiseClassification`); one `document.ingest` event per chunk with content
+  sealed via `sealFor` (per-tenant key) and a SHA-256 digest — no plaintext
+  chunk content in the event log. The ingester holds no issuance handle
+  (invariant 3); a hostile document is injection-inert (Claim 29).
+- **Git integration, read-only (M15):** `src/git-reader.ts` (ADR-020) — verbs
+  allowlisted at configuration time to `log`/`show`/`diff`/`status` (write and
+  network verbs refused at construction, `CommandCheck` posture); argv-array
+  exec with no shell, minimal environment, timeout → failure; traversal
+  refused before spawn (absolute paths, `..` segments, `rev:path` tails,
+  `--no-index`/`--git-dir`/`--work-tree`/`-C` escape hatches); output is
+  untrusted content that enters the ingestion path labeled with the
+  repository's classification (Claim 30).
+- **Capability-request persistence (M15):** the M12 seam closed —
+  `PersistenceStore` gained `createCapabilityRequest` /
+  `getCapabilityRequest` / `listCapabilityRequestsForTenant` /
+  `updateCapabilityRequestStatus` over the migration-3 `capability_requests`
+  table (raw tagged-template SQL, tenant-bound RLS context per transaction);
+  the REST capability-request routes mirror to the store when one is wired
+  (opt-in — without it the M14 surface is byte-for-byte unchanged); mirror
+  failures propagate (fail closed, no silently unpersisted request).
+- **Minimal UI (M15):** `tools/ui/index.html` (ADR-020) — one static page,
+  zero dependencies, inline CSS/JS, vanilla `fetch` against `POST /v1/tasks`
+  and `GET /v1/audit`; served by the M14 server through exact-route
+  `staticPages` (`GET /ui`, `GET /`) — no directory serving, no parametrized
+  path, so traversal does not exist by construction. The bearer token is
+  typed by the operator at runtime; no canary/secret/absolute URL in any
+  served page (secret-scan test); accessibility basics hold (semantic HTML,
+  labeled inputs, keyboard-native controls, `aria-live` outputs); rendering
+  uses `textContent` only — model text and event metadata are never
+  interpreted as HTML. No new authorization surface: the UI is a client of
+  the ordinary PDP path.
+- **Developer setup scripts (M15):** `scripts/setup.ps1` + `scripts/setup.sh`
+  (ADR-020) — Node ≥ 22.5 / git / npm checks, `npm install`, typecheck,
+  tests; every check prints its result and a failed check exits nonzero
+  (fail closed); offline and reviewable in-repo (no `curl | bash`, no remote
+  fetches — pattern-scanned by test); optional Postgres-16 container
+  bootstrap (`-WithPostgres` / `--with-postgres`) matching DEPLOYMENT.md's
+  M12 workflow.
 - **Envelope encryption** (`src/envelope-secrets.ts`): AES-256-GCM envelope
   encryption with HKDF-derived DEKs. Secrets are never stored in plaintext.
   Evidence records get a redacted placeholder.
@@ -214,10 +257,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 439 tests pass (426 green; 13 Postgres-mode tests skip without
+All 462 tests pass (448 green; 14 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -231,6 +274,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M13 runtime realism (33: adapter + egress gate 14, command checks 10, telemetry 9)**
 | **M12 platform shift (50: backend parity 28, tenant RLS + keys 17, persistence/restore 5)**.
 | **M14 REST API (50: server core + authn/whitelist/fail-closed 20, sessions + capability requests 18, audit + tasks 12)**.
+| **M15 Stage-0 closure (23: ingestion 8, git 7, UI 4, setup 3, capability-request persistence 1)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -611,7 +655,41 @@ semantics did not change: capability AND policy still gate every action.
    (`src/persistence.ts`) keeps `projects`/`tasks`/`agent_sessions` under
    RLS with tenant-bound CRUD and upserted resumable session state
    (roundtrip + restart tests live). The `capability_requests` table
-   exists per ADR-018; its API is a future seam.
+   exists per ADR-018; ~~its API is a future seam~~ **M15 closed: the
+   persistence API exists and the REST capability-request routes mirror to
+   it when wired (see "What M15 closed").**
+
+## What M15 closed
+
+M15 was the Stage-0 cleanup milestone (ADR-020: document ingestion, read-only
+Git, setup scripts, minimal UI; the M12 capability-request persistence seam
+folded in; zero new runtime dependencies — git shells out to the installed
+CLI, the UI is static HTML). Decision semantics did not change: capability
+AND policy still gate every action, and every new surface is data plumbing
+over the existing PDP path.
+
+1. ~~**Ingestion had no chunk/label/classify pipeline.**~~
+   `DocumentIngester` (`src/ingestion.ts`) chunks deterministically, labels
+   every chunk through the M11 machinery (raise-only), registers chunks as
+   capability-scoped registry resources, and seals chunk content into
+   `document.ingest` events — no plaintext in the evidence plane, no
+   authority minted by hostile documents (Claim 29).
+2. ~~**The platform had no repository access.**~~ `GitReader`
+   (`src/git-reader.ts`) is read-only by construction: verbs allowlisted at
+   configuration time, argv exec with no shell, traversal refused pre-spawn,
+   output ingested as a document at the repo's classification (Claim 30).
+3. ~~**`capability_requests` had a table but no API (M12 seam).**~~
+   `PersistenceStore` gained tenant-bound create/get/list/status methods
+   (raw tagged-template SQL, RLS context per transaction); the REST
+   capability-request routes mirror to the store when one is wired —
+   opt-in, so the M14 in-memory surface is unchanged without it.
+4. ~~**There was no developer setup path.**~~ `scripts/setup.ps1` +
+   `scripts/setup.sh`: offline, reviewable, fail-closed (nonzero exit on
+   any failed check), optional Postgres bootstrap per DEPLOYMENT.md.
+5. ~~**The REST surface had no client.**~~ `tools/ui/index.html` — a static
+   operator console served by the M14 server (exact routes, no traversal
+   surface), posting tasks and querying the audit log through the ordinary
+   bearer-JWT contract; the UI shows the trace and never bypasses the guard.
 
 ## Watch-items from the M9 audit
 

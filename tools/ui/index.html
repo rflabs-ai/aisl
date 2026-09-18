@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security Layer — operator console</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 60rem; padding: 1rem; line-height: 1.4; }
+  fieldset { margin: 1rem 0; border: 1px solid #888; }
+  legend { font-weight: 600; }
+  label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 500; }
+  input, textarea, button { font: inherit; }
+  input, textarea { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
+  textarea { min-height: 4rem; }
+  button { padding: 0.4rem 1rem; cursor: pointer; }
+  output { display: block; white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 0.5rem; min-height: 1.5rem; }
+  .error { color: #a00; }
+</style>
+</head>
+<body>
+<h1>Security Layer — operator console</h1>
+<p>Static client of the REST API (ADR-019/ADR-020). Every request is authorized
+by the same bearer-JWT contract as any other client; this page shows the trace
+and never bypasses the guard.</p>
+
+<fieldset>
+  <legend>Credentials</legend>
+  <label for="token">Bearer token (JWT from the trusted IdP)</label>
+  <input type="password" id="token" name="token" autocomplete="off" spellcheck="false">
+</fieldset>
+
+<main>
+  <fieldset>
+    <legend>Run a task</legend>
+    <form id="task-form">
+      <label for="task">Task for the agent</label>
+      <textarea id="task" name="task" required></textarea>
+      <button type="submit">Run task</button>
+    </form>
+    <output id="task-output" for="task-form" aria-live="polite"></output>
+  </fieldset>
+
+  <fieldset>
+    <legend>Evidence view</legend>
+    <form id="audit-form">
+      <label for="limit">Event limit</label>
+      <input type="number" id="limit" name="limit" min="1" max="1000" value="50">
+      <button type="submit">Query audit log</button>
+    </form>
+    <output id="audit-output" for="audit-form" aria-live="polite"></output>
+  </fieldset>
+</main>
+
+<script>
+  function bearer() {
+    return document.getElementById('token').value.trim();
+  }
+
+  function show(id, text, isError) {
+    const out = document.getElementById(id);
+    out.textContent = text;
+    out.classList.toggle('error', isError === true);
+  }
+
+  async function callJson(path, options) {
+    const res = await fetch(path, options);
+    const body = await res.json().catch(() => ({}));
+    return { status: res.status, body };
+  }
+
+  document.getElementById('task-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const task = document.getElementById('task').value;
+    if (!bearer()) { show('task-output', 'Enter a bearer token first.', true); return; }
+    show('task-output', 'Running…');
+    try {
+      const { status, body } = await callJson('/v1/tasks', {
+        method: 'POST',
+        headers: { 'authorization': 'Bearer ' + bearer(), 'content-type': 'application/json' },
+        body: JSON.stringify({ task }),
+      });
+      show('task-output', status + ' ' + JSON.stringify(body, null, 2), status !== 200);
+    } catch (err) {
+      show('task-output', 'Request failed: ' + err, true);
+    }
+  });
+
+  document.getElementById('audit-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const limit = document.getElementById('limit').value || '50';
+    if (!bearer()) { show('audit-output', 'Enter a bearer token first.', true); return; }
+    show('audit-output', 'Querying…');
+    try {
+      const { status, body } = await callJson('/v1/audit?limit=' + encodeURIComponent(limit), {
+        headers: { 'authorization': 'Bearer ' + bearer() },
+      });
+      show('audit-output', status + ' ' + JSON.stringify(body, null, 2), status !== 200);
+    } catch (err) {
+      show('audit-output', 'Request failed: ' + err, true);
+    }
+  });
+</script>
+</body>
+</html>

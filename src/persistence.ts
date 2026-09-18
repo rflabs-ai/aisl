@@ -56,6 +56,19 @@ export interface SessionRow {
   readonly updatedAt: Date;
 }
 
+export interface CapabilityRequestRow {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly principal: string;
+  readonly status: string;
+  /** Whitelisted request body: sessionId, resources, actions, maxClassification, justification. */
+  readonly requested: Readonly<Record<string, unknown>>;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+  readonly decidedAt?: Date;
+  readonly decidedBy?: string;
+}
+
 /**
  * Migration id 3 (ADR-018 schema block, verbatim columns/types): the M4
  * capability-request flow table plus the Stage-0 project/task/session state
@@ -366,4 +379,82 @@ export class PersistenceStore {
       return rows.map(toSession);
     });
   }
+
+  /**
+   * M15 (ADR-020): durable mirror of the M4 capability-request flow over the
+   * migration-3 table. The in-memory `CapabilityRequestService` stays the
+   * decision surface; these methods make the requests survive restart.
+   */
+  async createCapabilityRequest(
+    tenantId: string,
+    id: string,
+    principal: string,
+    requested: JsonObject,
+    expiresAt: Date,
+  ): Promise<CapabilityRequestRow> {
+    return this.run(tenantId, async (tx) => {
+      const rows = await tx`
+        INSERT INTO capability_requests (id, tenant_id, principal, status, requested, created_at, expires_at)
+        VALUES (${id}, ${tenantId}, ${principal}, 'pending', ${tx.json(requested)}, now(), ${expiresAt})
+        RETURNING id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by`;
+      return toCapabilityRequest(rows[0]!);
+    });
+  }
+
+  async getCapabilityRequest(tenantId: string, id: string): Promise<CapabilityRequestRow | undefined> {
+    return this.run(tenantId, async (tx) => {
+      const rows = await tx`
+        SELECT id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by
+        FROM capability_requests
+        WHERE tenant_id = ${tenantId} AND id = ${id}`;
+      return rows.length === 0 ? undefined : toCapabilityRequest(rows[0]!);
+    });
+  }
+
+  async listCapabilityRequestsForTenant(tenantId: string, status?: string): Promise<CapabilityRequestRow[]> {
+    return this.run(tenantId, async (tx) => {
+      const rows = status === undefined
+        ? await tx`
+            SELECT id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by
+            FROM capability_requests
+            WHERE tenant_id = ${tenantId} ORDER BY created_at, id`
+        : await tx`
+            SELECT id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by
+            FROM capability_requests
+            WHERE tenant_id = ${tenantId} AND status = ${status} ORDER BY created_at, id`;
+      return rows.map(toCapabilityRequest);
+    });
+  }
+
+  async updateCapabilityRequestStatus(
+    tenantId: string,
+    id: string,
+    status: string,
+    decidedBy: string,
+  ): Promise<CapabilityRequestRow | undefined> {
+    return this.run(tenantId, async (tx) => {
+      const rows = await tx`
+        UPDATE capability_requests
+        SET status = ${status}, decided_at = now(), decided_by = ${decidedBy}
+        WHERE tenant_id = ${tenantId} AND id = ${id}
+        RETURNING id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by`;
+      return rows.length === 0 ? undefined : toCapabilityRequest(rows[0]!);
+    });
+  }
+}
+
+function toCapabilityRequest(row: Row): CapabilityRequestRow {
+  const decidedAt = row.decided_at;
+  const decidedBy = row.decided_by;
+  return {
+    id: requireString(row.id, 'capability_requests.id'),
+    tenantId: requireString(row.tenant_id, 'capability_requests.tenant_id'),
+    principal: requireString(row.principal, 'capability_requests.principal'),
+    status: requireString(row.status, 'capability_requests.status'),
+    requested: requireObject(row.requested, 'capability_requests.requested'),
+    createdAt: requireDate(row.created_at, 'capability_requests.created_at'),
+    expiresAt: requireDate(row.expires_at, 'capability_requests.expires_at'),
+    ...(decidedAt !== null ? { decidedAt: requireDate(decidedAt, 'capability_requests.decided_at') } : {}),
+    ...(decidedBy !== null && decidedBy !== undefined ? { decidedBy: requireString(decidedBy, 'capability_requests.decided_by') } : {}),
+  };
 }

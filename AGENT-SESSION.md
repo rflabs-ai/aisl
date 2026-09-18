@@ -24,6 +24,75 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 18 — 2026-09-18 — opencode/m15-stage0-cleanup
+
+**Did:**
+- M15 landed end to end — **Stage 0 is fully [DONE]**. **ADR-020** (Phase 0)
+  written into `DECISIONS.md`: deterministic ingestion, read-only Git, no-
+  `curl|bash` setup script, static UI on the M14 server, capability-request
+  persistence.
+- Phase 1: `src/ingestion.ts` — `chunkContent` (boundary-aware fixed-size,
+  pure) + `DocumentIngester` (chunk ids `doc/<id>/chunk/<n>`, chunks as
+  registry resources with `derivedFrom`, labels via M11
+  `propagateClassification` + raise-only re-ingest, one `document.ingest`
+  event per chunk sealed with `sealFor`, plaintext never in events) +
+  `tests/m15-ingestion.test.ts` (8: determinism, labels, raise-only,
+  sealed-event canary scan, hostile-document injection inertness).
+- Phase 1 (M12 seam): `src/persistence.ts` — `createCapabilityRequest` /
+  `getCapabilityRequest` / `listCapabilityRequestsForTenant` /
+  `updateCapabilityRequestStatus` over the migration-3 table (tagged
+  templates, tenant-bound); `src/rest-sessions.ts` — optional
+  `requestsStore` mirror on submit/approve (fail-closed on mirror failure;
+  M14 surface unchanged without the store) + `tests/m15-persistence-
+  capability-requests.test.ts` (1 live-DB test; skips without
+  `DATABASE_URL` — Docker daemon was down this session, live run pending).
+- Phase 2: `src/git-reader.ts` — `GitReader` (verbs allowlisted at config
+  time to log/show/diff/status — write/network verbs refused at
+  construction; argv-only exec, no shell; traversal + escape-hatch args
+  refused pre-spawn incl. `rev:path` tails) + `tests/m15-git.test.ts`
+  (7, against a real throwaway repo: config-time refusals, traversal,
+  round trip, output→ingestion at repo label with sealed events).
+- Phase 2 (UI): `src/rest-api.ts` — `staticPages` dep + `contentType` on
+  `RestResponse` + `staticPageFromFile` (exact routes only; no directory
+  serving); `tools/ui/index.html` — single zero-dep page, vanilla `fetch`
+  against `/v1/tasks` + `/v1/audit`, `textContent`-only rendering (no XSS
+  surface), labeled inputs/keyboard-native controls; `tests/m15-ui.test.ts`
+  (4: serving, secret scan, accessibility basics, both endpoints authorized
+  like any client).
+- Setup: `scripts/setup.ps1` + `scripts/setup.sh` (checks → install →
+  typecheck → tests, fail-closed nonzero exits, offline, optional Postgres
+  bootstrap per DEPLOYMENT.md) + `tests/m15-setup.test.ts` (3: forbidden-
+  pattern scan, empty-PATH nonzero exit — verified live, clean-checkout
+  exit 0).
+- Docs sweep: ROADMAP rows 37–40 → [DONE] + Stage-0-complete note,
+  CURRENT_STATE (counts, what-works, what-M15-closed), DEPLOYMENT.md
+  (setup script + UI mount), SECURITY_CLAIMS (Claims 29 + 30), this entry.
+
+**Left:**
+- The capability-request persistence test is live-DB and skipped this
+  session (Docker daemon not running); the SQL mirrors the proven
+  migration-3/idempotency patterns, but it should be verified against a
+  real container at the next Postgres-mode run.
+- Deny of capability requests has no REST route (service-level only) —
+  matches ADR-019's endpoint contract; add a route + mirror when reviewers
+  work through the API.
+- Demo/benchmark intentionally unchanged (no UI/ingestion section added).
+
+**Next session should:**
+- Run `scripts/setup.ps1 -WithPostgres` (or the manual M12 container flow)
+  with `DATABASE_URL` set and verify the 14 PG-mode tests live, including
+  `tests/m15-persistence-capability-requests.test.ts`.
+- Stage 1 residuals: Sandbox lifecycle management (row 61) is the only
+  Stage-1 row still open; then HARD-stage items (H1/H10/H12/H13/H15).
+
+**Evidence:**
+- 462 tests (448 pass, 14 PG-mode skips, 0 fail); 23 new M15 tests.
+- `npm run typecheck` clean; `npm run demo` exit 0; `npm run benchmark`
+  exit 0 (SLO gate pass, 0 hard failures). Files: `src/ingestion.ts`,
+  `src/git-reader.ts`, `src/persistence.ts`, `src/rest-sessions.ts`,
+  `src/rest-api.ts`, `tools/ui/index.html`, `scripts/setup.{ps1,sh}`,
+  `tests/m15-*.test.ts`.
+
 ### SESSION 17 — 2026-09-17 — opencode/m14-rest-api
 
 **Did:**

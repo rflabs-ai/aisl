@@ -19,11 +19,20 @@ import { type Capability } from './capability.ts';
 import { hasMfa } from './identity.ts';
 import { type SessionManager } from './session-manager.ts';
 import { CapabilityRequestService, type CapabilityRequest } from './capability-request.ts';
+import type { PersistenceStore } from './persistence.ts';
 import { RestRejection, optStr, str, strArray, type RestApi, type RestResponse } from './rest-api.ts';
 
 export interface SessionRouteDeps {
   readonly sessions: SessionManager;
   readonly requests: CapabilityRequestService;
+  /**
+   * M15 (ADR-020): optional durable mirror over the migration-3
+   * capability_requests table. Submit/approve/deny mirror to it; the
+   * in-memory service stays the decision surface. Mirror failures
+   * propagate (fail closed) — the caller sees an error instead of a
+   * silently unpersisted request.
+   */
+  readonly requestsStore?: PersistenceStore;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,16 +100,34 @@ export function registerSessionRoutes(api: RestApi, deps: SessionRouteDeps): voi
     return { status: 200, body: { revoked: true } };
   });
 
-  api.addRoute('POST', '/v1/capability-requests', (ctx): RestResponse => {
+  api.addRoute('POST', '/v1/capability-requests', async (ctx): Promise<RestResponse> => {
     if (!isRecord(ctx.body)) throw new RestRejection(400, 'invalid-body', 'body must be a JSON object');
+    const maxClassification = str(ctx.body.maxClassification, 'maxClassification');
+    const justification = optStr(ctx.body.justification, 'justification') ?? '';
     const request = deps.requests.submit(
       ctx.principal,
       str(ctx.body.sessionId, 'sessionId'),
       strArray(ctx.body.resources, 'resources'),
       strArray(ctx.body.actions, 'actions'),
-      str(ctx.body.maxClassification, 'maxClassification'),
-      optStr(ctx.body.justification, 'justification') ?? '',
+      maxClassification,
+      justification,
     );
+    if (deps.requestsStore) {
+      // Whitelisted projection into the durable mirror — nothing beyond these fields persists.
+      await deps.requestsStore.createCapabilityRequest(
+        ctx.principal.tenantId,
+        request.id,
+        request.principalId,
+        {
+          sessionId: request.sessionId,
+          resources: [...request.requestedResources],
+          actions: [...request.requestedActions],
+          maxClassification: request.maxClassification,
+          justification: request.justification,
+        },
+        new Date(request.createdAt + 300_000),
+      );
+    }
     return { status: 201, body: projectRequest(request) };
   });
 
@@ -112,7 +139,7 @@ export function registerSessionRoutes(api: RestApi, deps: SessionRouteDeps): voi
     return { status: 200, body: { requests: pending } };
   });
 
-  api.addRoute('POST', '/v1/capability-requests/:id/approvals', (ctx): RestResponse => {
+  api.addRoute('POST', '/v1/capability-requests/:id/approvals', async (ctx): Promise<RestResponse> => {
     if (!hasMfa(ctx.auth)) throw new RestRejection(403, 'approval-mfa-required');
     const id = ctx.params.id ?? '';
     const request = deps.requests.get(id);
@@ -133,6 +160,14 @@ export function registerSessionRoutes(api: RestApi, deps: SessionRouteDeps): voi
     }
     try {
       const approved = deps.requests.approve(id, ctx.principal, scope);
+      if (deps.requestsStore) {
+        await deps.requestsStore.updateCapabilityRequestStatus(
+          ctx.principal.tenantId,
+          id,
+          'approved',
+          ctx.principal.id,
+        );
+      }
       return {
         status: 201,
         body: { request: projectRequest(approved.request), capability: projectCapability(approved.capability) },

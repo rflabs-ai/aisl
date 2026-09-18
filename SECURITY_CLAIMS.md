@@ -1215,3 +1215,95 @@ collector exists (that dependency needs its own ADR).
 it in an incident. The claim itself is the guard: any use of telemetry as a
 control would violate this document and the dependency-direction tests.
 
+
+## Claim 29 — Document ingestion is injection-inert, labeled, and sealed (M15)
+
+**Claim:** Document ingestion (`src/ingestion.ts`) chunks deterministically
+(no model in the loop), registers every chunk as a registry resource labeled
+with the source document's id as `derivedFrom`, computes its label through the
+M11 machinery (max-by-rank, raise-only on re-ingest), and records one
+`document.ingest` event per chunk whose content is sealed with the tenant-bound
+key — no plaintext chunk content ever enters the event log. Ingestion holds no
+issuance handle and cannot mint authority (invariant 3), whatever the document
+says.
+
+**Mechanism:** `chunkContent` is a pure function (boundary-aware fixed-size
+windows; chunk ids `doc/<documentId>/chunk/<n>` are deterministic). Labels:
+`propagateClassification` over the document plus any `derivedFrom` sources;
+re-ingest goes through `ResourceRegistry.raiseClassification` (refuses to
+lower). Events: `sealFor(tenant, content, classification)` per chunk (Claim 13
+machinery, ADR-018 per-tenant keys) plus a SHA-256 digest. The constructor
+surface is registry + event log + actor attribution only — there is no
+authorization or issuance dependency to abuse.
+
+**Threat model:** TM-002 (injection), TM-004 (evidence store as a target).
+
+**Assumptions:** the source document's label is correct at ingestion time
+(labels propagate; garbage-in-garbage-labeled is the contract, not label
+authorship).
+
+**Evidence:** `tests/m15-ingestion.test.ts` — 8 cases: deterministic ids and
+chunking; label = source label with a higher `derivedFrom` source raising it;
+raise-only re-ingest; one sealed event per chunk with the plaintext canary
+absent from the whole serialized event log; a hostile document (matching
+injection-telemetry patterns) mints no capability events and stays at the
+source's label.
+
+**Test:** `tests/m15-ingestion.test.ts`.
+
+**Known limitations:** chunking is coarse (fixed windows with paragraph/line/
+space boundary awareness — no semantic chunking, no OCR, no embeddings).
+Content lives in the embedder's content map; the evidence plane holds sealed
+copies only. A mislabeled source document mislabels its chunks.
+
+**Residual risk:** operator error in source-document labeling; a deployment
+that feeds ingestion output straight to a model without the guard — the
+ingestion path is data plumbing, the PDP path (Claim 1/3) remains the control.
+
+---
+
+## Claim 30 — Git access is read-only, confined, and its output is data (M15)
+
+**Claim:** Git integration (`src/git-reader.ts`) can only read: the verb set
+is allowlisted at configuration time to `log`, `show`, `diff`, `status` (every
+write or network verb is refused when the reader is constructed); the command
+is an argv array with no shell; arguments that name paths outside the
+configured repository root (absolute paths, `..` segments) or root-escape
+hatches (`--no-index`, `--git-dir`, `--work-tree`, `-C`) are refused before
+spawn; and the output is untrusted content that enters the ingestion pipeline
+(Claim 29) labeled with the repository's classification — no path from output
+text to authority exists.
+
+**Mechanism:** constructor validation against `GIT_READ_VERBS` (runtime-
+validated like `CommandCheck`'s allowlist, so a JS caller cannot dodge it);
+`spawnSync('git', [verb, ...args])` with minimal environment and timeout →
+failure; `assertSafeArg` refuses traversal/escape hatches pre-spawn
+(`rev:path` tails are checked too). Output composition with ingestion is the
+caller's one-liner (`ingester.ingest({ document: repo, content })`) — the
+reader returns a string, never authority.
+
+**Threat model:** TM-001 (compromised model driving reads), TM-002
+(injected content inside repository files), TM-005 (supply chain — no new
+dependency; the installed git CLI is the only executor).
+
+**Assumptions:** git is installed; the configured root is the intended
+boundary; the repository's classification label is correct.
+
+**Evidence:** `tests/m15-git.test.ts` — 7 cases against a real throwaway
+repository: write verbs (`push`, `commit`, `fetch`) refused at construction;
+instance-allowlist refusals; absolute-path, traversal, and escape-hatch
+argument refusals; missing root refusal; `log`/`show`/`status`/`diff` round
+trip; output ingested with the repo's label, sealed under the tenant key,
+plaintext canary absent from the event log.
+
+**Test:** `tests/m15-git.test.ts`.
+
+**Known limitations:** no write-side git (out of scope by design, ADR-020);
+no network remotes (local repositories only); `..` is refused even inside
+revision ranges (`A..B`) — over-broad for that idiom, fail-closed by
+preference; git CLI error text is reduced to exit codes (no redacted
+diagnostics yet).
+
+**Residual risk:** a repository whose content is hostile is exactly the
+poisoned-source case (TM-002): reads succeed and stay data — the ceiling is
+the guard's documented D2 limit, not a new one.

@@ -10,6 +10,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { AuthContext, Principal, Action } from './domain.ts';
 import type { AuthorizationService } from './pdp.ts';
 import type { IdentityProvider } from './identity.ts';
@@ -23,7 +24,7 @@ const FORBIDDEN_PARAM_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const BEARER_RE = /^Bearer ([^\s]+)$/;
 
-export type RestResponse = { readonly status: number; readonly body: unknown };
+export type RestResponse = { readonly status: number; readonly body: unknown; readonly contentType?: string };
 
 export interface RestRequestContext {
   readonly principal: Principal;
@@ -103,9 +104,9 @@ function parseQuery(queryString: string): Record<string, string> {
   return out;
 }
 
-function respond(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+function respond(res: ServerResponse, status: number, body: unknown, contentType = 'application/json'): void {
+  res.writeHead(status, { 'content-type': contentType });
+  res.end(contentType === 'application/json' ? JSON.stringify(body) : body);
 }
 
 const ANONYMOUS_PRINCIPAL: Principal = {
@@ -147,6 +148,24 @@ export interface RestApiDeps {
   readonly storeHealth?: () => 'ok' | 'unavailable';
   /** Body size cap in bytes. Default: 1_048_576 (1 MiB). */
   readonly maxBodyBytes?: number;
+  /**
+   * Static pages (ADR-020 minimal UI): exact GET routes served as-is — no
+   * directory listing, no parametrized path, so traversal does not exist by
+   * construction. Pages contain no secrets; the UI authorizes like any other
+   * client (bearer JWT typed by the operator at runtime).
+   */
+  readonly staticPages?: readonly StaticPage[];
+}
+
+export interface StaticPage {
+  readonly route: string;
+  readonly body: string;
+  readonly contentType: string;
+}
+
+/** Load one static page from disk at assembly time (embedder calls this, not the request path). */
+export function staticPageFromFile(route: string, filePath: string, contentType: string): StaticPage {
+  return { route, body: readFileSync(filePath, 'utf8'), contentType };
 }
 
 export interface RestApiFullDeps extends RestApiDeps, SessionRouteDeps, AuditRouteDeps {}
@@ -183,6 +202,9 @@ export class RestApi {
       body: { idp: this.idp.getIdPHealth().status, store: this.storeHealth() },
     }));
     this.addRoute('POST', '/v1/authorize', (ctx) => this.authorizeRoute(ctx));
+    for (const page of deps.staticPages ?? []) {
+      this.addRoute('GET', page.route, () => ({ status: 200, body: page.body, contentType: page.contentType }));
+    }
   }
 
   /** Register a route. Path is '/'-segments; a segment starting with ':' captures one param. Throws on duplicate method+pattern or a hostile param name. */
@@ -286,7 +308,7 @@ export class RestApi {
 
     try {
       const response = await route.handler({ principal, auth, params, query, body });
-      respond(res, response.status, response.body);
+      respond(res, response.status, response.body, response.contentType);
     } catch (error) {
       if (error instanceof RestRejection) {
         respond(res, error.status, { error: error.code });

@@ -26,7 +26,7 @@ import {
   deny,
   isAuthenticated,
 } from './domain.ts';
-import { type EventStore, type SecurityEvent, type AuditFilters } from './events.ts';
+import { type EventStore, type SecurityEvent, type AuditFilters, StoreUnavailableError } from './events.ts';
 import { BASELINE_ROLES, type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
@@ -236,6 +236,22 @@ export class AuthorizationService {
         metadata: { phase: 'decision', reason: decision.reason },
       });
     } catch (error) {
+      if (error instanceof StoreUnavailableError) {
+        // H15: the store is DOWN (unreachable/unmigrated/failed write). Deny
+        // with the distinct reason so an outage is not disguised as a generic
+        // write failure — and no event can be appended while it is down.
+        process.emitWarning?.(
+          'evidence store unavailable: every decision is being denied (fail closed, H15)',
+        );
+        return deny(
+          principal.id,
+          action,
+          resourceId,
+          'store-unavailable',
+          `evidence store unavailable, failing closed: ${(error as Error).message}`,
+          at,
+        );
+      }
       // A decision we cannot record is a decision we do not make.
       return deny(
         principal.id,

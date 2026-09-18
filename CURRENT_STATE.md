@@ -11,9 +11,9 @@ baseline.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~7,600 lines of source across 34 modules
+TypeScript foundation on Node 24, ~7,700 lines of source across 34 modules
 (`src/` — `event-store-pg.ts`, `tenant-rls.ts`, and `persistence.ts` are
-M12's additions), 387 tests (`tests/`, `security-tests/`; 374 pass, 13
+M12's additions), 439 tests (`tests/`, `security-tests/`; 426 pass, 13
 Postgres-mode tests skip cleanly without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -155,8 +155,8 @@ Dev dependencies: `typescript`, `@types/node`.
   `runVerifications` path, so a failed check marks the step errored; no new
   authority anywhere.
 - **Structured telemetry (M13):** `TelemetryPort` + `JsonlTelemetry` (`src/telemetry.ts`) emit one JSON object per line (stdout or an injected sink): `session.start`/`session.end` (ids, counts, durations), `pdp.denyReasons` aggregates computed from existing step decisions, and `model.call` outcomes from the adapter. Emission failures are swallowed and counted (`dropped`) — telemetry is observability, never a control, and the PDP never reads it (dependency-direction tests; Claim 28).
-- **Postgres event backend (M12):** `EventStore` port (exactly `EventLog`'s public surface) with two implementations — `EventLog` (SQLite + in-memory, the default) and `PostgresEventLog` (`src/event-store-pg.ts`, `postgres@3.4.9`, zero transitive deps, raw SQL via tagged templates, no ORM/pooling). Forward-only, versioned, sha256-recorded migrations (ids 1–3, wired from `tenant-rls.ts`/`persistence.ts`); a recorded id with a changed hash refuses to open (tamper). Chain rehydrate + verify on connect (resume parity with `EventLog.resume()`); appends persist through the same signing/hash helpers; the migrate event is persisted before `whenReady()` resolves. Opt-in via `EVENT_STORE=postgres` + `DATABASE_URL` (ambient `DATABASE_URL` alone flips nothing). Fail-closed: appends before ready throw, a failed write closes the store, and error messages redact the URL/credentials (secret-scan test).
-- **Database-enforced tenant isolation (M12, Postgres mode):** `FORCE RLS` + deny-by-default per-role policies on the control-plane tables (`src/tenant-rls.ts` for `security_events`, `src/persistence.ts` for the state tables). `app_reader` is tenant-scoped via the per-transaction context (`set_config('app.tenant_id', ..., is_local := true)`): unset context → zero rows, hostile queries → zero rows, wrong context → only that tenant (proven live via `SET LOCAL ROLE app_reader` — superuser is not the proof); per-tenant evidence keys (`sealFor`/`openFor`, `evidence-key:v2:<tenant>:<level>`) bind decryption to tenant identity with **no silent re-encryption** of legacy seals. SQLite mode stays app-level (Claim 9 updated).
+- **Postgres event backend (M12):** `EventStore` port (exactly `EventLog`'s public surface) with two implementations — `EventLog` (SQLite + in-memory, the default) and `PostgresEventLog` (`src/event-store-pg.ts`, `postgres@3.4.9`, zero transitive deps, raw SQL via tagged templates, no ORM/pooling). Forward-only, versioned, sha256-recorded migrations (ids 1–3, wired from `tenant-rls.ts`/`persistence.ts`); a recorded id with a changed hash refuses to open (tamper). Chain rehydrate + verify on connect (resume parity with `EventLog.resume()`); appends persist through the same signing/hash helpers; the migrate event is persisted before `whenReady()` resolves. Opt-in via `EVENT_STORE=postgres` + `DATABASE_URL` (ambient `DATABASE_URL` alone flips nothing). Fail-closed: **a typed `StoreUnavailableError` denies with the distinct `store-unavailable` reason (H15) plus a loud warning — wired through the PDP's decision path, tested without a live DB**; appends before open fail closed; a failed write closes the store; error messages redact the URL/credentials (secret-scan test); PG-mode runtimes construct through the ready-gated `buildWorldAsync` factory (awaiting connect/migration/chain-verify before any bootstrap append), and `close()` drains the write queue before ending the pool (a PG-mode demo persists every event and exits cleanly).
+- **Database-enforced tenant isolation (M12, Postgres mode):** `FORCE RLS` + deny-by-default per-role policies on the control-plane tables (`src/tenant-rls.ts` for `security_events`, `src/persistence.ts` for the state tables). `app_reader` is tenant-scoped via the per-transaction context (`set_config('app.tenant_id', ..., is_local := true)`): unset context → zero rows, hostile queries → zero rows, wrong context → only that tenant (proven live via `SET LOCAL ROLE app_reader` — superuser is not the proof); **per-tenant evidence keys are wired into the runtime write path** (`sealFor` in runtime.ts's record path and the guard's ladder/withheld seals) — sealed evidence carries `evidence-key:v2:<tenant>:<level>` and decrypts only with tenant-bound clearance (`revealEvidence` authorizes on the sealed keyId itself; a capability on another tenant's key never matches). Legacy seals keep opening — no silent re-encryption. SQLite mode stays app-level (Claim 9 updated).
 - **Backup + restore (M12):** `tools/backup.ps1` (plain-SQL `pg_dump`, host pg_dump preferred with docker fallback; password via `PGPASSWORD` env, never argv/logs) and a rehearsed restore test — dump → restore into a scratch db → chain `verify()` + signature check + `verifyBundle()` + persistence row parity all pass live.
 - **Persistence (M12):** `PersistenceStore` (`src/persistence.ts`) — RLS'd `projects`/`tasks`/`agent_sessions` (+ `capability_requests` table per ADR-018) with tenant-bound CRUD, upserted resumable session state, defense-in-depth cross-tenant refusals, roundtrip + restart tests live.
 - Policy evaluation: default deny, deny-overrides, approval gating, classification
@@ -247,7 +247,15 @@ code. They are not evidence of security against a competent adversary.
   ADR-018 amended). A live-DB run then surfaced: migration id 3 was not
   idempotent on re-apply (fixed: `IF NOT EXISTS`, matching id 1's posture) and
   the backend tamper test needed to disarm the new append-only trigger first
-  (fixed, mirroring the SQLite tamper posture).
+  (fixed, mirroring the SQLite tamper posture). The M12 session audit then
+  found the two headline claims unwired (fixed: `store-unavailable` deny
+  reason mapped through a typed error; per-tenant sealing wired into the
+  runtime write path) and a PG-mode CLI exit hang (fixed: `close()` at each
+  command's end, which itself surfaced the write-queue drain race — close now
+  ends the pool only after every queued write). A first attempt at queueing
+  pre-open appends was reverted with cause: seq assignment raced the chain
+  load, so PG-mode construction went through a ready-gated factory instead
+  (ADR-018 amended).
 
 No M3-relevant test failure was suppressed. Nothing was skipped or marked
 `todo` to make the suite green.

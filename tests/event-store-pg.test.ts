@@ -24,6 +24,11 @@ import {
   type SecurityEvent,
 } from '../src/events.ts';
 import { MIGRATIONS, PostgresEventLog } from '../src/event-store-pg.ts';
+import { ResourceRegistry, defineResource } from '../src/registry.ts';
+import { AuthorizationService } from '../src/pdp.ts';
+import { createPolicyEngine } from '../src/policy.ts';
+import { mockAuth } from '../src/testing.ts';
+import { type Principal } from '../src/domain.ts';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const UNREACHABLE_URL = 'postgres://postgres:fake-password-for-redaction-test@127.0.0.1:1/none';
@@ -367,6 +372,29 @@ describe('M12 postgres fail-closed (H15)', () => {
     assert.throws(() => store.append({ tenantId: 't1', principal: 'p', actor: 'a', actorKind: 'agent', action: 'read', result: 'success' }), /refus|unavailable|failed/i);
     assert.equal(store.all().length, 0, 'the in-memory chain reflects the refusal: nothing was appended');
     store.close();
+  });
+
+  test('an unavailable store denies with the distinct store-unavailable reason (H15, no DB needed)', async () => {
+    // No DATABASE_URL and no server: after the connect fails, every append is
+    // a typed refusal — the PDP must surface that as store-unavailable, not
+    // the generic evidence-write-failure. (During 'connecting', appends queue
+    // for the startup race and must NOT deny — false denials are a regression
+    // of the M10 false-denial budget.)
+    const broken = new PostgresEventLog({ url: UNREACHABLE_URL });
+    await assert.rejects(broken.whenReady(), /unavailable/i);
+    const registry = new ResourceRegistry();
+    registry.add(defineResource({ id: 'r1', type: 'document', tenantId: 'acme', classification: 'internal' }));
+    const principal: Principal = { id: 'agent:x', kind: 'agent', tenantId: 'acme', roles: [], attributes: {}, auth: mockAuth({ subject: 'agent:x' }) };
+    const authz = new AuthorizationService(
+      registry,
+      createPolicyEngine([{ id: 'allow-read', effect: 'allow', principals: {}, actions: ['read'], resources: {} }]),
+      broken,
+      () => 1,
+    );
+    const decision = authz.authorize({ principal, action: 'read', resourceId: 'r1' });
+    assert.equal(decision.decision, 'deny');
+    assert.equal(decision.denyReason, 'store-unavailable');
+    broken.close();
   });
 
   test('error messages never carry the URL or its credentials (structural secret test)', { skip: PG_SKIP }, async () => {

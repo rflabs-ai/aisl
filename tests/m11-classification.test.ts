@@ -12,7 +12,7 @@ import { ResourceRegistry, defineResource, ingestDocument, propagateClassificati
 import { AgentSession, LocalSandbox } from '../src/runtime.ts';
 import { ScriptedModel } from '../src/model.ts';
 import { testWorld } from '../src/testing.ts';
-import { keyIdFor } from '../src/seal.ts';
+import { keyIdForTenant } from '../src/seal.ts';
 import { type PolicyRule } from '../src/policy.ts';
 
 const ALLOW_AGENT_WRITE: PolicyRule = {
@@ -143,8 +143,8 @@ describe('write path propagation (end-to-end)', () => {
     assert.equal(ev.metadata?.derivedClassification, 'confidential');
     const sealed = ev.metadata?.sealed as { keyId: string } | null;
     assert.ok(sealed);
-    assert.equal(sealed.keyId, keyIdFor('confidential'));
-    assert.equal(sealed.keyId, 'evidence-key:confidential');
+    assert.equal(sealed.keyId, keyIdForTenant('acme', 'confidential'));
+    assert.equal(sealed.keyId, 'evidence-key:v2:acme:confidential');
   });
 
   test('a later write with no higher sources does not lower the label', async () => {
@@ -175,7 +175,7 @@ describe('write path propagation (end-to-end)', () => {
     assert.equal(ev.metadata?.derivedClassification, 'confidential');
     const sealed = ev.metadata?.sealed as { keyId: string } | null;
     assert.ok(sealed);
-    assert.equal(sealed.keyId, 'evidence-key:confidential');
+    assert.equal(sealed.keyId, 'evidence-key:v2:acme:confidential');
   });
 });
 

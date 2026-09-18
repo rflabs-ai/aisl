@@ -10,7 +10,7 @@
  *   - D6 (model-based critique) is telemetry only — see the stub.
  */
 
-import { seal, type Sealed } from './seal.ts';
+import { sealFor, type Sealed } from './seal.ts';
 import { classificationRank, type ActionRequest, type AuthorizationDecision, type Classification, type Principal } from './domain.ts';
 import { type CapabilityRequestService } from './capability-request.ts';
 
@@ -159,7 +159,7 @@ export function runLadder(
 ): GuardedResponse {
   if (flags.length === 0) return { status: 'delivered', text: initialText, flags: [], citations: toCitations(initialText), guardId: GUARD_ID, originalSealed: null, ladderRung: null };
   const repairable = flags.filter((f) => f.reason !== 'leak');
-  const sealed = (txt: string) => seal(txt, options.classification);
+  const sealed = (txt: string) => sealFor(options.ctx.principal.tenantId, txt, options.classification);
   const okIfClean = (text: string, rung: 'repair' | 'regenerate'): GuardedResponse | null =>
     runDetectors({ ...options.ctx, modelText: text, canaries: [] }).length === 0
       ? { status: 'repaired', text, flags: [], citations: toCitations(text), guardId: GUARD_ID, originalSealed: sealed(initialText), ladderRung: rung }
@@ -185,7 +185,7 @@ export class GroundedResponseGuard implements ResponseGuard {
     try {
       const flags = criticFn === undefined ? runDetectors(ctx) : [...runDetectors(ctx), ...criticFn(ctx.modelText)];
       if (flags.some((f) => f.reason === 'leak')) {
-        return { status: 'withheld', text: SAFE_COMPLETION, flags, citations: [], guardId: this.id, originalSealed: seal(ctx.modelText, ctx.classification), ladderRung: null };
+        return { status: 'withheld', text: SAFE_COMPLETION, flags, citations: [], guardId: this.id, originalSealed: sealFor(ctx.principal.tenantId, ctx.modelText, ctx.classification), ladderRung: null };
       }
       const nonLeakFlags = flags.filter((f) => f.reason !== 'leak');
       const response = runLadder(ctx.modelText, nonLeakFlags, repairSpanStrip, null, { escalateText: ESCALATE_DEFAULT, classification: ctx.classification, ctx });

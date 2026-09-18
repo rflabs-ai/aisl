@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { type Principal } from '../src/domain.ts';
 import { type PolicyRule } from '../src/policy.ts';
-import { keyIdFor, open, type Sealed } from '../src/seal.ts';
+import { keyIdFor, keyIdForTenant, open, type Sealed } from '../src/seal.ts';
 import { TENANT_A } from '../src/scenario.ts';
 import { testWorld, mockAuth } from '../src/testing.ts';
 
@@ -98,7 +98,7 @@ describe('evidence sealing', () => {
     w.authorization.issue(w.root, {
       subject: AUDITOR.id,
       tenantId: TENANT_A,
-      resourceIds: [keyIdFor('internal')],
+      resourceIds: [keyIdForTenant(TENANT_A, 'internal')],
       actions: ['evidence.decrypt'],
       maxClassification: 'internal',
       expiresAt: w.clock.now() + 600_000,
@@ -117,13 +117,33 @@ describe('evidence sealing', () => {
     w.authorization.issue(w.root, {
       subject: AUDITOR.id,
       tenantId: TENANT_A,
-      resourceIds: [keyIdFor('confidential')],
+      resourceIds: [keyIdForTenant(TENANT_A, 'confidential')],
       actions: ['evidence.decrypt'],
       maxClassification: 'confidential',
       expiresAt: w.clock.now() + 600_000,
       provenance: { source: 'policy-grant' },
     });
 
+    assert.equal(w.authorization.revealEvidence(AUDITOR, event), undefined);
+  });
+
+  test('clearance minted for another tenant\'s v2 key does not decrypt ours', () => {
+    const w = testWorld({ policies: [EVIDENCE_RULE] });
+    readInternalDoc(w);
+    const event = lastExecution(w);
+
+    w.authorization.issue(w.root, {
+      subject: AUDITOR.id,
+      tenantId: TENANT_A,
+      resourceIds: [keyIdForTenant('other-tenant', 'internal')],
+      actions: ['evidence.decrypt'],
+      maxClassification: 'internal',
+      expiresAt: w.clock.now() + 600_000,
+      provenance: { source: 'policy-grant' },
+    });
+
+    // The sealed keyId names acme; a capability on another tenant's key id
+    // never matches, so tenant binding is enforced at the authorization layer.
     assert.equal(w.authorization.revealEvidence(AUDITOR, event), undefined);
   });
 

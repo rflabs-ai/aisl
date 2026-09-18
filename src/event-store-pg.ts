@@ -23,6 +23,7 @@ import {
   type EventStore,
   type SecurityEvent,
   GENESIS_HASH,
+  StoreUnavailableError,
   appendAnchorLine,
   bundleFromEvents,
   eventHash,
@@ -149,7 +150,7 @@ export class PostgresEventLog implements EventStore {
   /** Endpoint host only — the full URL is a secret and is never retained. */
   private readonly endpoint: string;
   private tail: Promise<void>;
-  private isOpen = false;
+  private state: 'connecting' | 'open' | 'failed' = 'connecting';
   private failure = 'postgres event store is not open';
 
   constructor(config: PostgresEventLogConfig) {
@@ -173,17 +174,18 @@ export class PostgresEventLog implements EventStore {
         ? await this.runMigrations(postgres(config.migrateUrl))
         : await this.assertMigrationsApplied();
       await this.loadAndVerifyChain();
-      this.isOpen = true;
+      this.state = 'open';
       this.failure = 'postgres event store is not open';
       // Await the migrate event's own persist before connect resolves, so
       // whenReady() means "migrations recorded AND their event persisted".
       if (applied.length > 0) await this.recordMigrationEvent(applied);
     } catch (error) {
-      this.isOpen = false;
+      this.state = 'failed';
       const detail = redactUrl(error instanceof Error ? error.message : String(error));
       this.failure = `postgres event store unavailable (endpoint ${this.endpoint}): ${detail}`;
       await this.sql.end({ timeout: 1_000 }).catch(() => {});
-      throw new Error(this.failure);
+      // Typed so the PDP maps this to denyReason 'store-unavailable' (H15).
+      throw new StoreUnavailableError(this.failure);
     }
   }
 
@@ -303,15 +305,23 @@ export class PostgresEventLog implements EventStore {
   }
 
   append(input: EventInput): SecurityEvent {
-    if (!this.isOpen) throw new Error(`${this.failure}: refusing to append (fail closed)`);
+    // Typed for the PDP: appends before the store is open (or after a failed
+    // connect/write) are a typed refusal — the PDP maps this to
+    // 'store-unavailable' (H15), not the generic evidence-write-failure.
+    // Runtime callers reach readiness through buildWorldAsync (scenario.ts)
+    // BEFORE any decision, so this fires only on genuine outages/misuse.
+    if (this.state !== 'open') throw new StoreUnavailableError(`${this.failure}: refusing to append (fail closed)`);
     const event = this.buildAndMirror(input);
     const next = this.tail.then(() => this.persist(event));
     next.catch((error) => {
       // A write that did not reach the database closes the store for further
       // appends: the next append (and every decision) fails closed.
-      this.isOpen = false;
+      this.state = 'failed';
       const detail = redactUrl(error instanceof Error ? error.message : String(error));
       this.failure = `postgres event store write failed (endpoint ${this.endpoint}): ${detail}`;
+      // Loud, once per failure (H15): the next append denies, and this warning
+      // is the operator-visible health signal the evidence path cannot give.
+      process.emitWarning?.(`evidence store unavailable: ${this.failure}`);
     });
     this.tail = next;
     return event;
@@ -358,6 +368,14 @@ export class PostgresEventLog implements EventStore {
   }
 
   close(): void {
-    this.sql.end({ timeout: 5_000 }).catch(() => {});
+    // End the pool AFTER every queued write: appends persist asynchronously
+    // (queued on this.tail), so an immediate end loses them (CONNECTION_ENDED).
+    // The tail is drained before the pool ends; post-close appends then fail
+    // closed through the driver error path.
+    const tail = this.tail;
+    const end = (): void => {
+      this.sql.end({ timeout: 5_000 }).catch(() => {});
+    };
+    tail.then(end, end).catch(() => {});
   }
 }

@@ -18,7 +18,7 @@ import {
   canonicalJson,
   classificationRank,
 } from './domain.ts';
-import { seal } from './seal.ts';
+import { sealFor } from './seal.ts';
 import { type EventStore } from './events.ts';
 import { type Approval } from './policy.ts';
 import { type AuthorizationService } from './pdp.ts';
@@ -425,7 +425,7 @@ export class AgentSession {
     const digest = rendered === null ? null : createHash('sha256').update(rendered).digest('hex');
     const classification =
       derivedClassification ?? this.cfg.registry.get(request.resourceId)?.classification ?? 'x-unknown-resource';
-    const sealed = rendered === null ? null : seal(rendered, classification);
+    const sealed = rendered === null ? null : sealFor(this.cfg.principal.tenantId, rendered, classification);
 
     this.cfg.eventLog.append({
       tenantId: this.cfg.principal.tenantId,

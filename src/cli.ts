@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { runAttackCorpus } from './attacks.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyRule } from './policy.ts';
 import { type Resource } from './domain.ts';
-import { buildWorld, summarizeRepoModel, TENANT_A, whenWorldReady } from './scenario.ts';
+import { buildWorld, buildWorldAsync, summarizeRepoModel, TENANT_A } from './scenario.ts';
 import { defineResource, detectInjectionSignals } from './registry.ts';
 import { AgentSession, LocalSandbox } from './runtime.ts';
 import { AuthorizationService } from './pdp.ts';
@@ -41,8 +41,7 @@ function heading(text: string): void {
 }
 
 async function demo(): Promise<void> {
-  const world = buildWorld();
-  await whenWorldReady(world);
+  const world = await buildWorldAsync();
   const r = world.resources;
 
   heading('MVP DEMO — high-assurance AI execution environment');
@@ -483,11 +482,12 @@ async function demo(): Promise<void> {
     m13FailV?.result === 'fail' ? 'EXPECTED-FAIL' : 'FAIL',
     `${m13FailV?.evidence ?? 'missing'}; verification failures already mark the step errored`,
   );
+  // Postgres mode: close the store's pool or the process hangs at exit.
+  world.eventLog.close();
 }
 
 async function attack(): Promise<void> {
-  const world = buildWorld();
-  await whenWorldReady(world);
+  const world = await buildWorldAsync();
   const results = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   heading('ATTACK HARNESS');
   let failed = 0;
@@ -500,11 +500,12 @@ async function attack(): Promise<void> {
   }
   console.log(`\n  ${results.length - failed}/${results.length} attack cases behaved as required.`);
   if (failed > 0) process.exitCode = 1;
+  // Postgres mode: close the store's pool or the process hangs at exit.
+  world.eventLog.close();
 }
 
 async function benchmark(): Promise<void> {
-  const world = buildWorld();
-  await whenWorldReady(world);
+  const world = await buildWorldAsync();
   const attacks = await runAttackCorpus(world, join(ROOT, 'security-attacks'));
   const firstPassGuardCount = world.eventLog
     .all()
@@ -677,6 +678,8 @@ async function benchmark(): Promise<void> {
 
   heading('BENCHMARK (measured this run — not a claim about the product)');
   console.log(JSON.stringify(output, null, 2));
+  // Postgres mode: close the store's pool or the process hangs at exit.
+  world.eventLog.close();
 }
 
 function ratio(n: number, d: number): number {

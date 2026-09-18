@@ -83,6 +83,17 @@ export type EventInput = Omit<SecurityEvent, 'seq' | 'previousEventHash' | 'even
 export const GENESIS_HASH = '0'.repeat(64);
 
 /**
+ * H15 fail-closed signal: the event store cannot accept writes because it is
+ * unreachable, unmigrated, or a prior write failed — the store is DOWN, not
+ * merely slow. Thrown by PostgresEventLog.append; the PDP maps it to the
+ * distinct `denyReason: 'store-unavailable'` so an outage is operator-
+ * distinguishable from a policy denial or a generic write failure. EventLog
+ * (SQLite/in-memory) never throws this class — its failures stay
+ * `evidence-write-failure`.
+ */
+export class StoreUnavailableError extends Error {}
+
+/**
  * The evidence-plane port (ADR-018): exactly the public surface of EventLog.
  * Two implementations: EventLog (SQLite + in-memory, the default for
  * single-node, on-prem, air-gapped, and every run without DATABASE_URL) and

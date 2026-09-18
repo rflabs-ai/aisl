@@ -186,6 +186,7 @@ export type DenyReason =
   | 'tenant-mismatch'
   | 'evaluation-error'
   | 'evidence-write-failure'
+  | 'store-unavailable'
   | 'issuer-not-permitted'
   | 'issuer-insufficient-authority'
   | 'unknown-resource'

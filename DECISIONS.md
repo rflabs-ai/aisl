@@ -783,6 +783,16 @@ decision that needs the store with the distinct `denyReason:
 in-memory, no retry-until-allow. The degraded mode is explicit and
 operator-visible, per H15's methodology.
 
+Append semantics around readiness: appends issued **before the store is
+open** fail closed with the typed error — a PG-mode runtime must construct
+its world through the ready-gated factory (`buildWorldAsync`), which awaits
+connect/migration/chain-verification **before any bootstrap append
+happens**, so no decision and no bookkeeping can precede a verified store.
+Queueing pre-open appends was tried and rejected: a buffered append's seq is
+assigned before the chain loads, colliding with rehydrated rows. The
+`denyReason: 'store-unavailable'` + loud health signal covers the genuine
+outage path (unreachable, unmigrated, failed write).
+
 ### Connection and secret handling
 
 `DATABASE_URL` from the environment (production: secret-broker injection

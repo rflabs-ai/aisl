@@ -135,21 +135,42 @@ export const AUDIT_POLICY_RULE: PolicyRule = {
   resources: { types: ['audit-log'] },
 };
 
+/**
+ * Postgres is opt-in (EVENT_STORE=postgres + DATABASE_URL): an ambient
+ * DATABASE_URL alone would flip every in-process world to a store that
+ * must be migrated and awaited — the SQLite/in-memory backends stay the
+ * default for all runs that do not explicitly ask for Postgres (ADR-018).
+ */
+function makeEventLog(options: { sqlitePath?: string }): EventStore {
+  return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
+    ? new PostgresEventLog({
+        url: process.env.DATABASE_URL,
+        ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
+        ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
+      })
+    : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+}
+
 export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
+  return assembleWorld(makeEventLog(options), options);
+}
+
+/**
+ * Postgres mode: the store connects/migrates asynchronously, and the world's
+ * bootstrap events append during assembly, so a PG-mode world can only be
+ * built through this factory — it awaits readiness BEFORE any bootstrap
+ * append happens. The synchronous buildWorld stays for the SQLite/in-memory
+ * backends, which need no readiness.
+ */
+export async function buildWorldAsync(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): Promise<World> {
+  const eventLog = makeEventLog(options);
+  if (eventLog instanceof PostgresEventLog) await eventLog.whenReady();
+  return assembleWorld(eventLog, options);
+}
+
+function assembleWorld(eventLog: EventStore, options: { sqlitePath?: string; policies?: readonly PolicyRule[] }): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
-  // Postgres is opt-in (EVENT_STORE=postgres + DATABASE_URL): an ambient
-  // DATABASE_URL alone would flip every in-process world to a store that
-  // must be migrated and awaited — the SQLite/in-memory backends stay the
-  // default for all runs that do not explicitly ask for Postgres (ADR-018).
-  const eventLog: EventStore =
-    process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
-      ? new PostgresEventLog({
-          url: process.env.DATABASE_URL,
-          ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
-          ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
-        })
-      : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
 
   registry.add(defineResource({ id: RESOURCE_IDS.repoA, type: 'repository', tenantId: TENANT_A, classification: 'internal' }));
   registry.add(defineResource({ id: RESOURCE_IDS.internalDoc, type: 'document', tenantId: TENANT_A, classification: 'internal' }));
@@ -289,15 +310,6 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
       });
     },
   };
-}
-
-/**
- * Postgres mode: the store connects/migrates asynchronously. Callers (cli,
- * tests) must await readiness before any decision, or every append until
- * ready fails closed. No-op for the synchronous SQLite/in-memory backends.
- */
-export async function whenWorldReady(world: World): Promise<void> {
-  if (world.eventLog instanceof PostgresEventLog) await world.eventLog.whenReady();
 }
 
 export function summarizeRepoModel(): ModelPort {

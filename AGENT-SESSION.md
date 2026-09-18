@@ -131,6 +131,22 @@ was left, and what the next session should pick up.
   backup cadence, restore drill, fail-closed); CURRENT_STATE full update
   (387 tests / 34 modules / counts + What-M12-closed + failed-record +
   gap updates #7 #12 #13).
+- **Session-audit ticket fixes (M12):** the audit found the two headline
+  claims unwired and a PG-mode CLI hang — all fixed and re-verified:
+  (1) `store-unavailable` DenyReason added to the union and mapped through a
+  typed `StoreUnavailableError` (src/events.ts, thrown by the backend,
+  caught in the PDP's decision path → deny + loud warning; H15 wiring test
+  runs with NO live DB); (2) per-tenant sealing wired into the runtime
+  write path (`sealFor` at runtime.ts record + both guard seals; reveal
+  authorizes on the sealed v2 keyId itself, so a capability on another
+  tenant's key never matches — three evidence/m11 tests updated to the
+  tenant-bound contract, one new cross-tenant-clearance test); (3) cli
+  closes the store at each command's end — which exposed a write-queue
+  drain race (close ends the pool only after every queued write) and a
+  pre-open append seq race (reverted the queue experiment with cause; PG
+  mode now builds through the ready-gated `buildWorldAsync` factory;
+  ADR-018 amended). PG-mode demo verified end-to-end: every event
+  persisted (94 rows), chain valid, exit 0, no hang.
 
 **Left:**
 - M12 milestone complete; the remaining open seam is the `capability_requests`
@@ -148,9 +164,10 @@ was left, and what the next session should pick up.
   left-over (`capability_requests` API methods) into M15 Phase 1 as scoped.
 
 **Evidence:**
-- Gate: `npm run typecheck` clean; 387 tests — 374 pass, 13 Postgres-mode
-  skips, 0 fail; live Postgres suites 28 + 17 + 5 green against the
-  disposable container; demo + benchmark exit 0, all 14 SLO targets pass.
+- Gate: `npm run typecheck` clean; 439 tests — 426 pass, 13 Postgres-mode
+  skips, 0 fail; live Postgres suites 29 + 17 + 5 green against the
+  disposable container; PG-mode demo end-to-end (94 events persisted,
+  chain valid, exit 0); demo + benchmark exit 0, all 14 SLO targets pass.
 
 ---
 

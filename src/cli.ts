@@ -27,6 +27,7 @@ import { CapabilityRequestService } from './capability-request.ts';
 import { ScriptedModel } from './model.ts';
 import { HttpModelAdapter, ModelEgressDeniedError } from './model-http.ts';
 import { CommandCheck } from './check-command.ts';
+import { SandboxRegistry } from './sandbox-registry.ts';
 import { JsonlTelemetry } from './telemetry.ts';
 import { evaluateSlo } from './slo.ts';
 
@@ -482,6 +483,48 @@ async function demo(): Promise<void> {
     m13FailV?.result === 'fail' ? 'EXPECTED-FAIL' : 'FAIL',
     `${m13FailV?.evidence ?? 'missing'}; verification failures already mark the step errored`,
   );
+  // M16: sandbox lifecycle — create, limit, destroy, attest (ADR-021). The
+  // lifecycle wraps the existing container sandbox; the PDP gates every
+  // execute() on a sandbox.execute capability scoped to the sandbox resource.
+  heading('19. M16: sandbox lifecycle (create -> execute -> attest -> destroy)');
+  const m16Policy = createPolicyEngine([
+    ...BASELINE_POLICY,
+    { id: 'allow-agent-sandbox-execute', effect: 'allow', principals: { kinds: ['agent'] }, actions: ['sandbox.execute'], resources: { ids: [`sandbox:${TENANT_A}:m16-demo`] } },
+  ]);
+  const m16Authz = new AuthorizationService(world.registry, m16Policy, world.eventLog, world.clock.now);
+  const m16Sandboxes = new SandboxRegistry({
+    registry: world.registry,
+    eventLog: world.eventLog,
+    authorization: m16Authz,
+    actorId: world.root.id,
+    actorKind: world.root.kind,
+  });
+  const m16Handle = m16Sandboxes.create({ tenantId: TENANT_A, sandboxId: 'm16-demo', limits: { memoryLimit: '64m', pidsLimit: 32 } });
+  line('sandbox.create', 'CREATE', `${m16Handle.id} kind=${m16Handle.kind}`);
+  m16Authz.issue(world.root, {
+    subject: world.agent.id,
+    tenantId: TENANT_A,
+    resourceIds: [m16Handle.id],
+    actions: ['sandbox.execute'],
+    maxClassification: 'public',
+    expiresAt: world.clock.now() + 600_000,
+    provenance: { source: 'policy-grant', note: 'M16 demo: sandbox execute' },
+  });
+  const m16Exec = m16Sandboxes.execute({
+    tenantId: TENANT_A,
+    sandboxId: 'm16-demo',
+    principal: world.agent,
+    tool: { name: 'sandbox.echo', invoke: (ctx) => ({ output: `echo:${String(ctx.params.msg ?? '')}` }) },
+    params: { msg: 'hello from inside' },
+  });
+  line('execute through the PDP gate', m16Exec.executed ? 'ALLOW' : 'DENY', `${m16Exec.reason} -> ${String(m16Exec.output ?? '')}`);
+  const m16Attest = m16Sandboxes.attest(TENANT_A, 'm16-demo');
+  line('sandbox.attest (sealed payload)', 'SEALED', `digest=${m16Attest.digest.slice(0, 12)}... key=${m16Attest.sealed.keyId}`);
+  m16Sandboxes.destroy(TENANT_A, 'm16-demo');
+  line('sandbox.destroy', 'DESTROY', 'handle dropped; exit sweep is the process-teardown backstop');
+  const m16LifecycleEvents = world.eventLog.all().filter((e) => e.action.startsWith('sandbox.'));
+  line('lifecycle evidence (sealed, digest-only)', 'LOG', m16LifecycleEvents.map((e) => e.action.replace('sandbox.', '')).join(' -> '));
+
   // Postgres mode: close the store's pool or the process hangs at exit.
   world.eventLog.close();
 }

@@ -90,6 +90,14 @@ migrations framework; Phase 2: B (RLS policies + per-tenant keys) ∥ C
 verified against a live Postgres container; SQLite default unchanged).
 M10 ran first — it set the SLO baseline every later milestone must not regress.
 
+Scoping for Stage 0's finish line: `PROMPTS/M14-rest-api.md`
+(ADR-019 — the HTTP transport as a new trust boundary, `node:http` zero-dep,
+authn/tenant/whitelist contracts, authorize + sessions + capability
+requests + audit + tasks + healthz) then `PROMPTS/M15-stage0-cleanup.md`
+(ADR-020 — document ingestion ∥ Git read-only, the M12 capability-request
+API seam, setup script, minimal UI served by the M14 server). Stage 0 is
+fully done when both land.
+
 ---
 
 ## Stage 2 — HARD (substantial security engineering)

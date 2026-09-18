@@ -141,8 +141,16 @@ was left, and what the next session should pick up.
 - Full default gate: 387 tests — 374 pass, 13 skips (Postgres-mode),
   0 fail; demo + benchmark exit 0 (all 14 assurance targets pass).
 
+**Next session should:**
+- M14: `PROMPTS/M14-rest-api.md` is the prompt (ADR-019 Phase 0 is docs-only
+  and unblocked; Phase 1 is the server skeleton + auth seam; B/C wait on it).
+  M15 (`PROMPTS/M15-stage0-cleanup.md`) then finishes Stage 0. Fold the M12
+  left-over (`capability_requests` API methods) into M15 Phase 1 as scoped.
+
 **Evidence:**
-- Docs-only phase; `npm run typecheck` clean; `npm test` 351/351 unchanged.
+- Gate: `npm run typecheck` clean; 387 tests — 374 pass, 13 Postgres-mode
+  skips, 0 fail; live Postgres suites 28 + 17 + 5 green against the
+  disposable container; demo + benchmark exit 0, all 14 SLO targets pass.
 
 ---
 

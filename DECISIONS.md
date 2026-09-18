@@ -978,3 +978,119 @@ until a real deployment demands them.
 TLS-in-process if a deployment cannot terminate at a proxy; OpenAPI
 description generated from the route table when a customer integration
 demands it.
+
+---
+
+## ADR-020: Stage-0 closure — document ingestion, read-only Git, setup script, minimal UI
+
+**Context:** M15. Four ROADMAP rows remain before Stage 0 is done: basic
+document ingestion (chunk, label, classify), basic Git integration
+(read-only repo access), a developer setup script, and the minimal UI.
+The M12 seam (`capability_requests` has a table but no API methods) folds
+in here as the same control-plane surface. Zero new runtime dependencies:
+Git integration shells out to the installed `git` CLI (the `CommandCheck`
+precedent), and the UI is static HTML served by the M14 server.
+
+### Document ingestion
+
+- **Chunking is deterministic.** Fixed-size windows with boundary
+  awareness (last paragraph/space boundary inside the window; hard cut
+  only when no boundary fits). No model in the loop — chunking must be
+  reproducible byte-for-byte from the same input.
+- **Chunk ids are deterministic:** `doc/<documentId>/chunk/<n>`. The same
+  document always produces the same chunk ids; re-ingestion re-raises, it
+  never forks new ids.
+- **Labels reuse the M11 machinery, not a new one.** Every chunk carries
+  the source document's id as `derivedFrom` and its label is
+  `propagateClassification` over the source label(s) — max by rank,
+  raise-only on re-ingest via `ResourceRegistry.raiseClassification`.
+  Chunks are registry resources, capability-scoped like any resource; a
+  derived label feeds ceilings, never grants (invariant 3: hostile
+  document content mints no authority).
+- **Ingestion is an event.** One `document.ingest` event per chunk with
+  the derived label and a SHA-256 digest; chunk content is sealed with
+  `sealFor` (one key per tenant + classification, ADR-018). No plaintext
+  content in events beyond what sealing already does (Claim 13).
+
+### Git integration: read-only only
+
+- **Allowed verbs are an allowlist at config time:** `log`, `show`,
+  `diff`, `status`. Anything outside the set — every write or network
+  verb (`commit`, `push`, `fetch`, `clone`, `submodule`, ...) — is
+  refused when the reader is constructed, not at exec time.
+- **argv only, never a shell string** (the `CommandCheck` posture,
+  ADR-013-era `src/check-command.ts`). Fixed argv `[git, verb, ...args]`,
+  minimal environment (no ambient secrets), timeout → failure.
+- **The repo root is a configured boundary.** Traversal is refused at the
+  trust boundary: arguments that name paths outside the root (absolute
+  paths, `..` segments) or escape hatches (`--no-index`, `--git-dir`,
+  `--work-tree`, `-C`) are refused before spawn.
+- **Output is untrusted content.** Git output enters as a document
+  through the ingestion pipeline above, labeled with the repository's
+  classification; the agent's use of it is gated by the ordinary PDP
+  path (a read capability per the ordinary issuance path). No write, no
+  push, no fetch, no submodules, no network remotes.
+
+### Setup script: no `curl | bash`
+
+`scripts/setup.ps1` + `scripts/setup.sh` are plain, reviewable files in
+the repo. They check the Node version against `engines.node`, run
+`npm install`, `npm run typecheck`, and `npm test`, print what they
+checked and the next steps, and exit nonzero on the first failed check
+(fail-closed applies to tooling). No remote fetches, no pipe-to-shell,
+no sudo. They optionally bootstrap the disposable Postgres container from
+DEPLOYMENT.md's M12 workflow. The environment is reproducible offline.
+
+### Minimal UI: static HTML served by the M14 server
+
+One static HTML file (`tools/ui/index.html`) — inline CSS/JS, vanilla
+`fetch` against `/v1`, zero dependencies, no bundler, no framework, no
+`node_modules`. Served by the same `node:http` server as exact registered
+routes (`GET /ui`, `GET /`); there is no directory serving and no
+parametrized path, so traversal does not exist by construction. The page
+is a client of the API: task view posts `POST /v1/tasks`, evidence view
+calls `GET /v1/audit` — both authorized by the same bearer-JWT contract
+(ADR-019); **no new authorization surface** (the PDP rules do not
+change), and the UI shows the trace — it never bypasses the guard. The
+bearer token is typed by the operator at runtime; no canary, secret, or
+URL is embedded in any served page (secret-scan test). Accessibility
+basics are not a simplification target: semantic HTML, labeled inputs,
+keyboard reachability.
+
+### Capability-request persistence (M12 seam closure)
+
+`PersistenceStore` gains `createCapabilityRequest` /
+`getCapabilityRequest` / `listCapabilityRequestsForTenant` /
+`updateCapabilityRequestStatus` — raw tagged-template SQL over the
+existing migration-3 `capability_requests` table, tenant-bound like every
+other method (RLS context per transaction). The REST capability-request
+routes mirror to the store when one is wired (opt-in; absent store →
+in-memory behavior unchanged, so the M14 surface does not regress).
+
+**Alternatives:**
+- **Model-assisted chunking / embeddings** — nondeterministic, pulls a
+  model into the labeling path; rejected until a workflow demands it.
+- **libgit2 / isomorphic-git** — a runtime dependency plus a C-native
+  surface for four read verbs; the git CLI is already installed and the
+  argv posture is already proven. Rejected under ADR-012.
+- **`curl | bash` setup** — the exact pattern the row rejects; the repo
+  is the review gate.
+- **A framework-built UI** — dependencies, build step, and a second
+  authorization surface for a two-view page. Rejected.
+
+**Security implications:** New hostile-input surfaces: document content
+(data only, no authority — invariant 3 tested), git output (same), git
+arguments (allowlist + traversal refusal at config/spawn time), and one
+static page (no secrets in served content, tested). Ingestion events
+carry sealed content only. The UI adds no new decision path — it renders
+what `/v1` already returns.
+
+**Tradeoffs:** CLI-git means git must be installed (dev machines have
+it; a deployment that cannot install git cannot use the row — named
+honestly). Deterministic chunking is coarse (no semantic boundaries).
+The UI is deliberately spare: two views, no state, no i18n.
+
+**Future migration path:** Write-side git only behind an ADR with
+full-scan review; richer ingestion (OCR, embeddings) when a real
+workflow demands it; UI growth (policy view, approval queue) driven by
+operator need, still zero-dep and server-served.

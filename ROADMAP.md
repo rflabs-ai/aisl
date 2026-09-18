@@ -34,10 +34,10 @@ where it exists today.
 | Architecture / threat / claims docs | claim discipline | — | M | MVP | **[DONE]** |
 | REST API surface | real clients | PDP, session | M | P | **[DONE]** (M14: ADR-019 — `node:http` whitelist router, zero new runtime dependencies; bearer-JWT authn over `IdentityProvider.verifyToken` + registered-principal resolver, tenant derived from the verified principal only, whitelist body/response parsing with size cap, fail-closed mapping, `GET /healthz` (H15); endpoints: authorize, sessions, capability-requests, audit, tasks — every endpoint routes through the one existing decision path; `src/rest-api.ts` + `src/rest-sessions.ts` + `src/rest-audit.ts`) |
 | Project / task / session persistence | survive restart | Postgres | M | P | **[DONE]** (M12: `src/persistence.ts` — RLS'd `projects`/`tasks`/`agent_sessions` tables + tenant-bound CRUD API, upserted resumable session state; roundtrip + restart tests live) |
-| Basic document ingestion | chunk, label, classify | registry | M | P | **[ ]** |
-| Basic Git integration | read-only repo access | sandbox | M | P | **[ ]** |
-| Minimal UI (task + evidence view) | operator usability | REST API | M | P | **[ ]** |
-| Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[ ]** |
+| Basic document ingestion | chunk, label, classify | registry | M | P | **[DONE]** (M15: ADR-020 — `src/ingestion.ts`: deterministic boundary-aware chunker (no model in the loop), chunk ids `doc/<id>/chunk/<n>`, every chunk a registry resource with the source id as `derivedFrom`, labels through the M11 machinery (max-by-rank, raise-only re-ingest), one `document.ingest` event per chunk with content sealed per tenant key — no plaintext in events; Claim 29) |
+| Basic Git integration | read-only repo access | sandbox | M | P | **[DONE]** (M15: ADR-020 — `src/git-reader.ts`: verbs allowlisted at config time to `log`/`show`/`diff`/`status` (write/network verbs refused at construction), argv exec with no shell (CommandCheck posture), traversal/escape-hatch args refused before spawn, output flows through the ingestion path labeled with the repo's classification; Claim 30) |
+| Minimal UI (task + evidence view) | operator usability | REST API | M | P | **[DONE]** (M15: ADR-020 — `tools/ui/index.html` static page served by the M14 server via exact-route `staticPages` (no directory serving, traversal nonexistent by construction), zero dependencies, vanilla `fetch` against `POST /v1/tasks` + `GET /v1/audit`, bearer JWT typed at runtime, no canary/secret/URL in served pages (secret-scan test), accessibility basics (semantic HTML, labeled inputs, keyboard-native controls); no new authorization surface) |
+| Developer setup script | `curl | bash`-free reproducible env | — | S | MVP | **[DONE]** (M15: ADR-020 — `scripts/setup.ps1` + `scripts/setup.sh`: Node/git/npm checks, `npm install` + typecheck + tests, fail-closed nonzero exit on any failed check, offline (no remote fetches — pattern-scanned by test), optional Postgres-16 container bootstrap matching DEPLOYMENT.md) |
 | Trust-boundary parser tests | model output is hostile input to a parser | model gateway | S | MVP | **[DONE]** |
 | Dependency admission policy | pinning, SBOM, review gate — **before the first runtime dep** | — | S | MVP | **[DONE]** |
 | Assurance targets + SLOs | per-control measurable targets (ADR-014), tracked per release | benchmark | M | MVP | **[DONE]** (M10: "Assurance targets" table below implemented as a gated `slo` block in `benchmarks/results.json`; `npm run benchmark` exits nonzero on a hard miss; `falseClaimRate` widened to 100 honest sessions) |
@@ -95,8 +95,8 @@ Scoping for Stage 0's finish line: `PROMPTS/M14-rest-api.md`
 authn/tenant/whitelist contracts, authorize + sessions + capability
 requests + audit + tasks + healthz) then `PROMPTS/M15-stage0-cleanup.md`
 (ADR-020 — document ingestion ∥ Git read-only, the M12 capability-request
-API seam, setup script, minimal UI served by the M14 server). Stage 0 is
-fully done when both land.
+API seam, setup script, minimal UI served by the M14 server). Both landed —
+**Stage 0 is fully [DONE]**.
 
 ---
 

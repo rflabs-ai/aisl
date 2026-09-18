@@ -27,11 +27,14 @@ describe('container sandbox', () => {
     assert.equal(typeof isDockerAvailable(), 'boolean');
   });
 
-  test('ContainerSandbox falls back to LocalSandbox when Docker unavailable', () => {
+  test('ContainerSandbox runs and reports its kind honestly (fallback without Docker)', () => {
     resetDockerCache();
     const sandbox = new ContainerSandbox(new LocalSandbox());
     assert.equal(sandbox.run(() => 42), 42);
-    assert.ok(sandbox.kind.includes('fallback'), `kind=${sandbox.kind}`);
+    // With a live daemon the fallback cannot be exercised: assert the real
+    // kind either way so the sandbox never claims what it is not doing.
+    const expected = isDockerAvailable() ? 'container' : 'fallback';
+    assert.ok(sandbox.kind.includes(expected), `kind=${sandbox.kind} docker=${isDockerAvailable()}`);
   });
 
   test('LocalSandbox kind reports no-isolation', () => {

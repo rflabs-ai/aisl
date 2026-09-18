@@ -659,9 +659,13 @@ The construction seam is `src/scenario.ts` (the single `new EventLog` call
 site); no other caller changes. `verifyBundle()` and the audit-query API are
 untouched — they operate on exported bundles and the port surface.
 
-SQLite stays the **default embedded/test backend**. Postgres tests skip
-cleanly when `DATABASE_URL` is unset (mirror the container-sandbox
-fallback pattern). No ORM; raw SQL through the port. **No query federation
+SQLite stays the **default embedded/test backend**. Postgres is **opt-in**:
+the backend flips to `PostgresEventLog` only when `EVENT_STORE=postgres`
+AND `DATABASE_URL` are set — an ambient `DATABASE_URL` alone must not flip
+every in-process world to a store that needs migration and async readiness
+(appends before ready fail closed). Postgres tests skip cleanly when
+`DATABASE_URL` is unset (mirror the container-sandbox fallback pattern).
+No ORM; raw SQL through the port. **No query federation
 and no read replicas** — one runtime role, one writer.
 
 ### Schema (implementation must match this or amend this)

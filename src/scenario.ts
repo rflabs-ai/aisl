@@ -138,13 +138,18 @@ export const AUDIT_POLICY_RULE: PolicyRule = {
 export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
-  const eventLog: EventStore = process.env.DATABASE_URL
-    ? new PostgresEventLog({
-        url: process.env.DATABASE_URL,
-        ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
-        ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
-      })
-    : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+  // Postgres is opt-in (EVENT_STORE=postgres + DATABASE_URL): an ambient
+  // DATABASE_URL alone would flip every in-process world to a store that
+  // must be migrated and awaited — the SQLite/in-memory backends stay the
+  // default for all runs that do not explicitly ask for Postgres (ADR-018).
+  const eventLog: EventStore =
+    process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
+      ? new PostgresEventLog({
+          url: process.env.DATABASE_URL,
+          ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
+          ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
+        })
+      : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
 
   registry.add(defineResource({ id: RESOURCE_IDS.repoA, type: 'repository', tenantId: TENANT_A, classification: 'internal' }));
   registry.add(defineResource({ id: RESOURCE_IDS.internalDoc, type: 'document', tenantId: TENANT_A, classification: 'internal' }));

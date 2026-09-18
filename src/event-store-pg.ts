@@ -166,7 +166,9 @@ export class PostgresEventLog implements EventStore {
       await this.loadAndVerifyChain();
       this.isOpen = true;
       this.failure = 'postgres event store is not open';
-      if (applied.length > 0) this.recordMigrationEvent(applied);
+      // Await the migrate event's own persist before connect resolves, so
+      // whenReady() means "migrations recorded AND their event persisted".
+      if (applied.length > 0) await this.recordMigrationEvent(applied);
     } catch (error) {
       this.isOpen = false;
       const detail = redactUrl(error instanceof Error ? error.message : String(error));
@@ -239,20 +241,13 @@ export class PostgresEventLog implements EventStore {
     this.events.push(...loaded);
   }
 
-  private recordMigrationEvent(applied: readonly AppliedMigration[]): void {
-    this.append({
-      tenantId: '', // store-level event: not tenant-scoped
-      principal: 'service:store-migrate',
-      actor: 'service:store-migrate',
-      actorKind: 'service',
-      action: 'store.migrate',
-      result: 'success',
-      metadata: { phase: 'store-migrate', applied: applied.map((a) => ({ id: a.id, hash: a.hash })) },
-    });
-  }
-
-  append(input: EventInput): SecurityEvent {
-    if (!this.isOpen) throw new Error(`${this.failure}: refusing to append (fail closed)`);
+  /**
+   * Build the signed event, mirror it, anchor it — the shared body of both
+   * write paths. Callers decide whether the persist goes through the
+   * append queue (append) or is awaited directly (the migrate event, which
+   * connect() must have persisted before whenReady() resolves).
+   */
+  private buildAndMirror(input: EventInput): SecurityEvent {
     const previousEventHash = this.events.at(-1)?.eventHash ?? GENESIS_HASH;
     const partial: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
       ...input,
@@ -267,6 +262,26 @@ export class PostgresEventLog implements EventStore {
     };
     this.events.push(event);
     if (this.anchorPath) appendAnchorLine(this.anchorPath, event);
+    return event;
+  }
+
+  /** Store-level migrate event: mirrored synchronously, persisted directly (not queued). */
+  private async recordMigrationEvent(applied: readonly AppliedMigration[]): Promise<void> {
+    const event = this.buildAndMirror({
+      tenantId: '', // store-level event: not tenant-scoped
+      principal: 'service:store-migrate',
+      actor: 'service:store-migrate',
+      actorKind: 'service',
+      action: 'store.migrate',
+      result: 'success',
+      metadata: { phase: 'store-migrate', applied: applied.map((a) => ({ id: a.id, hash: a.hash })) },
+    });
+    await this.persist(event);
+  }
+
+  append(input: EventInput): SecurityEvent {
+    if (!this.isOpen) throw new Error(`${this.failure}: refusing to append (fail closed)`);
+    const event = this.buildAndMirror(input);
     const next = this.tail.then(() => this.persist(event));
     next.catch((error) => {
       // A write that did not reach the database closes the store for further

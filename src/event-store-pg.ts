@@ -190,6 +190,20 @@ export class PostgresEventLog implements EventStore {
         hash TEXT NOT NULL,
         applied_at TIMESTAMPTZ NOT NULL
       )`;
+      // Idempotent bootstrap for the ADR-018 roles (cluster-level, like the
+      // migrations bookkeeping table): NOLOGIN roles, no passwords in DDL —
+      // operator provisioning of LOGIN/passwords is out-of-band (DEPLOYMENT).
+      // Tests use superuser + SET LOCAL ROLE to exercise RLS contexts.
+      await ddl.unsafe(`
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_rw') THEN
+            CREATE ROLE app_rw NOLOGIN;
+          END IF;
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_reader') THEN
+            CREATE ROLE app_reader NOLOGIN;
+          END IF;
+        END $$;
+      `);
       const applied: AppliedMigration[] = [];
       for (const migration of MIGRATIONS) {
         const hash = migrationHash(migration.sql);

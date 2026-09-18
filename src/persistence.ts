@@ -432,6 +432,14 @@ export class PersistenceStore {
     });
   }
 
+  /**
+   * One decision, ever: only a `pending` row transitions to a decided status.
+   * The WHERE guard makes a replayed approve/deny (the service refuses it with
+   * 409/403, but the REST mirror runs before the service — audit ticket 01)
+   * affect zero rows instead of overwriting `decided_at`/`decided_by` with a
+   * reviewer whose decision was refused. A missing row, a foreign-tenant row,
+   * and an already-decided row are all indistinguishable `undefined`.
+   */
   async updateCapabilityRequestStatus(
     tenantId: string,
     id: string,
@@ -445,7 +453,7 @@ export class PersistenceStore {
       const rows = await tx`
         UPDATE capability_requests
         SET status = ${status}, decided_at = now(), decided_by = ${decidedBy}
-        WHERE tenant_id = ${tenantId} AND id = ${id}
+        WHERE tenant_id = ${tenantId} AND id = ${id} AND status = 'pending'
         RETURNING id, tenant_id, principal, status, requested, created_at, expires_at, decided_at, decided_by`;
       return rows.length === 0 ? undefined : toCapabilityRequest(rows[0]!);
     });

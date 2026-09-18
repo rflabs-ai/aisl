@@ -165,6 +165,21 @@ Dev dependencies: `typescript`, `@types/node`.
 - **Container sandbox** (`src/container-sandbox.ts`): Docker-backed isolation
   with non-root, read-only rootfs, no network namespace, seccomp, memory/CPU/PID
   limits. Falls back to `LocalSandbox` when Docker is unavailable.
+- **Sandbox lifecycle (M16):** `src/sandbox-registry.ts` (ADR-021) — wraps the
+  container sandbox with the missing lifecycle: `create` spawns synchronously
+  (spawn-before-register, so a failure leaves no orphan) and registers the
+  sandbox as a tenant-bound `'system'` resource (`sandbox:<tenantId>:<name>`);
+  `get`/`list`/`destroy`/`attest` re-check the registry's tenant binding on
+  every call (cross-tenant get reads as absent, cross-tenant destroy refuses);
+  `execute` authorizes `sandbox.execute` on the sandbox resource id through the
+  ordinary PDP path before `runTool` — the agent gets a capability, never the
+  handle. Every lifecycle action appends a sealed event (`sealFor`, per-tenant
+  key, classification `'public'`) plus a SHA-256 digest of the limit config;
+  the plaintext log shows only digest + keyId. Limits ARE
+  `ContainerSandboxOptions`; `effectiveLimits` is the single defaults source so
+  destroy/attest record effective-vs-declared honestly. Destroy refuses unknown
+  ids, is idempotent on already-destroyed ones, and `installExitSweep()`
+  (opt-in) tears down every active sandbox on `beforeExit`/SIGINT/SIGTERM.
 - **Egress proxy** (`src/egress-proxy.ts`): HTTP proxy that intercepts traffic,
   blocks IP literals, and routes every request through the PDP before forwarding.
   Sessions have no route out except through the proxy.
@@ -257,10 +272,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 462 tests pass (448 green; 14 Postgres-mode tests skip without
+All 475 tests pass (460 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -275,6 +290,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M12 platform shift (50: backend parity 28, tenant RLS + keys 17, persistence/restore 5)**.
 | **M14 REST API (50: server core + authn/whitelist/fail-closed 20, sessions + capability requests 18, audit + tasks 12)**.
 | **M15 Stage-0 closure (23: ingestion 8, git 7, UI 4, setup 3, capability-request persistence 1)**.
+| **M16 sandbox lifecycle (10: round trip + refusal 2, tenant isolation 2, limits + attestation 2, PDP-gated execute 2, exit sweep 1, seal-scan 1)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -690,6 +706,31 @@ over the existing PDP path.
    operator console served by the M14 server (exact routes, no traversal
    surface), posting tasks and querying the audit log through the ordinary
    bearer-JWT contract; the UI shows the trace and never bypasses the guard.
+
+## What M16 closed
+
+M16 was the sandbox-lifecycle milestone (ADR-021: create, limit, destroy,
+attest — ROADMAP row 61, the last open Stage 1 row). The lifecycle is a
+wrapper over the existing `ContainerSandbox` plumbing, not a reimplementation:
+zero new runtime dependencies, attestation reuses `sealFor` (ADR-018) and the
+event chain, and the execution seam (`runTool`) is untouched.
+
+1. ~~**The sandbox was created once and left running — no lifecycle.**~~
+   `SandboxRegistry` (`src/sandbox-registry.ts`) owns create (synchronous,
+   spawn-before-register), tenant-scoped get/list, idempotent destroy, attest,
+   and an opt-in process-exit sweep (Claim 31).
+2. ~~**Sandbox limits had no typed, auditable config surface.**~~ Limits ARE
+   `ContainerSandboxOptions` (re-exported as `SandboxLimits`); `effectiveLimits`
+   extracts the Docker-path defaults into one source so attestation records
+   effective-vs-declared without drift.
+3. ~~**Sandbox execution had no PDP-gated authority surface.**~~
+   `SandboxRegistry.execute` authorizes `sandbox.execute` on the sandbox
+   resource id through the ordinary `authorize` path (which appends its own
+   decision event) before `runTool`; the agent never holds the handle.
+4. ~~**No attestation of sandbox state.**~~ `sandbox.create`/`sandbox.destroy`
+   /`sandbox.attest` events carry a sealed payload (pid, kind, limits,
+   timestamps, duration) under the tenant's `'public'` key plus a SHA-256
+   limit-config digest — plaintext events show only digest + keyId.
 
 ## Watch-items from the M9 audit
 

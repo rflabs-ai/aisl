@@ -58,7 +58,7 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Secrets brokerage (real backend) | KMS-backed, dynamic, audited | ADR-008 | L | E | **[DONE]** |
 | Network egress proxy | enforce what the gateway decides | ADR-009 | L | MVP | **[DONE]** |
 | Container sandbox | real isolation for tools | ADR-003 | L | MVP | **[DONE]** |
-| Sandbox lifecycle management | create, limit, destroy, attest | container | M | P | **[ ]** |
+| Sandbox lifecycle management | create, limit, destroy, attest | container | M | P | **[DONE]** (M16: ADR-021 — `src/sandbox-registry.ts`: tenant-namespaced ids (`sandbox:<tenant>:<name>`) registered as `'system'` resources with the registry as the tenant authority (every lifecycle call re-checks the binding); sealed `sandbox.create`/`sandbox.destroy`/`sandbox.attest` events via `sealFor` + a SHA-256 limit-config digest — plaintext events carry only digest + keyId; `sandbox.execute` gated by the ordinary PDP path on a capability scoped to the sandbox resource id; limits ARE `ContainerSandboxOptions` with effective-vs-declared attested from one defaults source; idempotent destroy, no orphan on failed create, opt-in process-exit sweep; Claim 31) |
 | Tenant isolation hardening | RLS, per-tenant keys | Postgres | L | E | **[DONE]** (M12: `FORCE RLS` + deny-by-default per-role policies on the control-plane tables — `app_reader` tenant-scoped, hostile queries read zero rows (live-DB tested, superuser not the proof); per-tenant evidence keys `evidence-key:v2:<tenant>:<level>`, no silent re-encryption; Postgres mode only — SQLite mode stays app-level; Claim 9) |
 | Model provider adapters | real providers behind the port | ADR-005 | M | P | **[DONE]** (M13: `src/model-http.ts` — OpenAI-compatible `HttpModelAdapter` over injectable `fetch` with retry/backoff/timeout, output always through `parseModelOutput`; classification egress gate is default-deny and not bypassable; Claim 27) |
 | Verification pipeline | tests, linters, SAST on agent output | verification | M | P | **[DONE]** (M13: `src/check-command.ts` — `CommandCheck`, argv-array exec with no shell, config-time allowlist refusal, artifact via stdin only, minimal env, timeout → fail; flows through `runVerifications`, no new authority) |
@@ -96,7 +96,9 @@ authn/tenant/whitelist contracts, authorize + sessions + capability
 requests + audit + tasks + healthz) then `PROMPTS/M15-stage0-cleanup.md`
 (ADR-020 — document ingestion ∥ Git read-only, the M12 capability-request
 API seam, setup script, minimal UI served by the M14 server). Both landed —
-**Stage 0 is fully [DONE]**.
+**Stage 0 is fully [DONE]**. `PROMPTS/M16-sandbox-lifecycle.md` (ADR-021 —
+sandbox lifecycle: create, limit, destroy, attest) closed the last Stage 1
+row.
 
 ---
 

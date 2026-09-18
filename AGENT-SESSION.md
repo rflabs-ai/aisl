@@ -24,6 +24,57 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 19 — 2026-09-18 — opencode/m16-sandbox-lifecycle
+
+**Did:**
+- M16 landed — **ROADMAP row 61 (the last open Stage 1 row) is [DONE]**.
+  **ADR-021** (Phase 0) written into `DECISIONS.md`: sandbox lifecycle
+  decisions — synchronous create with embedder-held handles and tenant-
+  namespaced ids; `ContainerSandboxOptions` IS the limits record; idempotent
+  destroy + process-exit sweep; sealed attest events; PDP-gated execute.
+- Phase 1: `src/sandbox-registry.ts` — `SandboxRegistry` (create/get/list/
+  destroy/attest/execute): sandbox ids `sandbox:<tenantId>:<name>` registered
+  as tenant-bound `'system'` resources (registry = tenant authority, re-checked
+  on every lifecycle call); spawn-before-register so a failed create leaves no
+  orphan; every lifecycle action appends a sealed event (`sealFor`, `'public'`
+  classification, per-tenant key ADR-018) + SHA-256 limit-config digest —
+  plaintext log shows digest + keyId only; `execute()` authorizes
+  `sandbox.execute` through the ordinary PDP path (own decision event) before
+  `runTool`; destroy refuses unknown ids, idempotent on already-destroyed,
+  `installExitSweep()` (opt-in beforeExit/SIGINT/SIGTERM) + testable
+  `sweepExit()`.
+- `src/container-sandbox.ts` — defaults extracted to `effectiveLimits`
+  (single source with `buildDockerArgs`) so attestation records
+  effective-vs-declared without drift. Sandbox behavior unchanged.
+- Phase 2: `tests/m16-sandbox-lifecycle.test.ts` (10: round trip + refusals,
+  tenant isolation incl. registry-rebind flip, limits digest + sealed
+  effective limits, attest canary scan, no-capability deny + capability allow
+  execute through the real PDP, exit sweep, per-event seal/digest scan) and
+  demo section 19 (create -> execute -> attest -> destroy with event output).
+- Docs sweep: ROADMAP row 61 → [DONE] + milestone-prompts note, CURRENT_STATE
+  (counts, what-works, what-M16-closed), DEPLOYMENT.md (sandbox lifecycle
+  operating notes), SECURITY_CLAIMS (Claim 31), this entry.
+
+**Left:**
+- Attested pid is the runtime's own pid — no resident container/image digest
+  to attest until a long-lived sandbox model exists (named in ADR-021).
+- Per-sandbox action policy, sandbox sharing, snapshot/restore, HSM remote
+  attestation, microVM backend: ADR-021's named migration path, none demanded
+  yet.
+
+**Next session should:**
+- Stage 1 is fully closed. Pick up HARD-stage items per ROADMAP (H1/H10/H12/
+  H13/H15) or the next milestone prompt when written.
+
+**Evidence:**
+- 475 tests (460 pass, 15 PG-mode skips, 0 fail); 10 new M16 tests. The skip
+  delta (14 → 15) and +3 tests come from the M15 audit-fix commit already on
+  trunk, not M16.
+- `npm run typecheck` clean; `npm run demo` exit 0 with the new section 19;
+  `npm run attack` exit 0; `npm run benchmark` exit 0 (0 hard failures).
+  Files: `src/sandbox-registry.ts`, `src/container-sandbox.ts`,
+  `tests/m16-sandbox-lifecycle.test.ts`, `src/cli.ts`.
+
 ### SESSION 18 — 2026-09-18 — opencode/m15-stage0-cleanup
 
 **Did:**

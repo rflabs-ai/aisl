@@ -58,6 +58,23 @@ export interface ContainerSandboxOptions {
   readonly timeoutMs?: number;
 }
 
+const SANDBOX_DEFAULTS: Required<ContainerSandboxOptions> = {
+  memoryLimit: '128m',
+  cpuPeriod: 100_000,
+  cpuQuota: 50_000,
+  pidsLimit: 64,
+  timeoutMs: 30_000,
+};
+
+/**
+ * Limits actually applied by the Docker path, defaults included. Single source
+ * of truth with `buildDockerArgs` so the lifecycle attestation (M16) records
+ * effective vs declared limits without duplicating the defaults.
+ */
+export function effectiveLimits(opts: ContainerSandboxOptions = {}): Required<ContainerSandboxOptions> {
+  return { ...SANDBOX_DEFAULTS, ...opts };
+}
+
 /**
  * Docker-backed sandbox. When Docker is unavailable, falls back to LocalSandbox
  * (zero isolation). The fallback is logged, not silent — a caller that expects
@@ -82,11 +99,7 @@ export class ContainerSandbox implements Sandbox {
   }
 
   private buildDockerArgs(taskId: string, workDir: string, extraArgs: string[]): { args: string[]; timeout: number } {
-    const memory = this.opts.memoryLimit ?? '128m';
-    const cpuPeriod = this.opts.cpuPeriod ?? 100_000;
-    const cpuQuota = this.opts.cpuQuota ?? 50_000;
-    const pids = this.opts.pidsLimit ?? 64;
-    const timeout = this.opts.timeoutMs ?? 30_000;
+    const { memoryLimit: memory, cpuPeriod, cpuQuota, pidsLimit: pids, timeoutMs: timeout } = effectiveLimits(this.opts);
 
     return {
       args: [

@@ -1307,3 +1307,73 @@ diagnostics yet).
 **Residual risk:** a repository whose content is hostile is exactly the
 poisoned-source case (TM-002): reads succeed and stay data — the ceiling is
 the guard's documented D2 limit, not a new one.
+
+---
+
+## Claim 31 — Sandbox lifecycle is attested, tenant-scoped, and PDP-gated (M16)
+
+**Claim:** Every sandbox managed by `SandboxRegistry` (`src/sandbox-registry.ts`)
+has a complete, tamper-evident lifecycle record: creation, destruction, and
+attestation each append an event whose attestation payload (pid, sandbox kind,
+declared + effective limits, timestamps, duration) is sealed under the owning
+tenant's key — the plaintext event log shows only a SHA-256 digest of the limit
+config and the key id, never the payload. Every lifecycle call re-checks the
+ResourceRegistry's tenant binding (cross-tenant get reads as absent,
+cross-tenant destroy refuses), and tool execution inside the sandbox happens
+only through `execute()`, which the ordinary PDP path gates on a
+`sandbox.execute` capability scoped to the sandbox resource id — the agent never
+receives the handle.
+
+**Mechanism:** `create` spawns synchronously and registers only after a
+successful spawn (a failed create leaves no half-registered handle), naming the
+sandbox `sandbox:<tenantId>:<name>` as a `'system'` resource with the registry
+as the tenant authority. `execute` authorizes through
+`AuthorizationService.authorize` (which appends its own decision event — every
+execute attempt, allowed or denied, is evidence) before `runTool`; no capability,
+no execution. Limits are the container sandbox's own `ContainerSandboxOptions`;
+`effectiveLimits` is the single defaults source, so the destroy/attest payloads
+record what the Docker path actually applies versus what was declared. Destroy
+refuses unknown ids, is idempotent on already-destroyed sandboxes (explicit
+destroy and the exit sweep cannot race into a throw), and `installExitSweep()`
+tears down every active sandbox on `beforeExit`/SIGINT/SIGTERM, each with its
+own destroy event.
+
+**Threat model:** TM-004 (evidence store as a target — sealed payloads resist
+reading and the chain resists tamper), TM-001 (a compromised model driving
+sandbox execution — capability-scoped, PDP-gated), ATK-011 (resource exhaustion
+— limits are declared, applied, and attested).
+
+**Assumptions:** the runtime process is not compromised; the sandbox kind
+string is honest (it is — the fallback path self-reports `fallback/...`);
+the ResourceRegistry is not mutated to re-bind a sandbox across tenants except
+by an operator with registry authority (a re-bind flips lifecycle verdicts
+fail-closed, and that is tested).
+
+**Evidence:** `tests/m16-sandbox-lifecycle.test.ts` — 10 cases: create/destroy
+round trip with sealed events; duplicate-create and unknown-id-destroy
+refusals; idempotent destroy; cross-tenant get/destroy/list refusals;
+registry-rebind flips the tenant verdict; limit digest over the declared
+config; sealed payload carrying effective limits (defaults included); attest
+payload sealed under the tenant key with the plaintext canary absent from the
+whole serialized event log; execute denied without a capability and executed
+with one (through `AgentSession`-grade principals, real PDP); exit sweep
+destroys every active sandbox and records the evidence; a per-event scan that
+every `sandbox.*` event carries both a sealed payload and a digest. The demo's
+M16 section exercises create -> execute -> attest -> destroy end-to-end.
+
+**Test:** `tests/m16-sandbox-lifecycle.test.ts`.
+
+**Known limitations:** the attested pid is the runtime's own pid — the current
+sandbox is ephemeral per invocation (`docker run --rm`, tmpdirs removed in
+`finally`), so there is no resident container or image digest to attest; those
+arrive with a long-lived sandbox model. The exit sweep is opt-in (it installs
+process-level signal handlers) and swallow-fails per sandbox: evidence for the
+rest of the fleet outranks a clean exit code on one broken teardown. Per-sandbox
+action policy (which tools a sandbox may run), multi-tenant sandbox sharing,
+snapshot/restore, and HSM-backed remote attestation are named non-goals (ADR-021
+migration path).
+
+**Residual risk:** an embedder that hands the `SandboxHandle` (or the raw
+`Sandbox`) to the agent bypasses the registry's gating exactly as handing out
+the `AuthorizationService` would — the handle is the embedder's credential, and
+the claim covers the registry's surface, not a deployment that leaks it.

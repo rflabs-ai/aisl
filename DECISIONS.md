@@ -1094,3 +1094,88 @@ The UI is deliberately spare: two views, no state, no i18n.
 full-scan review; richer ingestion (OCR, embeddings) when a real
 workflow demands it; UI growth (policy view, approval queue) driven by
 operator need, still zero-dep and server-served.
+
+---
+
+## ADR-021: Sandbox lifecycle — create, limit, destroy, attest (M16)
+
+**Context:** M16. M13 shipped the container sandbox
+(`src/container-sandbox.ts`, ADR-003 migration path) — Docker-backed
+isolation with memory/CPU/PID limits, non-root, read-only rootfs,
+no network — but the sandbox is created once and left running: there is
+no lifecycle around it. ROADMAP row 61 is the last open Stage-1 row.
+The lifecycle is a wrapper over the existing plumbing, not a
+reimplementation: zero new runtime dependencies, attestation reuses
+`sealFor` (ADR-018 per-tenant keys), limits reuse the existing
+`ContainerSandbox` constructor options.
+
+### Decisions
+
+- **Create — synchronous, embedder-held, minimal env.** `SandboxRegistry.create`
+  spawns the sandbox synchronously and returns a `SandboxHandle` to the
+  embedder/runtime — the agent never receives the handle, only a PDP-gated
+  capability. The sandbox id is caller-chosen and namespaced:
+  `sandbox:<tenantId>:<sandboxId>`; the ResourceRegistry is the authority for
+  which tenant a sandbox belongs to (registered as type `'system'`,
+  classification `'public'` — sandbox metadata is not a data label, same
+  posture as `audit-log`). Duplicate ids refuse. Spawn environment stays the
+  `CommandCheck` precedent: the sandbox executes serialized tool functions, not
+  shells; nothing inherits ambient env (the Docker path runs a fixed image, the
+  fallback runs in-process under the runtime's own posture).
+- **Limit — the existing `ContainerSandboxOptions` ARE the config record.**
+  `SandboxLimits` is that type re-exported; no parallel vocabulary. Defaults
+  live in one place (`effectiveLimits`, exported so the destroy attestation can
+  record limits *actually applied* vs *declared* without duplicating defaults).
+  Fail-closed posture is unchanged: limits are enforced by the kernel/cgroup
+  when Docker is present; without Docker the kind string says `fallback/...`
+  so a caller expecting isolation can detect the degradation.
+- **Destroy — deterministic, idempotent, swept.** `destroy` drops the active
+  handle and records `sandbox.destroy` (sealed payload: pid, duration,
+  effective vs declared limits). Destroy on an unknown id refuses; destroy on
+  an already-destroyed sandbox is a no-op (the exit sweep and an explicit
+  destroy must not race into a throw). The current sandbox is ephemeral per
+  invocation (`docker run --rm`, tmpdirs removed in `finally`), so there is no
+  long-lived container to kill — the sweep's job is evidence: every active
+  sandbox gets a destroy event on process exit (`installExitSweep()`,
+  `beforeExit` + SIGINT/SIGTERM), and a create that throws never leaves a
+  half-registered handle (register-after-successful-spawn ordering).
+- **Attest — sealed events, digest-only plaintext.** `sandbox.create`,
+  `sandbox.destroy`, and `sandbox.attest` events carry
+  `metadata.sealed = sealFor(tenant, payload, 'public')` (Claim 13 machinery;
+  the lifecycle is not a data-label boundary, but sealing keeps the
+  tamper-evident invariant) and a SHA-256 digest of the limit config via
+  `canonicalJson`. The plaintext event log shows only the digest and key id —
+  same posture as `document.ingest` (Claim 29). The sealed payload records the
+  sandbox's own process metadata: pid, kind (honest about fallback), limits,
+  timestamps.
+- **Capability — the PDP gates every execute.** The agent's authority over a
+  sandbox is a `Capability` with action `sandbox.execute` scoped to the sandbox
+  resource id; `SandboxRegistry.execute` authorizes through the ordinary
+  `AuthorizationService.authorize` path (which appends its own decision event)
+  before `runTool`. No new issuance path, no new decision path.
+
+**Alternatives:**
+- **Long-lived per-tenant containers** — the current per-invocation
+  `docker run --rm` model already bounds blast radius; a daemon-style sandbox
+  adds a lifecycle (health, restart, IPC) nothing consumes yet.
+- **A parallel limit vocabulary** — drift with `ContainerSandboxOptions` for
+  zero benefit; re-export instead.
+- **New crypto for attestation** — `sealFor` + the event chain already provide
+  tenant-bound tamper evidence; new machinery would be unaudited surface.
+
+**Security implications:** New event actions (`sandbox.create/destroy/attest`)
+are sealed and digest-carrying; execute is PDP-gated and audited; tenant
+binding is delegated to the ResourceRegistry (the authority) and re-checked on
+every lifecycle call; no ambient secrets reach the sandbox; the exit sweep
+prevents unaccounted teardown. The sandbox execution itself is unchanged —
+`ContainerSandbox` behavior is untouched except for the defaults extraction.
+
+**Tradeoffs:** The attested pid is the runtime's own pid (the sandbox has no
+resident process to attest — image digests arrive when a long-lived sandbox
+model exists). `installExitSweep` installs process-level signal handlers and
+is opt-in so test processes are not wired to it by accident.
+
+**Future migration path:** per-sandbox action policy (which tools a sandbox may
+run), multi-tenant sandbox sharing, snapshot/restore, remote attestation
+(HSM-backed), and a microVM backend (Firecracker/gVisor) when a deployment
+cannot trust the host kernel — each behind its own ADR.

@@ -187,6 +187,36 @@ ingress. Its own in-process story is deliberately modest: it binds
 - **Customer:** physical control and transfer procedure. **Vendor:** signed
   artifacts, model packaging, transfer manifests.
 
+### Sandbox lifecycle (M16, ADR-021)
+
+Who creates, who destroys, and what happens on process exit:
+
+- **Who creates:** the embedder/runtime — not the agent. `SandboxRegistry.create`
+  spawns synchronously (Docker-backed when the daemon is up, `LocalSandbox`
+  fallback when not — the handle's `kind` says which, so a deployment that
+  requires isolation can refuse to run on `fallback/...`) and registers the
+  sandbox as a tenant-bound resource. The agent's only authority is a
+  `sandbox.execute` capability scoped to the sandbox resource id; the handle
+  stays with the runtime.
+- **Who destroys:** the embedder calls `destroy` when work completes; destroy
+  is idempotent and refuses unknown ids. An operator never tears down sandboxes
+  by hand — the lifecycle events are the record.
+- **Process exit:** `installExitSweep()` (opt-in, call once at startup) sweeps
+  every active sandbox on `beforeExit`/SIGINT/SIGTERM, appending one sealed
+  `sandbox.destroy` event per sandbox — no unaccounted teardown. Call it in any
+  long-running deployment; short-lived CLIs that destroy explicitly do not
+  need it.
+- **Evidence:** `sandbox.create`/`sandbox.destroy`/`sandbox.attest` events
+  carry sealed payloads (pid, kind, effective-vs-declared limits, duration)
+  under the tenant's key plus a limit-config digest; the plaintext log shows
+  digest + keyId only. A crashing process loses the sweep, not the history —
+  `sandbox.create` has no matching `sandbox.destroy` in the event log is the
+  operational signal for "sandbox was active when the process died".
+- **Limits:** declared at create time as the container sandbox's own options
+  (memory/CPU/PID/timeout); enforced by the kernel/cgroup when Docker is
+  present. Without Docker the sandbox degrades to in-process execution and
+  says so — treat that as a deployment misconfiguration, not a mode.
+
 ## 2. Hardware tiers
 
 | Tier | Compute | Storage | Keys | Network |

@@ -9,6 +9,26 @@ Classification: **MVP** (required for the MVP definition of done), **P** (post-M
 
 ---
 
+## Vision
+
+Build the **AI Operating System for Sensitive Organizations** — a high-assurance
+agent runtime that lets an organization deploy capable AI against information it
+currently cannot safely give to AI. The promise is not "our AI won't leak your
+data"; it is:
+
+> AI actions are constrained by enforceable policy, executed inside controlled
+> environments, and accompanied by evidence.
+
+The design target is defense-in-depth in the spirit of intelligence-community
+SOC/SCIF environments, aimed at a **99.99996% (≈0.4 defects per million)**
+reliability bar — a north star, never a published claim (ADR-014). The distilled
+end state is [VISION COMPLETE](#vision-complete), below. The full original brief
+— the product framing, the value proposition, and the honest "software does not
+create a SCIF" caveat — lives in `initial-idea-CONTEXT.md` (§36 onward), which
+is the source this roadmap distills.
+
+---
+
 ## Stage 0 — EASY (conventional engineering)
 
 Code that a competent team writes without a security research budget. Marked done
@@ -105,9 +125,15 @@ row.
 ## Stage 2 — HARD (substantial security engineering)
 
 Each item lists attack surface, failure modes, assumptions, test methodology, and
-residual risk, as required.
+residual risk, as required. All fifteen items are open **[ ]** (none started).
+Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 
-### H1 — Robust capability issuance (root of trust)
+- **Working order** (pick list, AGENT-SESSION SESSION 19): **H1 [NEXT]** first —
+  it is the root of trust for everything above it — then H10, H12, H13, H15.
+  The remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after
+  those five clear.
+
+### H1 — Robust capability issuance (root of trust) **[NEXT]**
 
 - **Attack surface:** the issuance function, the signing key, the root principal.
 - **Failure modes:** over-broad issuance; key theft; root used for routine work;
@@ -339,7 +365,8 @@ assumptions outside our control. Documented so they never become marketing copy.
 
 ## Assurance targets (ADR-014)
 
-**North star:** 99.9996%. It is a reminder of the direction and of how this
+**North star:** 99.99996% (≈0.4 defects per million). It is a reminder of the
+direction and of how this
 ends — build every control we know how to build, then stop and let independent
 verifiers tell us where we are wrong. It is not a published property of the
 system, and no single percentage can be: see ADR-014 and the defect bar in
@@ -347,8 +374,8 @@ SECURITY_PRINCIPLES.md. Obvious flaws — the kind that exist only because the
 code was written wrong — are defects, not tradeoffs, and are never recorded as
 accepted risk.
 
-There is no single number for "how secure is this". A percentage like 99.9996%
-(≈3.4 failures per million) cannot be computed for a system, defended to an
+There is no single number for "how secure is this". A percentage like 99.99996%
+(≈0.4 defects per million) cannot be computed for a system, defended to an
 auditor, or falsified by a test — publishing one would violate this project's
 own rule that every claim binds to a property, a mechanism, and a test. What we
 publish instead is one target per control, each with a measurement.
@@ -456,7 +483,15 @@ of that equation defensible and testable.
 
 ---
 
-## Next milestones (full format)
+## Milestone specifications (full format)
+
+M0–M3 are specified in full format below and are **done**. M4–M16 were run the
+same way and also all landed — their full-format specifications live in
+`PROMPTS/M*-*.md`, and the completion evidence (counts, commits, benchmark
+results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
+
+Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. The open
+frontier is Stage 2 (HARD), above.
 
 ### M0 — Architectural foundation (done)
 

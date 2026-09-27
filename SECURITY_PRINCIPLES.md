@@ -6,7 +6,7 @@ with no mechanism is a slogan; there are none here.
 
 ## The bar
 
-**99.9996% is a north star, not a claim.** It is a reminder of what we are
+**99.99996% is a north star, not a claim.** It is a reminder of what we are
 working towards and of how this project ends: we do every control we know how
 to do, and then we stop and wait for independent verifiers to tell us where we
 are wrong. Until they do, we do not declare victory. The number is never

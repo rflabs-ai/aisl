@@ -24,6 +24,40 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 20 — 2026-09-24 — opencode/docs-roadmap-drift-cleanup
+
+**Did:**
+- Roadmap drift sweep (no code, no behavior change). Four fixes:
+  1. **North-star number corrected**: 99.9996% → **99.99996% (≈0.4 defects per
+     million)** everywhere (ROADMAP ×2, DECISIONS ADR-014 ×3,
+     SECURITY_PRINCIPLES ×1) — the docs had dropped a digit from the stated
+     vision. Correction recorded in ADR-014 itself.
+  2. **Vision statement added to ROADMAP** top: the "AI Operating System for
+     Sensitive Organizations" framing, the policy/environment/evidence promise,
+     and a pointer to `initial-idea-CONTEXT.md` as the distilled source.
+  3. **Stage 2 status markers**: H1 marked **[NEXT]** (root of trust, first in
+     the SESSION 19 pick list), working-order note added (then H10/H12/H13/H15),
+     Stage 2 declared all-open [ ] explicitly.
+  4. **"Next milestones (full format)" (stale after M3, title said "next")**
+     retitled to "Milestone specifications (full format)" + index: M0–M3 below,
+     M4–M16 in `PROMPTS/M*.md`, Stage 0/1 closed, frontier is Stage 2.
+
+**Left:**
+- Nothing started; doc-only. Untracked `.scratch/session-audit/` dirs and the
+  pre-existing dirty `benchmarks/results.json` unchanged.
+
+**Next session should:**
+- Begin H1 per ROADMAP Stage 2 (root of trust: signed delegation, ADR-002) or
+  write the H1 milestone prompt in the established format.
+
+**Evidence:**
+- `rg` sweep: no remaining `99.9996%` outside the ADR-014 correction note;
+  `99.99996%` present in ROADMAP (top vision + assurance-targets),
+  DECISIONS ADR-014, SECURITY_PRINCIPLES, and the original brief lines
+  (unchanged source). No code or tests touched.
+
+---
+
 ### SESSION 19 — 2026-09-18 — opencode/m16-sandbox-lifecycle
 
 **Did:**

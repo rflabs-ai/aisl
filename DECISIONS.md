@@ -394,14 +394,21 @@ the benchmark as a usability metric, never as a security metric.
 
 ## ADR-014: No single security percentage; per-control assurance targets
 
-**Context:** The project's ambition is expressed as "as close to 99.9996% secure
-as possible". That number (≈3.4 failures per million, the Six Sigma figure) is a
+**Correction (2026-09-24):** the ambition figure was recorded as 99.9996% — a
+dropped digit. The stated vision (`initial-idea-CONTEXT.md`) is 99.99996%
+(≈0.4 defects per million); that number is the SSOT and has been corrected
+throughout this doc set. The architectural implication versus the Six Sigma
+figure (≈3.4 per million) is unchanged: still an aspiration, never a published
+claim.
+
+**Context:** The project's ambition is expressed as "as close to 99.99996%
+secure as possible". That number (≈0.4 defects per million) is a
 legitimate aspiration and an unusable metric: it has no denominator, no defined
 failure event, and no test that could falsify it. Publishing it would break the
 rule this project was founded on — every claim must bind to a property, a threat
 model, a mechanism, a test, and evidence.
 
-**Decision:** Adopt 99.9996% as an internal **north star**, never as a published
+**Decision:** Adopt 99.99996% as an internal **north star**, never as a published
 claim. Publish one measurable target per control instead (ROADMAP.md,
 "Assurance targets"), each with a named measurement, and report current values
 on every run via `npm run benchmark`. Where a target is unmeasurable (unknown
@@ -421,7 +428,7 @@ it hides whether a specific control works); derive a composite score from the
 per-control numbers (rejected — averaging distinct controls produces a number
 that means nothing and ages badly).
 
-**Reasoning:** The instinct behind 99.9996% is right: make unauthorized access
+**Reasoning:** The instinct behind 99.99996% is right: make unauthorized access
 extraordinarily difficult, and prove it. The way to prove it is per-control
 measurement with growing evidence, not a single figure that no test can fail.
 A composite percentage would also create pressure to keep it high rather than

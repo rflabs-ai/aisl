@@ -12,7 +12,6 @@ import {
   CapabilityIssuanceError,
   issueRequestForRole,
   verifyCapability,
-  type IssuerAuthority,
 } from '../src/capability.ts';
 import { type Principal, classificationRank } from '../src/domain.ts';
 import { testWorld } from '../src/testing.ts';
@@ -124,15 +123,21 @@ describe('M11: role-templated issuance', () => {
       () => world.authorization.issueForRole(service, 'worker', world.agent.id, [world.resources.repoA!], opts),
       (e: unknown) => e instanceof CapabilityIssuanceError && /must present its own authority/.test(e.message),
     );
-    const weakAuthority: IssuerAuthority = {
+    // H1 (ADR-023): the issuer attenuates against its own signed capability.
+    // The parent holds 'write' but not 'read', so a role request for 'read'
+    // overreaches — proven against a signed artifact, not a declared object.
+    const weakParent = world.authorization.issue(world.root, {
+      subject: service.id,
+      tenantId: 'acme',
       resourceIds: [world.resources.repoA!],
       actions: ['write'],
       maxClassification: 'internal',
       expiresAt: at + 60_000,
-    };
+      provenance: { source: 'policy-grant' },
+    });
     assert.throws(
       () =>
-        world.authorization.issueForRole(service, 'worker', world.agent.id, [world.resources.repoA!], opts, weakAuthority),
+        world.authorization.issueForRole(service, 'worker', world.agent.id, [world.resources.repoA!], opts, weakParent),
       (e: unknown) => e instanceof CapabilityIssuanceError && /exceeds issuer authority/.test(e.message),
     );
   });

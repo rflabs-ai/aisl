@@ -156,30 +156,47 @@ distributed deployment; multi-node revocation propagation delay.
 **Claim:** A non-root issuer can only mint a capability that is a subset of its own
 resources, actions, classification ceiling, and expiry.
 
-**Mechanism:** `findOverreach` attenuation check at `src/capability.ts:188`;
-issuers other than the authorization root must present their own authority.
-Revocation is checked in `AuthorizationService.evaluate()` before attenuation,
-so a revoked capability fails before signature or scope verification.
+**Mechanism:** `findOverreach` attenuation check at `src/capability.ts:296`;
+issuers other than the authorization root must present `parent` — their own
+signed capability (ADR-023). The parent is verified before any field is
+trusted: HMAC signature, `parent.subject === issuer.id` (you delegate only
+what you hold), same tenant, unexpired, unconsumed. The attenuation authority
+is DERIVED from the parent's own fields, never declared; the child records the
+chain link (`provenance.delegatedFrom` = parent id + parent signature) under
+its own signature, and a caller-supplied `delegatedFrom` is overridden.
+`AuthorizationService.issue` adds custody: the parent must be registered and
+not revoked. Revocation is checked in `AuthorizationService.evaluate()` before
+attenuation, so a revoked capability fails before signature or scope
+verification.
 
 **Threat model:** TM-001, TM-003.
 
-**Assumptions:** the root principal is trustworthy; delegation chains are short.
+**Assumptions:** the root principal is trustworthy; the HMAC capability key is
+process-resident (known-gap #4).
 
-**Evidence:** invariant 6 tests (four cases, including a valid attenuation).
+**Evidence:** invariant 6 tests (rewritten against signed parents) plus the H1
+suite: tampered/forged parents, foreign-subject parents (the declared-object
+bypass), cross-tenant, expired, consumed, revoked, and unregistered parents,
+two-hop chains, an issuance-fuzzing extremes matrix, and a structural test
+asserting no declared-authority symbol remains in `src/`.
 
-**Test:** `tests/invariants.test.ts` invariant 6.
+**Test:** `tests/invariants.test.ts` invariant 6;
+`tests/h1-signed-delegation.test.ts`.
 
-**Known limitations:** attenuation is checked against a declared authority
-object, not a cryptographically chained delegation. A capability does not yet
-carry its parent's signature. Hierarchical matching (`PolicyRule.resources.idPatterns`,
+**Known limitations:** the chain is provable within the process's HMAC key
+domain; portable cross-process chains wait for per-issuer asymmetric keys
+(ADR-008). Every hop attenuates strictly, so a delegation cycle cannot
+escalate, but no explicit chain-depth limit exists (ADR-023 residual).
+Hierarchical matching (`PolicyRule.resources.idPatterns`,
 M5) adds a way to express a scope ceiling without enumerating ids, but it does
 not weaken attenuation: the matcher still respects the per-rule resource
 ceiling and the per-capability `resourceIds` array. If a capability lists
 specific resource ids, the matcher only succeeds against those ids; patterns in
 the rule do not expand the set of ids the capability may reach.
 
-**Residual risk:** forged delegation chains until full chain-of-custody signing
-lands (HARD stage).
+**Residual risk:** key theft (known-gap #4) — an attacker holding the
+capability signing key can mint validly-signed parents. Chain-depth policy is
+deferred until a workload demands long chains.
 
 ---
 

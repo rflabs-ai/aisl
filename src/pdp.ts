@@ -7,9 +7,9 @@
  */
 
 import {
+  CapabilityIssuanceError,
   type Capability,
   type IssueRequest,
-  type IssuerAuthority,
   type RoleIssuanceRequest,
   issueCapability,
   issueRequestForRole,
@@ -83,12 +83,28 @@ export class AuthorizationService {
     this.roles = roles;
   }
 
+  /**
+   * H1 (ADR-023): `parent` is the issuer's own signed capability. Beyond the
+   * pure-function checks in issueCapability (signature, subject, tenant,
+   * expiry, consumption), the service adds custody: the parent must be
+   * registered here and not revoked. Fail closed on both.
+   */
   issue(
     issuer: Principal,
     request: IssueRequest,
-    issuerAuthority?: IssuerAuthority,
+    parent?: Capability,
   ): Capability {
-    const cap = issueCapability(issuer, request, this.now(), issuerAuthority);
+    if (parent) {
+      if (!this.capabilities.has(parent.id)) {
+        throw new CapabilityIssuanceError(
+          `parent capability ${parent.id} is not registered with this authorization service`,
+        );
+      }
+      if (this.revoked.has(parent.id)) {
+        throw new CapabilityIssuanceError(`parent capability ${parent.id} is revoked`);
+      }
+    }
+    const cap = issueCapability(issuer, request, this.now(), parent);
     this.capabilities.set(cap.id, cap);
     this.eventLog.append({
       tenantId: cap.tenantId,
@@ -123,10 +139,10 @@ export class AuthorizationService {
     subject: string,
     resourceIds: readonly string[],
     opts: RoleIssuanceRequest,
-    issuerAuthority?: IssuerAuthority,
+    parent?: Capability,
   ): Capability {
     const request = issueRequestForRole(this.roles, issuer, roleId, subject, resourceIds, opts);
-    return this.issue(issuer, request, issuerAuthority);
+    return this.issue(issuer, request, parent);
   }
 
   grant(cap: Capability): void {

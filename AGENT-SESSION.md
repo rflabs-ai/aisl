@@ -24,6 +24,61 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 22 — 2026-09-27 — opencode/h1-signed-delegation
+
+**Did:**
+- **H1 landed** — **ROADMAP Stage 2 H1 (root of trust) is [DONE]**. **ADR-023**
+  (Phase 0) written into `DECISIONS.md`: the declared `issuerAuthority` seam is
+  REMOVED — `issueCapability`'s fourth parameter is now `parent?: Capability`,
+  the issuer's own signed capability.
+- Pure-function checks in `src/capability.ts` (order matters — signature before
+  any field is trusted): parent HMAC valid; `parent.subject === issuer.id` (you
+  delegate only what you hold — kills the declared-object bypass); same tenant;
+  unexpired; unconsumed (`usedAt` refuses spent single-use propagation).
+  Authority is DERIVED from the parent's fields; `findOverreach` subset check
+  unchanged (`IssuerAuthority` renamed to internal `HeldAuthority`, unexported).
+- Chain link: the child's `provenance.delegatedFrom` records the parent's
+  `{ id, signature }`, set by `issueCapability` (caller-supplied values
+  overridden) and covered by the child's own HMAC — tamper-evident, walkable.
+- Service custody in `src/pdp.ts` (`AuthorizationService.issue`): parent must
+  be registered and not revoked — the stateful checks the pure function cannot
+  make. No PDP hot-path change (chain checked at issuance, the only place
+  authority is created).
+- Tests FIRST (red via typecheck): `tests/h1-signed-delegation.test.ts` — 24
+  tests: 7 parent refusals (missing/tampered/forged/foreign-subject/cross-
+  tenant/expired/consumed), 2 service-custody refusals (revoked/unregistered),
+  3 chain-traceability (link recorded, caller-supplied override ignored, two-
+  hop attenuated), 11-case extremes fuzz matrix, 1 structural (no
+  `issuerAuthority`/`IssuerAuthority` symbol anywhere in `src/`). Invariant 6
+  rewritten to mint real signed parents (same overreach regexes); M11
+  weakAuthority test rewritten the same way. Two test bugs during the run:
+  the expired-parent regex needed the id wildcarded, and the cross-tenant
+  case initially tripped the subject check first (fixed by matching subjects).
+- Docs sweep: SECURITY_CLAIMS Claim 6 (mechanism/limitations/residual/evidence),
+  ROADMAP H1 → [DONE] + working order (next: H10/H12/H13/H15; M17 parallel),
+  CURRENT_STATE (intro, counts 499/484/15 — also fixed stale 462/448/14 counts
+  from pre-M16 — gap #11 struck, what-works entry, what-H1-closed), this entry.
+
+**Left:**
+- Nothing started. M17 federation untouched (parallel track, separate session).
+- Known-gap #4 (symmetric process-wide capability key) is unchanged and now
+  carries MORE weight: a stolen key can mint validly-signed parents.
+  ADR-008 (KMS/asymmetric) is the upgrade path.
+
+**Next session should:**
+- H10 (signed builds/supply chain) or H12 (secure updates) or execute M17
+  Phase 1 — pick one per session. If delegation work continues: ADR-008
+  per-issuer asymmetric keys makes chains portable across processes.
+
+**Evidence:**
+- Gate: 499 tests (484 pass, 15 PG-mode skips, 0 fail); typecheck clean;
+  `npm run demo` exit 0; benchmark metrics unchanged (2122/2122 decisions,
+  falseClaimRate 0 over 101, SLO pass 0 hard failures). Files:
+  `src/capability.ts`, `src/pdp.ts`, `tests/h1-signed-delegation.test.ts`,
+  `tests/invariants.test.ts`, `tests/m11-rbac.test.ts`, docs.
+
+---
+
 ### SESSION 21 — 2026-09-27 — opencode/docs-federation-adr
 
 **Did:**

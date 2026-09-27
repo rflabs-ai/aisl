@@ -130,26 +130,34 @@ Each item lists attack surface, failure modes, assumptions, test methodology, an
 residual risk, as required. All fifteen items are open **[ ]** (none started).
 Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 
-- **Working order** (pick list, AGENT-SESSION SESSION 19): **H1 [NEXT]** first —
-  it is the root of trust for everything above it — then H10, H12, H13, H15.
-  The remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after
-  those five clear. **H1 and M17 (federation, ADR-022) run as parallel
-  tracks** — disjoint surfaces; M17's dispatch phase uses the human-gated M4
-  flow and does not wait for signed delegation.
+- **Working order** (pick list, AGENT-SESSION SESSION 19): ~~H1 [NEXT]~~
+  **H1 [DONE]** (ADR-023) — it was the root of trust for everything above it.
+  Next: H10, H12, H13, H15. **M17 (federation, ADR-022) runs as a parallel
+  track** — disjoint surfaces; its dispatch phase uses the human-gated M4
+  flow. The remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized
+  after those four clear.
 
-### H1 — Robust capability issuance (root of trust) **[NEXT]**
+### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
 - **Attack surface:** the issuance function, the signing key, the root principal.
 - **Failure modes:** over-broad issuance; key theft; root used for routine work;
   issuance not attributable to a human; **delegation chains asserted by the
-  caller instead of proven** (today `issuerAuthority` is a declared object — a
-  caller can overstate it; ADR-002). Chained delegation must carry the parent's
-  signature so attenuation is enforced cryptographically, not by convention.
+  caller instead of proven** (was: `issuerAuthority` was a declared object —
+  any caller could overstate it; closed by ADR-023). Chained delegation carries
+  the parent's signature so attenuation is enforced cryptographically, not by
+  convention.
 - **Assumptions:** at least one honest key custodian; dual control for root.
 - **Test methodology:** key ceremony drills; issuance fuzzing (every field
   extreme); attempt every attenuation bypass in the harness.
 - **Residual risk:** a custodian who is coerced or malicious.
 - **Class:** MVP/HA.
+- **Closed:** ADR-023 — the fourth parameter of `issueCapability` is the
+  issuer's own signed capability (`parent`); authority is derived, never
+  declared; the chain link is recorded (`provenance.delegatedFrom`) and
+  tamper-evident; service-level custody refuses revoked/unregistered parents.
+  24 H1 tests (`tests/h1-signed-delegation.test.ts` + rewritten invariant 6).
+  Residual: symmetric key (known-gap #4), no depth limit (cycles cannot
+  escalate).
 
 ### H2 — Short-lived credentials and workload identity — *structurally necessary at federation (ADR-022)*
 

@@ -35,6 +35,14 @@ export interface Provenance {
   readonly sessionId?: string;
   readonly taskId?: string;
   readonly note?: string;
+  /** H1 (ADR-023): set by issueCapability from the parent capability — never caller-supplied. */
+  readonly delegatedFrom?: DelegatedFrom;
+}
+
+/** H1 (ADR-023): the recorded chain link — the parent's id and its signature. */
+export interface DelegatedFrom {
+  readonly id: string;
+  readonly signature: string;
 }
 
 export interface Capability {
@@ -68,8 +76,8 @@ export interface IssueRequest {
   readonly provenance: Provenance;
 }
 
-/** Authority held by a non-root issuer; used for attenuation checks. */
-export interface IssuerAuthority {
+/** H1 (ADR-023): attenuation authority, DERIVED from the issuer's own signed capability. */
+interface HeldAuthority {
   readonly resourceIds: readonly string[];
   readonly actions: readonly Action[];
   readonly maxClassification: Classification;
@@ -125,12 +133,16 @@ function stripSignature(cap: Capability): Omit<Capability, 'signature'> {
 
 /**
  * Mint authority. Invariants 2, 3, 4 and 6 are enforced here and nowhere else.
+ *
+ * H1 (ADR-023): a non-root issuer attenuates against `parent` — its own SIGNED
+ * capability — never against a declared object. Authority is derived from the
+ * parent; the chain link is recorded in the child's provenance.
  */
 export function issueCapability(
   issuer: Principal,
   request: IssueRequest,
   now: number,
-  issuerAuthority?: IssuerAuthority,
+  parent?: Capability,
 ): Capability {
   if (!CAPABILITY_ISSUER_KINDS.includes(issuer.kind)) {
     throw new CapabilityIssuanceError(
@@ -147,20 +159,34 @@ export function issueCapability(
     throw new CapabilityIssuanceError('capability expiry must be in the future');
   }
 
-  // Attenuation: a non-root issuer can only hand out what it already holds.
+  // Attenuation (H1, ADR-023): a non-root issuer can only hand out what it
+  // HOLDS, proven by a valid signed capability issued to itself.
   if (authorityRequired(issuer)) {
-    if (!issuerAuthority) {
+    if (!parent) {
       throw new CapabilityIssuanceError(
-        `issuer ${issuer.id} (${issuer.kind}) must present its own authority to mint capabilities`,
+        `issuer ${issuer.id} (${issuer.kind}) must present its own authority — its signed capability — to mint capabilities`,
       );
     }
-    const overreach = findOverreach(request, issuerAuthority);
+    const parentError = parentValidityError(parent, issuer, now);
+    if (parentError) {
+      throw new CapabilityIssuanceError(parentError);
+    }
+    const overreach = findOverreach(request, {
+      resourceIds: parent.resourceIds,
+      actions: parent.actions,
+      maxClassification: parent.maxClassification,
+      expiresAt: parent.expiresAt,
+    });
     if (overreach) {
       throw new CapabilityIssuanceError(
         `capability exceeds issuer authority: ${overreach}`,
       );
     }
   }
+
+  const provenance: Provenance = parent
+    ? { ...request.provenance, delegatedFrom: { id: parent.id, signature: parent.signature } }
+    : request.provenance;
 
   const body: Omit<Capability, 'signature'> = {
     id: randomUUID(),
@@ -175,10 +201,33 @@ export function issueCapability(
     expiresAt: request.expiresAt,
     singleUse: request.singleUse ?? false,
     constraints: request.constraints ?? [],
-    provenance: request.provenance,
+    provenance,
   };
 
   return { ...body, signature: signCapability(body) };
+}
+
+/**
+ * H1 (ADR-023): the parent must be a live, held, same-tenant capability.
+ * Order matters: the signature is verified before any field is trusted.
+ */
+function parentValidityError(parent: Capability, issuer: Principal, now: number): string | undefined {
+  if (!signatureValid(parent)) {
+    return 'parent capability signature invalid — a delegation parent must be an unmodified signed capability';
+  }
+  if (parent.subject !== issuer.id) {
+    return `parent capability ${parent.id} is held by ${parent.subject}, not issuer ${issuer.id}`;
+  }
+  if (parent.tenantId !== issuer.tenantId) {
+    return 'parent capability is bound to another tenant';
+  }
+  if (parent.expiresAt <= now) {
+    return `parent capability ${parent.id} is expired`;
+  }
+  if (parent.usedAt !== undefined) {
+    return `parent capability ${parent.id} is single-use and already consumed`;
+  }
+  return undefined;
 }
 
 const ROOT_KIND = 'authorization';
@@ -244,7 +293,7 @@ export function issueRequestForRole(
   };
 }
 
-function findOverreach(request: IssueRequest, authority: IssuerAuthority): string | undefined {
+function findOverreach(request: IssueRequest, authority: HeldAuthority): string | undefined {
   const missingResource = request.resourceIds.find((r) => !authority.resourceIds.includes(r));
   if (missingResource) return `resource ${missingResource} not held by issuer`;
 

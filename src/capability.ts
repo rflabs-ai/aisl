@@ -82,6 +82,8 @@ interface HeldAuthority {
   readonly actions: readonly Action[];
   readonly maxClassification: Classification;
   readonly expiresAt: number;
+  readonly singleUse: boolean;
+  readonly constraints: readonly Constraint[];
 }
 
 export class CapabilityIssuanceError extends Error {
@@ -159,6 +161,17 @@ export function issueCapability(
     throw new CapabilityIssuanceError('capability expiry must be in the future');
   }
 
+  // H1 (ADR-023, audit 02): ANY presented parent must be a live, held,
+  // same-tenant, signed capability — regardless of issuer kind. Root's minting
+  // power is unchanged; it simply never records a chain link it did not
+  // validate.
+  if (parent) {
+    const parentError = parentValidityError(parent, issuer, now);
+    if (parentError) {
+      throw new CapabilityIssuanceError(parentError);
+    }
+  }
+
   // Attenuation (H1, ADR-023): a non-root issuer can only hand out what it
   // HOLDS, proven by a valid signed capability issued to itself.
   if (authorityRequired(issuer)) {
@@ -167,15 +180,13 @@ export function issueCapability(
         `issuer ${issuer.id} (${issuer.kind}) must present its own authority — its signed capability — to mint capabilities`,
       );
     }
-    const parentError = parentValidityError(parent, issuer, now);
-    if (parentError) {
-      throw new CapabilityIssuanceError(parentError);
-    }
     const overreach = findOverreach(request, {
       resourceIds: parent.resourceIds,
       actions: parent.actions,
       maxClassification: parent.maxClassification,
       expiresAt: parent.expiresAt,
+      singleUse: parent.singleUse,
+      constraints: parent.constraints,
     });
     if (overreach) {
       throw new CapabilityIssuanceError(
@@ -306,7 +317,46 @@ function findOverreach(request: IssueRequest, authority: HeldAuthority): string 
   if (request.expiresAt > authority.expiresAt) {
     return 'expiry exceeds issuer expiry';
   }
+
+  // H1 (audit 01): the parent's constraints narrow what it holds — a child
+  // may narrow further but may not drop any. Network hosts compare as the
+  // intersection of the parent's network-host constraints; a child without a
+  // network-host constraint is unconstrained where the parent was not.
+  const parentHosts = effectiveHostSet(authority.constraints);
+  if (parentHosts !== undefined) {
+    const childHosts = effectiveHostSet(request.constraints ?? []);
+    if (childHosts === undefined) {
+      return 'network constraint not held by issuer';
+    }
+    const escaped = [...childHosts].find((h) => !parentHosts.has(h));
+    if (escaped !== undefined) {
+      return `network destination ${escaped} not held by issuer`;
+    }
+  }
+  for (const pc of authority.constraints) {
+    if (pc.kind !== 'param-equals') continue;
+    const held = (request.constraints ?? []).some(
+      (c) => c.kind === 'param-equals' && c.key === pc.key && c.value === pc.value,
+    );
+    if (!held) return `constraint ${pc.key} not held by issuer`;
+  }
+
+  // H1 (audit 01): a single-use capability is a leaf authority — it exists to
+  // be consumed once, so it cannot delegate at all.
+  if (authority.singleUse) {
+    return 'single-use capability cannot delegate';
+  }
   return undefined;
+}
+
+/** Intersection of every network-host constraint's host set; undefined = unconstrained. */
+function effectiveHostSet(constraints: readonly Constraint[]): Set<string> | undefined {
+  let acc: Set<string> | undefined;
+  for (const c of constraints) {
+    if (c.kind !== 'network-host') continue;
+    acc = acc === undefined ? new Set(c.hosts) : new Set([...acc].filter((h) => c.hosts.includes(h)));
+  }
+  return acc;
 }
 
 export interface VerificationContext {

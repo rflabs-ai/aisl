@@ -8,7 +8,8 @@
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CapabilityIssuanceError,
@@ -172,17 +173,25 @@ describe('H1: delegation requires the issuer own signed capability', () => {
 });
 
 describe('H1: service-level custody of the parent', () => {
-  test('a revoked parent is refused', () => {
+  test('a revoked parent is refused AND the refusal is audited', () => {
     const world = testWorld();
     const parent = parentFor(world);
     world.authorization.revoke(parent.id, 'test-revocation');
+    const before = world.eventLog.all().length;
     assert.throws(
       () => world.authorization.issue(svcPrincipal(), childRequest(world), parent),
       /revoked/,
     );
+    const refusal = world.eventLog
+      .all()
+      .slice(before)
+      .find((e) => e.action === 'capability.issue' && e.decision === 'deny');
+    assert.ok(refusal, 'a delegation attempt from a revoked parent must be audited');
+    assert.equal(refusal.result, 'denied');
+    assert.equal(refusal.capabilityId, parent.id);
   });
 
-  test('an unregistered parent is refused even with a valid signature', () => {
+  test('an unregistered parent is refused even with a valid signature AND the refusal is audited', () => {
     const world = testWorld();
     const ghost = issueCapability(world.root, {
       subject: 'svc:orchestrator',
@@ -193,10 +202,18 @@ describe('H1: service-level custody of the parent', () => {
       expiresAt: world.clock.now() + 60_000,
       provenance: { source: 'policy-grant' },
     }, world.clock.now());
+    const before = world.eventLog.all().length;
     assert.throws(
       () => world.authorization.issue(svcPrincipal(), childRequest(world), ghost),
       /not registered/,
     );
+    const refusal = world.eventLog
+      .all()
+      .slice(before)
+      .find((e) => e.action === 'capability.issue' && e.decision === 'deny');
+    assert.ok(refusal, 'a delegation attempt from an unregistered parent must be audited');
+    assert.equal(refusal.result, 'denied');
+    assert.equal(refusal.capabilityId, ghost.id);
   });
 });
 
@@ -255,6 +272,147 @@ describe('H1: the chain is recorded and traceable', () => {
   });
 });
 
+describe('H1: the constraint and single-use dimensions attenuate too (audit 01)', () => {
+  const world = testWorld();
+  const at = world.clock.now();
+
+  const constrainedParent = world.authorization.issue(world.root, {
+    subject: 'svc:orchestrator',
+    tenantId: 'acme',
+    resourceIds: [world.resources.repoA!],
+    actions: ['read'],
+    maxClassification: 'internal',
+    expiresAt: at + 60_000,
+    constraints: [
+      { kind: 'network-host', hosts: ['a.example.com', 'b.example.com'] },
+      { kind: 'param-equals', key: 'env', value: 'prod' },
+    ],
+    provenance: { source: 'policy-grant' },
+  });
+
+  const singleUseParent = world.authorization.issue(world.root, {
+    subject: 'svc:orchestrator',
+    tenantId: 'acme',
+    resourceIds: [world.resources.repoA!],
+    actions: ['read'],
+    maxClassification: 'internal',
+    expiresAt: at + 60_000,
+    singleUse: true,
+    provenance: { source: 'policy-grant' },
+  });
+
+  test('a child that DROPS the network constraint refuses', () => {
+    assert.throws(
+      () => issueCapability(svcPrincipal(), childRequest(world, { expiresAt: at + 60_000 }), at, constrainedParent),
+      /network constraint not held by issuer/,
+    );
+  });
+
+  test('a child that keeps the param but drops the network constraint refuses', () => {
+    assert.throws(
+      () =>
+        issueCapability(
+          svcPrincipal(),
+          childRequest(world, {
+            expiresAt: at + 60_000,
+            constraints: [{ kind: 'param-equals', key: 'env', value: 'prod' }],
+          }),
+          at,
+          constrainedParent,
+        ),
+      /network constraint not held by issuer/,
+    );
+  });
+
+  test('a child that keeps the network constraint but drops the param refuses', () => {
+    assert.throws(
+      () =>
+        issueCapability(
+          svcPrincipal(),
+          childRequest(world, {
+            expiresAt: at + 60_000,
+            constraints: [{ kind: 'network-host', hosts: ['a.example.com'] }],
+          }),
+          at,
+          constrainedParent,
+        ),
+      /constraint env not held by issuer/,
+    );
+  });
+
+  test('a child carrying every parent constraint succeeds', () => {
+    const child = issueCapability(
+      svcPrincipal(),
+      childRequest(world, {
+        expiresAt: at + 60_000,
+        constraints: [
+          { kind: 'network-host', hosts: ['a.example.com', 'b.example.com'] },
+          { kind: 'param-equals', key: 'env', value: 'prod' },
+        ],
+      }),
+      at,
+      constrainedParent,
+    );
+    assert.equal(child.constraints.length, 2);
+  });
+
+  test('a child that NARROWS the hosts stays legitimate (no false denial)', () => {
+    const child = issueCapability(
+      svcPrincipal(),
+      childRequest(world, {
+        expiresAt: at + 60_000,
+        constraints: [
+          { kind: 'network-host', hosts: ['a.example.com'] },
+          { kind: 'param-equals', key: 'env', value: 'prod' },
+        ],
+      }),
+      at,
+      constrainedParent,
+    );
+    const nh = child.constraints[0];
+    assert.ok(nh !== undefined && nh.kind === 'network-host');
+    assert.deepEqual([...nh.hosts], ['a.example.com']);
+  });
+
+  test('a single-use parent cannot delegate at all', () => {
+    assert.throws(
+      () => issueCapability(svcPrincipal(), childRequest(world, { expiresAt: at + 60_000 }), at, singleUseParent),
+      /single-use capability cannot delegate/,
+    );
+  });
+});
+
+describe('H1: root presents a parent too (audit 02)', () => {
+  test('root refuses an invalid parent instead of recording a bogus chain link', () => {
+    const world = testWorld();
+    const parent = parentFor(world);
+    const forged: Capability = {
+      ...parent,
+      signature: parent.signature.slice(0, -1) + (parent.signature.slice(-1) === 'a' ? 'b' : 'a'),
+    };
+    assert.throws(
+      () => issueCapability(world.root, childRequest(world), world.clock.now(), forged),
+      /parent capability signature/,
+    );
+  });
+
+  test('root with a valid parent records a real chain link', () => {
+    const world = testWorld();
+    const selfParent = world.authorization.issue(world.root, {
+      subject: world.root.id,
+      tenantId: 'acme',
+      resourceIds: [world.resources.repoA!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: world.clock.now() + 60_000,
+      provenance: { source: 'policy-grant' },
+    });
+    const child = issueCapability(world.root, childRequest(world), world.clock.now(), selfParent);
+    assert.equal(child.provenance.delegatedFrom?.id, selfParent.id);
+    assert.equal(child.provenance.delegatedFrom?.signature, selfParent.signature);
+  });
+});
+
 describe('H1: issuance fuzzing — every field extreme refuses', () => {
   const world = testWorld();
   const parent = parentFor(world);
@@ -285,11 +443,17 @@ describe('H1: issuance fuzzing — every field extreme refuses', () => {
 });
 
 describe('H1: structural invariant — no declared-authority seam remains', () => {
-  test('src/capability.ts and src/pdp.ts carry no issuerAuthority/IsherAuthority symbol', async () => {
-    const here = fileURLToPath(new URL('.', import.meta.url));
-    const capabilitySrc = await readFile(`${here}../src/capability.ts`, 'utf8');
-    const pdpSrc = await readFile(`${here}../src/pdp.ts`, 'utf8');
-    assert.equal(/issuerAuthority|IssuerAuthority/.test(capabilitySrc), false);
-    assert.equal(/issuerAuthority|IssuerAuthority/.test(pdpSrc), false);
+  test('no file under src/ carries the issuerAuthority/IssuerAuthority symbol', async () => {
+    const srcDir = fileURLToPath(new URL('../src', import.meta.url));
+    const files = (await readdir(srcDir)).filter((f) => f.endsWith('.ts'));
+    assert.ok(files.length >= 30, `expected the real src tree, found ${files.length} .ts files`);
+    for (const f of files) {
+      const text = await readFile(join(srcDir, f), 'utf8');
+      assert.equal(
+        /issuerAuthority|IssuerAuthority/.test(text),
+        false,
+        `${f} reintroduces the declared-authority seam`,
+      );
+    }
   });
 });

@@ -95,13 +95,27 @@ export class AuthorizationService {
     parent?: Capability,
   ): Capability {
     if (parent) {
-      if (!this.capabilities.has(parent.id)) {
-        throw new CapabilityIssuanceError(
-          `parent capability ${parent.id} is not registered with this authorization service`,
-        );
-      }
-      if (this.revoked.has(parent.id)) {
-        throw new CapabilityIssuanceError(`parent capability ${parent.id} is revoked`);
+      const custodyError = !this.capabilities.has(parent.id)
+        ? `parent capability ${parent.id} is not registered with this authorization service`
+        : this.revoked.has(parent.id)
+          ? `parent capability ${parent.id} is revoked`
+          : undefined;
+      if (custodyError) {
+        // H1 (audit 04): a refused delegation attempt is a security-relevant
+        // refusal — record it before failing closed (invariant 7 spirit).
+        this.eventLog.append({
+          tenantId: issuer.tenantId,
+          principal: issuer.id,
+          actor: issuer.id,
+          actorKind: issuer.kind,
+          action: 'capability.issue',
+          resourceId: request.resourceIds.join(','),
+          decision: 'deny',
+          capabilityId: parent.id,
+          result: 'denied',
+          metadata: { phase: 'capability-issuance-refused', refusal: custodyError },
+        });
+        throw new CapabilityIssuanceError(custodyError);
       }
     }
     const cap = issueCapability(issuer, request, this.now(), parent);

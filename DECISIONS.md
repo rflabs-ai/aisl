@@ -1354,6 +1354,17 @@ but no explicit depth limit exists — `ponytail: no chain-depth limit; every
 hop attenuates so cycles cannot escalate — add depth/loop detection only if a
 non-attenuating hop ever exists`.
 
+**Addendum (2026-09-27, session audit):** the first cut left two gaps, both
+ticketed by the audit and closed the same day. (a) The subset check now covers
+ALL held dimensions: a child must carry every parent constraint (it may narrow
+network hosts further — intersection semantics; no false denial of legitimate
+narrowing), and a single-use parent cannot delegate at all (a single-use
+capability is a leaf authority — it exists to be consumed once). (b) Parent
+validity is checked whenever a parent is present, including for the root, so
+no chain link is ever recorded from an unvalidated parent. Service-level
+custody refusals (revoked/unregistered parent) are audited as
+`capability.issue` deny events before the throw. Tests 24 → 32.
+
 **Future migration path:** Per-issuer asymmetric keys (ADR-008) make chains
 portable across processes (M17 federation multi-hop delegation); chain-depth
 policy if workloads demand long chains.

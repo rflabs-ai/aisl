@@ -1,12 +1,14 @@
 # M17 — Federation: control-plane as first client (ADR-022)
 
-Baseline: M16 merged (Stage 1 closed, ROADMAP row 61 [DONE]); 475 tests
-(460 pass, 15 PG-mode skips). ADR-022 landed: federation — one enforcement
+Baseline: M16 merged (Stage 1 closed, ROADMAP row 61 [DONE]); H1 signed
+delegation landed (ADR-023); 507 tests (492 pass, 15 PG-mode skips). ADR-022
+landed: federation — one enforcement
 plane, five state planes, no code merges. This milestone makes control-plane
 (`C:\Users\<user>\projects\control-plane`) the first federation client.
 
-**Runs PARALLEL to Stage 2 H1** — disjoint surfaces (M17 is integration +
-config across repos; H1 is `src/capability.ts` issuance). M17's dispatch
+**Independent of Stage 2 H1** (H1 is now [DONE] — M17 never waited on it).
+Disjoint surfaces (M17 is integration +
+config across repos; H1 was `src/capability.ts` issuance). M17's dispatch
 authorization uses the human-gated M4 capability-request flow over the M14
 REST API and does NOT depend on signed delegation. The sibling agent-arch
 audit found: control-plane orchestrates agent workers with zero sandboxing

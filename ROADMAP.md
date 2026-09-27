@@ -154,10 +154,13 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Closed:** ADR-023 — the fourth parameter of `issueCapability` is the
   issuer's own signed capability (`parent`); authority is derived, never
   declared; the chain link is recorded (`provenance.delegatedFrom`) and
-  tamper-evident; service-level custody refuses revoked/unregistered parents.
-  24 H1 tests (`tests/h1-signed-delegation.test.ts` + rewritten invariant 6).
-  Residual: symmetric key (known-gap #4), no depth limit (cycles cannot
-  escalate).
+  tamper-evident; service-level custody refuses revoked/unregistered parents
+  and audits each refusal. The session audit closed the remaining bypasses the
+  same day: the subset check covers ALL six dimensions (constraints subset —
+  narrowing legitimate; single-use parents are leaf authorities) and parent
+  validity runs for the root too. 32 H1 tests
+  (`tests/h1-signed-delegation.test.ts` + rewritten invariant 6). Residual:
+  symmetric key (known-gap #4), no depth limit (cycles cannot escalate).
 
 ### H2 — Short-lived credentials and workload identity — *structurally necessary at federation (ADR-022)*
 

@@ -118,7 +118,9 @@ requests + audit + tasks + healthz) then `PROMPTS/M15-stage0-cleanup.md`
 API seam, setup script, minimal UI served by the M14 server). Both landed —
 **Stage 0 is fully [DONE]**. `PROMPTS/M16-sandbox-lifecycle.md` (ADR-021 —
 sandbox lifecycle: create, limit, destroy, attest) closed the last Stage 1
-row.
+row. `PROMPTS/M17-federation-control-plane.md` (ADR-022 — control-plane as
+the first federation client) runs parallel to Stage 2 H1; M18–M20 prompts
+are written just-in-time per the M4–M16 convention.
 
 ---
 
@@ -131,7 +133,9 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Working order** (pick list, AGENT-SESSION SESSION 19): **H1 [NEXT]** first —
   it is the root of trust for everything above it — then H10, H12, H13, H15.
   The remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after
-  those five clear.
+  those five clear. **H1 and M17 (federation, ADR-022) run as parallel
+  tracks** — disjoint surfaces; M17's dispatch phase uses the human-gated M4
+  flow and does not wait for signed delegation.
 
 ### H1 — Robust capability issuance (root of trust) **[NEXT]**
 
@@ -147,7 +151,7 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Residual risk:** a custodian who is coerced or malicious.
 - **Class:** MVP/HA.
 
-### H2 — Short-lived credentials and workload identity
+### H2 — Short-lived credentials and workload identity — *structurally necessary at federation (ADR-022)*
 
 - **Attack surface:** credential issuance, transport, storage in memory, reuse.
 - **Failure modes:** leaked long-lived token; clock skew extending life; credential
@@ -214,7 +218,7 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Residual risk:** human-approved exfiltration; steganography.
 - **Class:** E/HA.
 
-### H8 — Cross-tenant isolation (cryptographic and physical)
+### H8 — Cross-tenant isolation (cryptographic and physical) — *structurally necessary at federation (ADR-022)*
 
 - **Attack surface:** shared process, shared database, shared caches, logs.
 - **Failure modes:** a query missing a tenant predicate; a cache key collision;
@@ -270,7 +274,7 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Residual risk:** a signed but malicious release.
 - **Class:** E/HA.
 
-### H13 — Incident response mechanisms
+### H13 — Incident response mechanisms — *structurally necessary at federation (ADR-022)*
 
 - **Attack surface:** everything, under the assumption of an active incident.
 - **Failure modes:** cannot revoke a session or a capability quickly; cannot
@@ -339,6 +343,31 @@ Not MVP. Listed so the architecture is never painted into a corner.
 | Advanced provenance | content-level lineage for every derived artifact | taint tracking | HA |
 | Disaster recovery with evidence continuity | rebuild without losing the chain | anchoring, backups | E/HA |
 | High-assurance operational procedures | dual control, access reviews, drills | everything above | HA |
+
+---
+
+## Federation integration milestones (ADR-022)
+
+ASL is the single enforcement plane for five sibling repos; **no code merges**;
+integration exclusively via the M14 REST seam, one client at a time. Full
+reasoning in `DECISIONS.md` ADR-022; each row carries the structural
+rationale (why the client's own core promise requires it).
+
+| Milestone | Client | Why structurally necessary | Gate | Status |
+| --- | --- | --- | --- | --- |
+| M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[ ]** |
+| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H10/H12); static device key (H2); unattended fail-closed (H13/H15) | H10/H12 partially | **[ ]** |
+| M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
+| M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
+
+creative-os integrates nothing: it holds the human Decision records that gate
+dispatch (SUGGESTION != CANON) and reads audit through the ordinary client
+path. Its capture-and-refinement surface is the reason the stack exists, not
+a component that needs enforcement.
+
+The federation itself pulls H8 (cross-tenant), H2, and H13 forward — those
+three are annotated above. Gate: before any non-personal tenant joins, H8
+must close or its residual be explicitly accepted per deployment.
 
 ---
 
@@ -576,3 +605,31 @@ tests cover tamper, tail truncation, anchor reconciliation, offline
 verification, signature forgery, and the structural API check. Residual risk
 remains (anchor rewrite by an attacker with host access) — see Claim 8 and
 ADR-004.
+
+### M17 — Federation: control-plane as first client (ADR-022)
+
+- **Purpose:** make control-plane the first federation client — anchored
+  evidence + capability-gated dispatch across repos, no code merge.
+- **Why it matters:** control-plane's "external verification decides" thesis
+  rests on a writable JSONL log and unsandboxed workers; the federation
+  closes both without changing its semantics.
+- **Dependencies:** M14 REST API, M4 capability-request flow, M16 sandbox
+  lifecycle — all shipped. Runs **parallel** to Stage 2 H1 (disjoint
+  surfaces; dispatch uses the human-gated M4 flow, so signed delegation is
+  not a prerequisite).
+- **Complexity:** M.
+- **Security significance:** the first cross-repo trust boundary — REST
+  clients become bearer-token principals, one tenant per project.
+- **What becomes possible:** every dispatched worker is capability-scoped and
+  every control-plane verdict is tamper-evident from outside its repo.
+- **Acceptance criteria:** tampered control-plane log detected after the
+  anchor cycle; dispatch refused without human approval; no plaintext project
+  content in ASL events; ASL never mints authority; both repos' gates green.
+- **Threats introduced:** availability coupling (ASL down → dispatch fails
+  closed), bearer-token handling inside control-plane.
+- **Threats mitigated:** self-verifying agents, unanchorable evidence,
+  unscoped worker authority.
+- **Tests required:** anchor tamper detection; capability-request denial
+  without approval; sealed-event secret scan on the federation path.
+- **Evidence produced:** anchor receipts in control-plane state, ASL audit
+  export showing federation events. Full prompt: `PROMPTS/M17-federation-control-plane.md`.

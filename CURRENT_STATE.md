@@ -1,11 +1,13 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M15 — Stage-0 closure (ADR-020): deterministic
-document ingestion, read-only Git integration, the M12 capability-request
-persistence seam, the developer setup scripts, and the minimal UI served by
-the M14 server — zero new runtime dependencies, Stage 0 fully [DONE]. M14's
-REST API, M12's Postgres control plane, M13's runtime realism, M11's authz
-depth and M10's SLO gate remain the non-regression baseline.
+Honest snapshot. Updated after M16 — sandbox lifecycle (ADR-021), the last
+Stage 1 row — with Stage 0 (ADR-020) fully [DONE]: deterministic document
+ingestion, read-only Git integration, the M12 capability-request persistence
+seam, the developer setup scripts, and the minimal UI served by the M14
+server — zero new runtime dependencies. M14's REST API, M12's Postgres
+control plane, M13's runtime realism, M11's authz depth and M10's SLO gate
+remain the non-regression baseline. Next frontier: Stage 2 HARD (H1 [NEXT])
+and M17 federation (ADR-022) as parallel tracks.
 
 ## What exists
 

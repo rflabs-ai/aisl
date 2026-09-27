@@ -153,21 +153,30 @@ distributed deployment; multi-node revocation propagation delay.
 
 ## Claim 6 — Capabilities cannot exceed their issuer's authority
 
-**Claim:** A non-root issuer can only mint a capability that is a subset of its own
-resources, actions, classification ceiling, and expiry.
+**Claim:** A non-root issuer can only mint a capability that is a subset of its
+own resources, actions, classification ceiling, and expiry; it must carry every
+constraint the issuer's own capability carries (it may narrow network hosts
+further, never drop one), and a single-use issuer capability cannot delegate
+at all.
 
-**Mechanism:** `findOverreach` attenuation check at `src/capability.ts:296`;
+**Mechanism:** `findOverreach` attenuation check at `src/capability.ts`;
 issuers other than the authorization root must present `parent` — their own
 signed capability (ADR-023). The parent is verified before any field is
 trusted: HMAC signature, `parent.subject === issuer.id` (you delegate only
-what you hold), same tenant, unexpired, unconsumed. The attenuation authority
-is DERIVED from the parent's own fields, never declared; the child records the
-chain link (`provenance.delegatedFrom` = parent id + parent signature) under
-its own signature, and a caller-supplied `delegatedFrom` is overridden.
+what you hold), same tenant, unexpired, unconsumed — checked whenever a parent
+is presented, including by the root. The attenuation authority is DERIVED from
+the parent's own fields, never declared, and the subset check covers all six
+dimensions: resources, actions, classification, expiry, constraints (child
+must carry every parent constraint; network hosts compare as intersections,
+so narrowing is legitimate), and single-use (a single-use parent is a leaf
+authority — no delegation). The child records the chain link
+(`provenance.delegatedFrom` = parent id + parent signature) under its own
+signature, and a caller-supplied `delegatedFrom` is overridden.
 `AuthorizationService.issue` adds custody: the parent must be registered and
-not revoked. Revocation is checked in `AuthorizationService.evaluate()` before
-attenuation, so a revoked capability fails before signature or scope
-verification.
+not revoked, and a refused custody check is audited as a `capability.issue`
+deny event before the throw. Revocation is checked in
+`AuthorizationService.evaluate()` before attenuation, so a revoked capability
+fails before signature or scope verification.
 
 **Threat model:** TM-001, TM-003.
 
@@ -177,8 +186,10 @@ process-resident (known-gap #4).
 **Evidence:** invariant 6 tests (rewritten against signed parents) plus the H1
 suite: tampered/forged parents, foreign-subject parents (the declared-object
 bypass), cross-tenant, expired, consumed, revoked, and unregistered parents,
-two-hop chains, an issuance-fuzzing extremes matrix, and a structural test
-asserting no declared-authority symbol remains in `src/`.
+two-hop chains, an issuance-fuzzing extremes matrix, the constraint/single-use
+dimension suite (drop-network, drop-param, carry-both, narrow-hosts,
+single-use-leaf), root-with-parent validation, and a structural test scanning
+every `src/*.ts` for the removed declared-authority symbol.
 
 **Test:** `tests/invariants.test.ts` invariant 6;
 `tests/h1-signed-delegation.test.ts`.

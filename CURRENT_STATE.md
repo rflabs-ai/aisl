@@ -11,9 +11,9 @@ baseline. Next frontier: M17 federation (ADR-022) and H10/H12/H13/H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~8,600 lines of source across 39 modules
-(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 499 tests
-(`tests/`, `security-tests/`; 484 pass, 15 Postgres-mode tests skip cleanly
+TypeScript foundation on Node 24, ~8,700 lines of source across 39 modules
+(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 507 tests
+(`tests/`, `security-tests/`; 492 pass, 15 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -58,11 +58,16 @@ Dev dependencies: `typescript`, `@types/node`.
   signed capability, presented as `parent` — the declared `issuerAuthority`
   seam is gone (ADR-023). The parent is verified before any field is trusted
   (signature, subject match — you delegate only what you hold — tenant,
-  expiry, consumption); authority is derived from the parent's fields; the
-  child records `provenance.delegatedFrom` (parent id + parent signature)
-  under its own signature, and caller-supplied values are overridden. The
-  service adds custody: registered and not revoked. Two-hop chains verified
-  traceable; 11-case extremes fuzz matrix refuses every overreach.
+  expiry, consumption) whenever one is presented, root included; authority is
+  derived from the parent's fields across all six dimensions (resources,
+  actions, classification, expiry, constraints — a child may narrow network
+  hosts but never drop one — and single-use parents are leaf authorities that
+  cannot delegate); the child records `provenance.delegatedFrom` (parent id +
+  parent signature) under its own signature, and caller-supplied values are
+  overridden. The service adds custody (registered, not revoked) and audits
+  every custody refusal as a `capability.issue` deny event. Two-hop chains
+  verified traceable; 11-case extremes fuzz matrix plus the
+  constraint/single-use bypass suite refuse every overreach.
 - **Audit query + export API (M6):** In-process query and export API
   (`src/audit-query.ts`, `AuditQueryService`). Authorized through
   `AuthorizationService.queryAudit` gating on synthetic `audit-log:<tenantId>`
@@ -283,7 +288,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 499 tests pass (484 green; 15 Postgres-mode tests skip without
+All 507 tests pass (492 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
 twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, H1:
@@ -302,7 +307,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M14 REST API (50: server core + authn/whitelist/fail-closed 20, sessions + capability requests 18, audit + tasks 12)**.
 | **M15 Stage-0 closure (23: ingestion 8, git 7, UI 4, setup 3, capability-request persistence 1)**.
 | **M16 sandbox lifecycle (10: round trip + refusal 2, tenant isolation 2, limits + attestation 2, PDP-gated execute 2, exit sweep 1, seal-scan 1)**.
-| **H1 signed delegation (24: parent refusals 7, service custody 2, chain traceability 3, extremes fuzz 11, structural 1)**; invariant 6 rewritten against signed parents (4).
+| **H1 signed delegation (32: parent refusals 7, custody + audit-event 2, chain traceability 3, constraint/single-use dimensions 6, root-with-parent 2, extremes fuzz 11, structural src-wide scan 1)**; invariant 6 rewritten against signed parents (4).
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -768,11 +773,17 @@ not change decision semantics — capability AND policy still gate every action
    that is not registered with it or that is revoked (stateful checks the pure
    function cannot make). Revoked parents cannot mint further authority.
 
-Tests: `tests/h1-signed-delegation.test.ts` (24) + invariant 6 rewritten to
+Tests: `tests/h1-signed-delegation.test.ts` (32) + invariant 6 rewritten to
 mint real parents. Structural invariant: no `issuerAuthority`/`IssuerAuthority`
-symbol remains anywhere in `src/`. Residuals named in Claim 6: the symmetric
-process-wide HMAC key (known-gap #4) and the absence of a chain-depth limit
-(every hop attenuates strictly, so cycles cannot escalate).
+symbol remains in any `src/*.ts` (the scan globs the whole tree). The session
+audit's four findings were closed the same day: the subset check now covers
+constraints (subset, narrowing legitimate) and single-use (leaf authority —
+no delegation); parent validity runs for the root too, so no chain link is
+recorded from an unvalidated parent; the structural scan globs `src/`; and
+custody refusals are audited as `capability.issue` deny events (ADR-023
+addendum). Residuals named in Claim 6: the symmetric process-wide HMAC key
+(known-gap #4) and the absence of a chain-depth limit (every hop attenuates
+strictly, so cycles cannot escalate).
 
 ## Watch-items from the M9 audit
 

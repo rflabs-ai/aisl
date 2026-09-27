@@ -24,6 +24,55 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 23 — 2026-09-27 — opencode/h1-audit-fixes
+
+**Did:**
+- Audited the session's own work (commits 2bb3498/a9cb84b/f62230d): verdict
+  needs-work, 4 tickets (1 must, 3 should) at
+  `.scratch/session-audit/2026-09-27-h1-signed-delegation/`. Then fixed all
+  four on `fix/h1-audit-findings`:
+  - **01 (must)** — `findOverreach` now covers ALL six authority dimensions:
+    a child must carry every parent constraint (network hosts compare as
+    intersections via `effectiveHostSet`, so narrowing `[a]` from `[a,b]` is
+    legitimate — no false denial; dropping any host or the whole constraint
+    refuses), and a single-use parent cannot delegate at all (leaf
+    authority). New messages: `network constraint not held by issuer`,
+    `network destination X not held by issuer`, `constraint K not held by
+    issuer`, `single-use capability cannot delegate`.
+  - **02** — parent validity (`parentValidityError`) now runs whenever a
+    parent is presented, root included — no chain link is ever recorded from
+    an unvalidated parent; root's minting power unchanged.
+  - **03** — the structural test globs every `src/*.ts` (was: two hardcoded
+    files) and asserts the tree is real (>= 30 files); typo "IsherAuthority"
+    fixed in the test name.
+  - **04** — `AuthorizationService.issue` appends a `capability.issue` deny
+    event (`result: 'denied'`, `capabilityId` = parent id,
+    `metadata.refusal`) before throwing on revoked/unregistered custody —
+    delegation-from-revoked attempts are now in the evidence chain.
+- Tests first (red confirmed via targeted run): +8 tests (6
+  constraint/single-use incl. the anti-false-denial narrow-hosts case, 2
+  root-with-parent). 24 → 32 H1 tests.
+- Docs sweep: ADR-023 addendum, Claim 6 (claim statement now names constraints
+  + single-use; mechanism names the audit event), CURRENT_STATE (counts
+  507/492/15, breakdown, what-works, what-H1-closed), ROADMAP H1 Closed note,
+  M17 prompt baseline refreshed (nit from the audit), this entry.
+
+**Left:**
+- Ticket files 01–04 will be marked resolved with the fix commit hash in a
+  follow-up commit (hash unknown until the commit lands).
+
+**Next session should:**
+- H10 (signed builds) / H12 (secure updates) / M17 Phase 1 — pick one. The
+  H1 seam is now closed end to end; ADR-008 asymmetric keys remains the
+  portability upgrade path.
+
+**Evidence:**
+- Gate: 507 tests (492 pass, 15 PG-mode skips, 0 fail); typecheck clean.
+  Files: `src/capability.ts`, `src/pdp.ts`,
+  `tests/h1-signed-delegation.test.ts`, docs; tickets 01–04 resolved.
+
+---
+
 ### SESSION 22 — 2026-09-27 — opencode/h1-signed-delegation
 
 **Did:**

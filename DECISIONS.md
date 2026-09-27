@@ -394,14 +394,21 @@ the benchmark as a usability metric, never as a security metric.
 
 ## ADR-014: No single security percentage; per-control assurance targets
 
-**Context:** The project's ambition is expressed as "as close to 99.9996% secure
-as possible". That number (≈3.4 failures per million, the Six Sigma figure) is a
+**Correction (2026-09-24):** the ambition figure was recorded as 99.9996% — a
+dropped digit. The stated vision (`initial-idea-CONTEXT.md`) is 99.99996%
+(≈0.4 defects per million); that number is the SSOT and has been corrected
+throughout this doc set. The architectural implication versus the Six Sigma
+figure (≈3.4 per million) is unchanged: still an aspiration, never a published
+claim.
+
+**Context:** The project's ambition is expressed as "as close to 99.99996%
+secure as possible". That number (≈0.4 defects per million) is a
 legitimate aspiration and an unusable metric: it has no denominator, no defined
 failure event, and no test that could falsify it. Publishing it would break the
 rule this project was founded on — every claim must bind to a property, a threat
 model, a mechanism, a test, and evidence.
 
-**Decision:** Adopt 99.9996% as an internal **north star**, never as a published
+**Decision:** Adopt 99.99996% as an internal **north star**, never as a published
 claim. Publish one measurable target per control instead (ROADMAP.md,
 "Assurance targets"), each with a named measurement, and report current values
 on every run via `npm run benchmark`. Where a target is unmeasurable (unknown
@@ -421,7 +428,7 @@ it hides whether a specific control works); derive a composite score from the
 per-control numbers (rejected — averaging distinct controls produces a number
 that means nothing and ages badly).
 
-**Reasoning:** The instinct behind 99.9996% is right: make unauthorized access
+**Reasoning:** The instinct behind 99.99996% is right: make unauthorized access
 extraordinarily difficult, and prove it. The way to prove it is per-control
 measurement with growing evidence, not a single figure that no test can fail.
 A composite percentage would also create pressure to keep it high rather than
@@ -1179,3 +1186,108 @@ is opt-in so test processes are not wired to it by accident.
 run), multi-tenant sandbox sharing, snapshot/restore, remote attestation
 (HSM-backed), and a microVM backend (Firecracker/gVisor) when a deployment
 cannot trust the host kernel — each behind its own ADR.
+
+---
+
+## ADR-022: Federation — one enforcement plane, five state planes
+
+**Context:** A portfolio audit (2026-09-27) profiled the five sibling repos and
+asked which Stage 2/3 controls each project's own core promise structurally
+requires. Findings, compressed:
+
+- **control-plane** (orchestrator: dispatches agent workers, runs external
+  verification, "agent claims are never treated as truth"): its thesis rests
+  on a *plain writable JSONL event log* and it sandboxes nothing — an
+  unsandboxed agent can rewrite its own verdicts. Structurally requires H5
+  (sandbox), H11 (tamper-evident evidence), H13 (kill switch for N-way
+  fan-out), H2 (short-lived client credentials).
+- **project-raven** (always-on Pi agent, self-building via headless OpenCode
+  that rewrites its own repo): unsigned self-update is remote code execution
+  by design. Structurally requires H12 (secure updates), H10 (signed builds),
+  H2 (static device key), H13/H15 (unattended fail-closed operation).
+- **home-agent** (daily-driver personal assistant over Ollama/OpenJarvis):
+  web search results → model → tool loop is a live injection path into shell
+  exec, and personal material egress is unclassifiable. Structurally requires
+  H4, H5, H7, and H11 for its LSM memory (poisoned memory = persistent
+  compromise). Security posture is a prose doc + config — no claims ledger,
+  no invariant tests.
+- **engineering-OS** (markdown-spec build protocol): its evidence log
+  (`engine/logger.ts`, regex-gated append-only WAL) IS the product — without
+  signatures/anchoring, "no invented state" is unenforceable against a
+  compromised chat. Structurally requires H11, H14 (the runtime graduation
+  test it names as a gap is exactly H14).
+- **creative-os** (SUGGESTION ≠ CANON; human Decision record gates truth):
+  lowest-privileged system by design — capture-and-refinement playground
+  whose Decision records happen to gate the stack. Requires nothing today;
+  when `ModelRuntime` lands, H11-aligned hashing for the source store.
+
+Three of the five already reference ASL: `control-plane/project-registry.yaml`
+registers ai-security-layer, engineering-OS, and home-agent as managed
+projects; creative-os ADR-0001 names the trio (creative state / execution
+state / enforcement); engineering-OS's sibling fence lists several as
+read-only.
+
+**Decision:** The five projects stay five repos — no code merges, ever. ASL
+is the single enforcement plane (PDP, capabilities, classification, sandbox
+lifecycle, signed EventLog); the siblings remain state planes. Integration
+exclusively via the M14 REST seam (`/v1/authorize`, `/v1/sessions`,
+`/v1/capability-requests`, `/v1/audit`, `/v1/tasks`), one client at a time:
+
+1. **M17 — control-plane first**: its event log head-hash is anchored into
+   ASL's evidence plane (the M3 anchor pattern across repos); dispatches
+   become capability requests approved by the human operator through the
+   ordinary M4 flow; ASL never mints authority itself.
+2. **M18 — project-raven**: self-build runs through the M16 sandbox
+   lifecycle; the self-update pipeline adopts H10/H12 (signed builds,
+   verified updates) before it modifies its own repo unattended.
+3. **M19 — home-agent**: its egress fence becomes a client of the ASL egress
+   gate + M13 classification machinery (same idea, stronger enforcement);
+   LSM memory anchoring follows.
+4. **M20 — engineering-OS**: retire `engine/logger.ts` into ASL's signed
+   EventLog — two evidence planes is the failure mode to avoid.
+
+creative-os integrates nothing: it holds the Decision records that gate
+dispatch and reads audit through the ordinary client path.
+
+**The federation pulls H8/H2/H13 forward.** The moment several projects share
+one ASL as tenants with very different ceilings (personal journal vs this
+repo's own source), cross-tenant isolation (H8, known-gap #7), short-lived
+client credentials (H2), and incident-response kill switches (H13) become
+structurally necessary for the *federation* even where no individual project
+needed them. Gate: H8 must close (or its residual be explicitly accepted per
+deployment) before any non-personal tenant joins.
+
+**Alternatives:**
+- **Merge the codebases** — rejected: the trust story depends on a small,
+  auditable surface; merging imports every sibling's dependencies and attack
+  surface into the enforcement plane.
+- **Grow engineering-OS's evidence log in parallel** — rejected: two evidence
+  planes means two tamper stories, one of them untested.
+- **Per-project bespoke security** — rejected: that is how home-agent and
+  raven ended up with prose-only security. One enforcement plane, tested
+  once, beats five untested copies.
+
+**Reasoning:** M17 does not depend on H1: its dispatch phase uses the
+human-gated M4 capability-request flow (agent asks, human grants), which
+already works over the M14 API — signed delegation (H1) is not a prerequisite.
+But the federation *amplifies* H1's importance: cross-repo capability issuance
+is exactly where "declared, not proven" `issuerAuthority` hurts most, so H1
+stays the priority security-core track and runs parallel to M17 (disjoint
+surfaces — H1 touches `src/capability.ts` issuance; M17 touches integration
+and config).
+
+**Security implications:** New trust boundary — cross-repo REST clients are
+bearer-token principals, one tenant per project. Availability coupling: ASL
+down means dispatch fails closed (accepted; loud per H15's direction). No
+plaintext project content crosses into ASL events (sealed per ADR-018 keys).
+
+**Tradeoffs:** control-plane gains a dependency on a running ASL; the
+siblings' security posture is now only as strong as their integration (a
+client that bypasses ASL is out of scope of this ADR and must be named in its
+milestone's non-goals).
+
+**Future migration path:** M18–M20 in order; prompts written just-in-time per
+the M4–M16 convention. Non-personal tenants wait for H8. Automated multi-hop
+delegation between projects waits for H1.
+
+---

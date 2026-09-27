@@ -24,6 +24,39 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 24 — 2026-09-27 — opencode/prompts-reorg
+
+**Did:**
+- PROMPTS folder reorganized to mirror the tracks:
+  - `PROMPTS/M-Track--DONE/` — all 14 landed M-track prompts (M4–M16,
+    M6.1, AUDIT-M7-M8) moved via `git mv`; M17 (federation, still pending)
+    stays at the PROMPTS root.
+  - `PROMPTS/H-Track/` — the Stage 2 queue: one stub per H item. H1 is a
+    tombstone (it ran without a prompt, straight from ROADMAP); H2–H15 are
+    queue placeholders pointing at their ROADMAP sections as the spec of
+    record, each with the known build context and the kickoff contract
+    (Phase 0 ADR → expand to full M4–M16 format → tests first → gate).
+    Pick order: H10 → H12 → H13 → H15 next.
+- ROADMAP: milestone-prompts paragraph updated to the new paths + H-Track
+  note; milestone-spec index updated.
+- Historical references inside the archived prompts themselves left as
+  written (they are done-track records, not live pointers).
+
+**Left:**
+- Nothing. Stubs are intentionally thin — detail arrives at kickoff, per the
+  just-in-time convention.
+
+**Next session should:**
+- Pick up `PROMPTS/H-Track/H10-signed-builds-supply-chain.md` (or H12/H13/H15)
+  and expand it to full format, then execute. M17 federation remains the
+  parallel track.
+
+**Evidence:**
+- Docs-only reorg (git mv + new stubs + ROADMAP/AGENT-SESSION pointers);
+  no code touched. Gate green via pre-commit hook.
+
+---
+
 ### SESSION 23 — 2026-09-27 — opencode/h1-audit-fixes
 
 **Did:**

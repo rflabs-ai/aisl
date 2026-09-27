@@ -92,15 +92,16 @@ Nothing above is inflated to look hard. It is a foundation, not a product.
 | Output reliability layer | guard the text channel: evidence-bound claims, guardrails, fallback | verification, events | M | P | **[DONE]** (M7/M8: `src/guard.ts` D2–D5, ladder, sealed originals, Claim 23; M9: Escalate wired to M4, classification derived per session, second-pass guard) |
 
 Planned milestone prompts (parallelization map lives in the M10 prompt and is
-restated in each): `PROMPTS/M10-assurance-targets-and-slos.md` (the row above —
+restated in each; **all landed M prompts live in `PROMPTS/M-Track--DONE/`**):
+`M10-assurance-targets-and-slos.md` (the row above —
 **done**; it set the SLO baseline every later milestone must not regress),
-`PROMPTS/M11-authz-depth.md` (Granular RBAC, Classification
+`M11-authz-depth.md` (Granular RBAC, Classification
 propagation, Configuration management — **done**; A/B subagents ran in
 parallel on disjoint surfaces, C consumed A's role surface),
-`PROMPTS/M13-runtime-realism.md` (model provider adapters, verification
+`M13-runtime-realism.md` (model provider adapters, verification
 pipeline, structured telemetry — **done**; ran concurrently with M11 on
 disjoint module surfaces, zero new runtime dependencies),
-`PROMPTS/M12-platform-shift.md`
+`M12-platform-shift.md`
 (Postgres ADR-018 + schema/migrations + tenant isolation + backup/restore —
 **[DONE]**; Phase 0: ADR-018 (driver `postgres.js` pinned as `postgres@3.4.9`,
 schema, two-role RLS model, per-tenant key derivation, fail-closed
@@ -110,17 +111,22 @@ migrations framework; Phase 2: B (RLS policies + per-tenant keys) ∥ C
 verified against a live Postgres container; SQLite default unchanged).
 M10 ran first — it set the SLO baseline every later milestone must not regress.
 
-Scoping for Stage 0's finish line: `PROMPTS/M14-rest-api.md`
+Scoping for Stage 0's finish line: `M14-rest-api.md`
 (ADR-019 — the HTTP transport as a new trust boundary, `node:http` zero-dep,
 authn/tenant/whitelist contracts, authorize + sessions + capability
-requests + audit + tasks + healthz) then `PROMPTS/M15-stage0-cleanup.md`
+requests + audit + tasks + healthz) then `M15-stage0-cleanup.md`
 (ADR-020 — document ingestion ∥ Git read-only, the M12 capability-request
 API seam, setup script, minimal UI served by the M14 server). Both landed —
-**Stage 0 is fully [DONE]**. `PROMPTS/M16-sandbox-lifecycle.md` (ADR-021 —
+**Stage 0 is fully [DONE]**. `M16-sandbox-lifecycle.md` (ADR-021 —
 sandbox lifecycle: create, limit, destroy, attest) closed the last Stage 1
 row. `PROMPTS/M17-federation-control-plane.md` (ADR-022 — control-plane as
 the first federation client) runs parallel to Stage 2 H1; M18–M20 prompts
 are written just-in-time per the M4–M16 convention.
+
+The Stage 2 (HARD) queue lives in `PROMPTS/H-Track/` — one stub per open H
+item (H2–H15; H1 is a tombstone for ADR-023), each pointing at its ROADMAP
+section as the spec of record and expanded to full prompt format just-in-time
+at kickoff.
 
 ---
 
@@ -527,11 +533,12 @@ of that equation defensible and testable.
 
 M0–M3 are specified in full format below and are **done**. M4–M16 were run the
 same way and also all landed — their full-format specifications live in
-`PROMPTS/M*-*.md`, and the completion evidence (counts, commits, benchmark
+`PROMPTS/M-Track--DONE/`, and the completion evidence (counts, commits, benchmark
 results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
 
 Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. The open
-frontier is Stage 2 (HARD), above.
+frontier is Stage 2 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE],
+next H10 → H12 → H13 → H15) plus M17 federation.
 
 ### M0 — Architectural foundation (done)
 

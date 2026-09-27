@@ -1,19 +1,19 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M16 — sandbox lifecycle (ADR-021), the last
-Stage 1 row — with Stage 0 (ADR-020) fully [DONE]: deterministic document
-ingestion, read-only Git integration, the M12 capability-request persistence
-seam, the developer setup scripts, and the minimal UI served by the M14
-server — zero new runtime dependencies. M14's REST API, M12's Postgres
-control plane, M13's runtime realism, M11's authz depth and M10's SLO gate
-remain the non-regression baseline. Next frontier: Stage 2 HARD (H1 [NEXT])
-and M17 federation (ADR-022) as parallel tracks.
+Honest snapshot. Updated after H1 — signed delegation (ADR-023), the first
+Stage 2 (HARD) item. Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are fully
+[DONE]: deterministic document ingestion, read-only Git integration, the
+capability-request persistence seam, the developer setup scripts, the minimal
+UI served by the M14 server, and the sandbox lifecycle — zero new runtime
+dependencies. M14's REST API, M12's Postgres control plane, M13's runtime
+realism, M11's authz depth and M10's SLO gate remain the non-regression
+baseline. Next frontier: M17 federation (ADR-022) and H10/H12/H13/H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~8,540 lines of source across 39 modules
-(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 462 tests
-(`tests/`, `security-tests/`; 448 pass, 14 Postgres-mode tests skip cleanly
+TypeScript foundation on Node 24, ~8,600 lines of source across 39 modules
+(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 499 tests
+(`tests/`, `security-tests/`; 484 pass, 15 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -52,8 +52,17 @@ Dev dependencies: `typescript`, `@types/node`.
 - **Capability request flow (M4):** Agents submit `CapabilityRequest` records;
   a human reviewer (`kind: 'user'`) approves, narrowing scope if desired, and
   the approval mints a single-use capability scoped exactly to the request.
-  Self-approval is structurally refused; non-user principals cannot approve;
-  requests expire after 5 minutes.
+   Self-approval is structurally refused; non-user principals cannot approve;
+   requests expire after 5 minutes.
+- **Signed delegation (H1):** a non-root issuer attenuates against its own
+  signed capability, presented as `parent` — the declared `issuerAuthority`
+  seam is gone (ADR-023). The parent is verified before any field is trusted
+  (signature, subject match — you delegate only what you hold — tenant,
+  expiry, consumption); authority is derived from the parent's fields; the
+  child records `provenance.delegatedFrom` (parent id + parent signature)
+  under its own signature, and caller-supplied values are overridden. The
+  service adds custody: registered and not revoked. Two-hop chains verified
+  traceable; 11-case extremes fuzz matrix refuses every overreach.
 - **Audit query + export API (M6):** In-process query and export API
   (`src/audit-query.ts`, `AuditQueryService`). Authorized through
   `AuthorizationService.queryAudit` gating on synthetic `audit-log:<tenantId>`
@@ -274,10 +283,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 475 tests pass (460 green; 15 Postgres-mode tests skip without
+All 499 tests pass (484 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, H1:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -293,6 +302,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M14 REST API (50: server core + authn/whitelist/fail-closed 20, sessions + capability requests 18, audit + tasks 12)**.
 | **M15 Stage-0 closure (23: ingestion 8, git 7, UI 4, setup 3, capability-request persistence 1)**.
 | **M16 sandbox lifecycle (10: round trip + refusal 2, tenant isolation 2, limits + attestation 2, PDP-gated execute 2, exit sweep 1, seal-scan 1)**.
+| **H1 signed delegation (24: parent refusals 7, service custody 2, chain traceability 3, extremes fuzz 11, structural 1)**; invariant 6 rewritten against signed parents (4).
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -391,9 +401,12 @@ Ordered by severity.
 9. **Detector risk.** `detectInjectionSignals` could be mistaken for a control by
    a future maintainer. It is telemetry.
 10. **Unknown-unknowns in the corpus.** 12 cases is a start, not coverage.
-11. **Attenuation is declared, not proven.** `issuerAuthority` is an object the
-    caller supplies; a caller can overstate it. Delegation must carry the
-    parent's signature (ADR-002, H1).
+11. ~~**Attenuation is declared, not proven.**~~ **H1 closed**: a non-root
+    issuer attenuates against its own signed capability (`parent`) — authority
+    is derived, never declared; the chain link is recorded in
+    `provenance.delegatedFrom` under the child's signature; the service
+    refuses revoked/unregistered parents (ADR-023). Residual: the HMAC key is
+    symmetric and process-wide (known-gap #4).
 12. **No multi-node capability revocation broadcast.** In-process revocation is
     immediate; a multi-node deployment needs a revocation channel (H13). M12
     gives Postgres mode the storage it needs (one writer is still enforced:
@@ -733,6 +746,33 @@ event chain, and the execution seam (`runTool`) is untouched.
    /`sandbox.attest` events carry a sealed payload (pid, kind, limits,
    timestamps, duration) under the tenant's `'public'` key plus a SHA-256
    limit-config digest — plaintext events show only digest + keyId.
+
+## What H1 closed
+
+H1 was the root-of-trust milestone (ADR-023, the first Stage 2 item): it did
+not change decision semantics — capability AND policy still gate every action
+— it changed what issuance accepts as proof of the issuer's own authority.
+
+1. ~~**Attenuation was declared, not proven (known-gap #11).**~~ The declared
+   `IssuerAuthority` object is gone from the API. A non-root issuer must
+   present `parent` — its own signed capability — and `issueCapability`
+   verifies the parent's HMAC signature BEFORE any field is trusted, then
+   checks subject match (you delegate only what you hold), same tenant,
+   unexpired, and unconsumed. Authority is derived from the parent's fields;
+   `findOverreach` is unchanged.
+2. ~~**Delegation chains carried no parent signature.**~~ The child's
+   `provenance.delegatedFrom` records the parent's `{ id, signature }`, is set
+   by `issueCapability` (caller-supplied values overridden), and is covered by
+   the child's own HMAC — the chain link is tamper-evident and walkable by id.
+3. **Service custody added:** `AuthorizationService.issue` refuses a parent
+   that is not registered with it or that is revoked (stateful checks the pure
+   function cannot make). Revoked parents cannot mint further authority.
+
+Tests: `tests/h1-signed-delegation.test.ts` (24) + invariant 6 rewritten to
+mint real parents. Structural invariant: no `issuerAuthority`/`IssuerAuthority`
+symbol remains anywhere in `src/`. Residuals named in Claim 6: the symmetric
+process-wide HMAC key (known-gap #4) and the absence of a chain-depth limit
+(every hop attenuates strictly, so cycles cannot escalate).
 
 ## Watch-items from the M9 audit
 

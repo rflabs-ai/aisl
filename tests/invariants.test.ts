@@ -9,7 +9,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { issueCapability } from '../src/capability.ts';
+import { issueCapability, type Capability } from '../src/capability.ts';
 import { type Principal } from '../src/domain.ts';
 import { AuthorizationService } from '../src/pdp.ts';
 import { EventLog } from '../src/events.ts';
@@ -233,18 +233,28 @@ describe('invariant 5: expired capabilities cannot be used', () => {
 });
 
 describe('invariant 6: capabilities cannot exceed the authority of their issuer', () => {
+  function orchestratorParent(world: ReturnType<typeof testWorld>): Capability {
+    return world.authorization.issue(world.root, {
+      subject: 'svc:orchestrator',
+      tenantId: 'acme',
+      resourceIds: [world.resources.repoA!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: world.clock.now() + 60_000,
+      provenance: { source: 'policy-grant' },
+    });
+  }
+
+  const orchestrator = () =>
+    ({ id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} }) as Principal;
+
   test('a non-root issuer cannot hand out resources it does not hold', () => {
     const world = testWorld();
-    const authority = {
-      resourceIds: [world.resources.repoA!],
-      actions: ['read' as const],
-      maxClassification: 'internal' as const,
-      expiresAt: world.clock.now() + 1_000,
-    };
+    const parent = orchestratorParent(world);
     assert.throws(
       () =>
         issueCapability(
-          { id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} },
+          orchestrator(),
           {
             subject: world.agent.id,
             tenantId: 'acme',
@@ -255,7 +265,7 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
             provenance: { source: 'delegation' },
           },
           world.clock.now(),
-          authority,
+          parent,
         ),
       /exceeds issuer authority/,
     );
@@ -263,16 +273,11 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
 
   test('a non-root issuer cannot escalate action or classification', () => {
     const world = testWorld();
-    const authority = {
-      resourceIds: [world.resources.repoA!],
-      actions: ['read' as const],
-      maxClassification: 'internal' as const,
-      expiresAt: world.clock.now() + 60_000,
-    };
+    const parent = orchestratorParent(world);
     assert.throws(
       () =>
         issueCapability(
-          { id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} },
+          orchestrator(),
           {
             subject: world.agent.id,
             tenantId: 'acme',
@@ -283,7 +288,7 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
             provenance: { source: 'delegation' },
           },
           world.clock.now(),
-          authority,
+          parent,
         ),
       /action delete not held by issuer/,
     );
@@ -291,7 +296,7 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
     assert.throws(
       () =>
         issueCapability(
-          { id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} },
+          orchestrator(),
           {
             subject: world.agent.id,
             tenantId: 'acme',
@@ -302,7 +307,7 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
             provenance: { source: 'delegation' },
           },
           world.clock.now(),
-          authority,
+          parent,
         ),
       /exceeds issuer ceiling/,
     );
@@ -313,7 +318,7 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
     assert.throws(
       () =>
         world.authorization.issue(
-          { id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} },
+          orchestrator(),
           {
             subject: world.agent.id,
             tenantId: 'acme',
@@ -330,8 +335,9 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
 
   test('attenuated delegation within the issuer authority succeeds', () => {
     const world = testWorld();
+    const parent = orchestratorParent(world);
     const cap = issueCapability(
-      { id: 'svc:orchestrator', kind: 'service', tenantId: 'acme', roles: [], attributes: {} },
+      orchestrator(),
       {
         subject: world.agent.id,
         tenantId: 'acme',
@@ -342,14 +348,11 @@ describe('invariant 6: capabilities cannot exceed the authority of their issuer'
         provenance: { source: 'delegation' },
       },
       world.clock.now(),
-      {
-        resourceIds: [world.resources.repoA!],
-        actions: ['read'],
-        maxClassification: 'internal',
-        expiresAt: world.clock.now() + 60_000,
-      },
+      parent,
     );
     assert.equal(cap.maxClassification, 'public');
+    assert.equal(cap.provenance.delegatedFrom?.id, parent.id);
+    assert.equal(cap.provenance.delegatedFrom?.signature, parent.signature);
   });
 });
 

@@ -1291,3 +1291,71 @@ the M4–M16 convention. Non-personal tenants wait for H8. Automated multi-hop
 delegation between projects waits for H1.
 
 ---
+
+## ADR-023: Signed delegation — attenuation from a held capability, not a declared object
+
+**Context:** H1 (root of trust), known-gap #11, Claim 6's limitation. A
+non-root issuer presents `issuerAuthority` — a plain object the caller
+supplies — and `findOverreach` checks the request against it. Nothing proves
+the object is real: any caller with a reference to `issueCapability` can
+declare authority it does not hold and mint within it. ADR-002 named the
+migration path: "a `parentSignature` field to make delegation chains
+cryptographically provable rather than declared."
+
+**Decision:** The fourth parameter of `issueCapability` becomes
+`parent?: Capability` — the issuer's own signed capability — replacing the
+declared `IssuerAuthority` entirely. For a non-root issuer:
+
+1. The parent is required. No parent → refuse.
+2. The parent's HMAC signature is re-verified; a tampered parent refuses.
+3. The parent must be held BY the issuer: `parent.subject === issuer.id` —
+   you can only delegate what you hold, proven by a signed artifact issued to
+   you. Presenting someone else's (necessarily stronger) capability refuses.
+4. The parent must be same-tenant, unexpired at `now`, and unconsumed
+   (`usedAt === undefined` — spent single-use authority does not propagate).
+5. The attenuation authority is DERIVED from the parent's own fields; the
+   existing `findOverreach` subset check is unchanged.
+6. The child's `provenance.delegatedFrom` records the parent's `{ id,
+   signature }`, set by `issueCapability` itself (caller-supplied values are
+   overridden) and covered by the child's own signature — the chain link is
+   tamper-evident, and each hop is walkable by id.
+7. `AuthorizationService.issue`/`issueForRole` add custody: the parent must
+   be registered with the service and not revoked (stateful checks the pure
+   function cannot make).
+
+**Alternatives:**
+- **Verify a caller-declared authority object** — incoherent: a declared
+  object has nothing to sign; verification of a signature-less artifact is
+  theater.
+- **Asymmetric per-issuer keys now** — the correct end-state (chains portable
+  across processes), but it requires ADR-008's KMS work; within one process
+  the HMAC parent already removes the declared-object bypass. Key theft
+  remains known-gap #4 and is unchanged by this ADR.
+- **Macaroons / caveat chains** — more machinery, no current consumer.
+
+**Reasoning:** The defect was the declared seam, not the subset check. Removing
+the seam — authority may only be *derived* from a signed artifact the issuer
+holds — makes overstatement impossible without forging the signature, and the
+custody checks close the stolen-but-never-registered and revoked-parent holes.
+
+**Security implications:** Attenuation is now enforced on a signed artifact;
+delegation is traceable (`delegatedFrom`) and tamper-evident; expired, spent,
+cross-tenant, foreign-subject, revoked, and unregistered parents all refuse.
+No PDP hot-path change — the chain is checked at the only place authority is
+created (issuance), not at every use.
+
+**Tradeoffs:** Callers must hold the actual `Capability` object rather than a
+hand-built plain object. Issuance from a service principal now requires that
+its capability was genuinely minted through the runtime — by design.
+
+**Residual risk:** The HMAC key is symmetric and process-wide (known-gap #4);
+every hop still attenuates strictly, so a delegation cycle cannot escalate,
+but no explicit depth limit exists — `ponytail: no chain-depth limit; every
+hop attenuates so cycles cannot escalate — add depth/loop detection only if a
+non-attenuating hop ever exists`.
+
+**Future migration path:** Per-issuer asymmetric keys (ADR-008) make chains
+portable across processes (M17 federation multi-hop delegation); chain-depth
+policy if workloads demand long chains.
+
+---

@@ -28,7 +28,8 @@ has already gained write access to infrastructure.
 | Steal the signing key | forge capabilities; detection depends on audit review |
 | Rewrite the event log in place | **detected** by chain + signature verification; SQLite UPDATE/DELETE refused by append-only triggers |
 | Delete the event log entirely | **detected** when the bundle is reconciled against the head-hash anchor file (and the anchor is on a different trust domain); still **succeeds** as a destruction if both store and anchor are on attacker-controlled storage |
-| Add a malicious dependency | **detected/limited** by the dependency admission policy (ADR-015): pinned in `package.json`, lockfile committed, SBOM diffed on build, no transitive runtime deps allowed, maintainer review gate. A malicious update to an already-trusted dep is the residual. |
+| Add a malicious dependency | **detected/limited** by the supply-chain gate (H10/ADR-024): exact pins, sha512 integrity + registry-pinned resolved URLs verified per lockfile entry, deterministic SBOM diffed against the committed `artifacts/sbom.json` baseline, and the `ADMITTED_RUNTIME_DEPS` allowlist — a new runtime dep fails the gate until an admission ADR lands in the same reviewed PR. A malicious update to an already-trusted dep is the residual (a version bump is a visible diff; content compromise inside a trusted version is outside this control). |
+| Direct code change | **detected/limited** since H10 (ADR-024): the signed build manifest binds `treeDigest` (git blob SHAs over all tracked files, outputs excluded), `sbomDigest`, and the gate result under an Ed25519 signature; `build verify` recomputes and refuses stale-source/stale-dependencies/bad-signature/gate-not-passed at deploy. Before a manifest exists, or with the signing key compromised, this path **succeeds** — that is the residual. |
 | Administrator mints a broad capability | succeeds and is logged |
 
 ## Controls
@@ -39,9 +40,17 @@ has already gained write access to infrastructure.
   one row and one file in lock-step".
 - Capability signatures detect *forgery without the key* (`src/capability.ts:110`).
 - Every issuance is logged with provenance (`src/pdp.ts:85`).
-- Runtime dependency count is one (`jose`), admitted under ADR-015 with a
-  documented admission policy. The third-party attack surface in production is
-  small but not nil; the residual is what `jose` itself does.
+- Runtime dependency count is two (`jose`, `postgres`), exact-pinned, each
+  admitted by an ADR (ADR-015, ADR-018) and enforced by the supply-chain gate
+  (`src/supply-chain.ts`, H10): SBOM diff vs the committed baseline, sha512
+  integrity, registry-pinned resolved URLs, and the code-enforced
+  `ADMITTED_RUNTIME_DEPS` allowlist.
+- The signed build manifest (`artifacts/build-manifest.json` + `.sig`) binds
+  source, dependencies, and gate result under an Ed25519 signature; deploy
+  verifies it before start (DEPLOYMENT.md). Residual: key custody is an env
+  var until ADR-008's KMS path; no transparency log (H11/Stage-3).
+- The third-party attack surface in production is small but not nil; the
+  residual is what `jose` and `postgres` themselves do.
 
 ## Assumptions
 
@@ -65,7 +74,9 @@ has already gained write access to infrastructure.
 Invariant 8 (tamper detection); `tests/m3-evidence-hardening.test.ts`
 (signature tamper, tail truncation, anchor reconciliation, offline verifier,
 structural API check); `tests/policy.test.ts` deterministic evaluation;
-benchmark reports `hashChainValid` and `auditCompleteness` on every run.
+benchmark reports `hashChainValid` and `auditCompleteness` on every run;
+`tests/h10-supply-chain.test.ts` (SBOM determinism + drift gate, pin/integrity
+refusals, tree-digest staleness, manifest sign/verify fail-closed).
 
 ## Residual risk
 

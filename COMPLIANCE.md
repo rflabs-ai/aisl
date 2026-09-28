@@ -24,7 +24,7 @@ implementation needed / external validation needed.
 | DE-AE-03 event correlation | EventLog | partial | no shipping, no alerting | queryable evidence | OTel + SIEM export | no |
 | DE-AE-06 deletion/destruction alerts | none | absent | no detection for destructive actions | alert records | verification plane + alerting | no |
 | DE-CM-06 incident drill | none | absent | no IR plan | game-day report | H13 | yes |
-| RS-MA-02 remediation | none | absent | no patch process | patch records | supply chain (H10) | yes |
+| RS-MA-02 remediation | supply-chain gate (H10) | partial | no patch process as operations; dependency freshness is gated (SBOM diff, exact pins, integrity verification) | `npm run supply-chain` output + `artifacts/sbom.json` history | patch cadence + review records (process) | yes |
 | RC-CO communication | none | absent | no notification process | notification records | operating model | yes |
 
 ## NIST SP 800-53 (selected, representative)
@@ -44,7 +44,7 @@ implementation needed / external validation needed.
 | SC-12 key management | capability key (env) | weak | env var, no rotation, no HSM | — | ADR-008 | yes |
 | SC-28 protection at rest | none | absent | — | — | encryption | yes |
 | SI-10 information input validation | `parseModelOutput` | implemented | model output only | parser tests | extend to all inputs | no |
-| SI-7 software integrity | none | absent | no signing | — | H10 | yes |
+| SI-7 software integrity | build manifest signing (H10) | partial | release manifests unsigned until a key ceremony runs `npm run build:sign`; gate verifies pins/integrity/SBOM | `build verify` output + manifest + signature | CI signing + key custody (ADR-008) | yes |
 
 ## NIST SP 800-207 (Zero Trust)
 
@@ -67,7 +67,7 @@ implementation needed / external validation needed.
 | LLM02 insecure output handling | partial | whitelist parser; no output encoding for downstream systems yet |
 | LLM03 training-data poisoning | N/A | no training, no fine-tuning |
 | LLM04 model DoS | absent | no quotas, timeouts, or budgets |
-| LLM05 supply chain | weak | zero runtime deps; devDeps unpinned, no SBOM |
+| LLM05 supply chain | partial | 2 runtime deps exact-pinned + integrity-verified; SBOM diffed on every build; signed build manifests (H10); signing-key custody + transparency log remain |
 | LLM06 sensitive info disclosure | partial | secrets denied by default; no DLP on outputs |
 | LLM07 insecure plugin design | partial | scoped tool context; no isolation |
 | LLM08 excessive agency | **core strength** | capabilities, ceilings, approvals |

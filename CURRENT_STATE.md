@@ -1,28 +1,34 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H1 — signed delegation (ADR-023), the first
-Stage 2 (HARD) item. Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are fully
-[DONE]: deterministic document ingestion, read-only Git integration, the
-capability-request persistence seam, the developer setup scripts, the minimal
-UI served by the M14 server, and the sandbox lifecycle — zero new runtime
-dependencies. M14's REST API, M12's Postgres control plane, M13's runtime
-realism, M11's authz depth and M10's SLO gate remain the non-regression
-baseline. Next frontier: M17 federation (ADR-022) and H10/H12/H13/H15.
+Honest snapshot. Updated after H10 — signed builds and supply-chain security
+(ADR-024), the second Stage 2 (HARD) item. Stage 0 (ADR-020) and Stage 1
+(M16, ADR-021) are fully [DONE]: deterministic document ingestion, read-only
+Git integration, the capability-request persistence seam, the developer setup
+scripts, the minimal UI served by the M14 server, and the sandbox lifecycle —
+zero new runtime dependencies. H1 (ADR-023, signed delegation) and H10
+(ADR-024, supply-chain gate + signed build manifests) are the landed Stage 2
+items. M14's REST API, M12's Postgres control plane, M13's runtime realism,
+M11's authz depth and M10's SLO gate remain the non-regression baseline.
+Next frontier: M17 federation (ADR-022) and H12/H13/H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~8,700 lines of source across 39 modules
-(`src/` — `ingestion.ts` and `git-reader.ts` are M15's additions), 507 tests
-(`tests/`, `security-tests/`; 492 pass, 15 Postgres-mode tests skip cleanly
+TypeScript foundation on Node 24, ~9,600 lines of source across 41 modules
+(`src/` — `ingestion.ts`, `git-reader.ts`, and `supply-chain.ts` are the
+latest additions), 527 tests
+(`tests/`, `security-tests/`; 512 pass, 15 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
 a static operator UI (`tools/ui/index.html`), developer setup scripts
-(`scripts/setup.ps1`, `scripts/setup.sh`), and this documentation set.
+(`scripts/setup.ps1`, `scripts/setup.sh`), the supply-chain gate artifacts
+(`artifacts/sbom.json` — the committed SBOM review baseline), and this
+documentation set.
 
 Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
-`postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps).
+`postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps),
+both exact-pinned (H10/ADR-024; `^` ranges refuse at the gate).
 Dev dependencies: `typescript`, `@types/node`.
 
 ## What works
@@ -68,6 +74,23 @@ Dev dependencies: `typescript`, `@types/node`.
   every custody refusal as a `capability.issue` deny event. Two-hop chains
   verified traceable; 11-case extremes fuzz matrix plus the
   constraint/single-use bypass suite refuse every overreach.
+- **Supply-chain gate + signed builds (H10):** `src/supply-chain.ts` (ADR-024)
+  turns the ADR-015 admission policy into code that refuses. The gate
+  (`npm run supply-chain`) regenerates a deterministic `ASL-SBOM v1` from the
+  lockfile and diffs it against the committed review baseline
+  (`artifacts/sbom.json`), enforces exact version pins (no `^`/`~`/`*`
+  ranges), sha512 integrity + `registry.npmjs.org` resolved URLs on every
+  lockfile package, and the `ADMITTED_RUNTIME_DEPS` allowlist (jose —
+  ADR-015, postgres — ADR-018; a new runtime dep fails until an admission ADR
+  lands in the same PR). The signed build manifest (`npm run build:sign` /
+  `build:verify`) runs the full release gate first (typecheck + tests +
+  supply-chain) and Ed25519-signs the canonical manifest binding
+  `treeDigest` (over `git ls-files -s` blob SHAs, artifacts excluded —
+  platform-independent), `sbomDigest`, `gitHead`, and the gate result;
+  `build verify` recomputes and verifies fail-closed with distinct reasons
+  (bad-signature / stale-source / stale-dependencies / gate-not-passed /
+  not-a-build-manifest). Deploy discipline: verify before start
+  (DEPLOYMENT.md). The gate also runs in the local pre-commit hook.
 - **Audit query + export API (M6):** In-process query and export API
   (`src/audit-query.ts`, `AuditQueryService`). Authorized through
   `AuthorizationService.queryAudit` gating on synthetic `audit-log:<tenantId>`
@@ -288,10 +311,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 507 tests pass (492 green; 15 Postgres-mode tests skip without
+All 527 tests pass (512 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, H1:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, H1, H10:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -308,6 +331,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M15 Stage-0 closure (23: ingestion 8, git 7, UI 4, setup 3, capability-request persistence 1)**.
 | **M16 sandbox lifecycle (10: round trip + refusal 2, tenant isolation 2, limits + attestation 2, PDP-gated execute 2, exit sweep 1, seal-scan 1)**.
 | **H1 signed delegation (32: parent refusals 7, custody + audit-event 2, chain traceability 3, constraint/single-use dimensions 6, root-with-parent 2, extremes fuzz 11, structural src-wide scan 1)**; invariant 6 rewritten against signed parents (4).
+| **H10 supply chain (20: SBOM deterministic + complete 2, pins 4, drift gate 5, tree digest 2, manifest sign/verify 5)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -390,7 +414,9 @@ Ordered by severity.
    `policy.load` event. What remains true: authoring is still in-repo and the
    review gate is git — the hash proves integrity, not review. A committer can
    recompute a hash; signatures and an out-of-band approval service are the
-   next step (H10/H12 territory).
+   next step (H10/H12 territory). H10's release manifest now signs the whole
+   source tree (policy included) at release time; the load-time hash check's
+   residual is unchanged.
 7. **Shared process for all tenants.** Logical isolation only; one memory-safety
    bug crosses every boundary. Container sandbox isolates per-task when Docker is
    available. **M12 (Postgres mode) narrows the data blast radius: the database
@@ -785,6 +811,42 @@ addendum). Residuals named in Claim 6: the symmetric process-wide HMAC key
 (known-gap #4) and the absence of a chain-depth limit (every hop attenuates
 strictly, so cycles cannot escalate).
 
+## What H10 closed
+
+H10 was the supply-chain milestone (ADR-024, the second Stage 2 item): it
+does not touch the PDP — it changes what the repository will let you build,
+commit, and ship.
+
+1. ~~**The SBOM-diff policy item (ADR-015 item 5) was prose, not code.**~~ The
+   gate generates a deterministic `ASL-SBOM v1` from the lockfile and diffs it
+   against the committed baseline (`artifacts/sbom.json`); any dependency
+   drift fails with the added/removed/changed list until the baseline is
+   regenerated in a reviewed PR. The SBOM diff is now the dependency review
+   gate, not a session discipline.
+2. ~~**Pins were ranges; the lockfile pinned silently.**~~ `package.json` is
+   exact-pinned (`jose 6.2.12`, `postgres 3.4.9`, dev deps exact) and the gate
+   refuses range characters — every version change is now a visible one-line
+   diff. Every lockfile package must carry a sha512 integrity hash and a
+   `registry.npmjs.org` resolved URL (hash verification, H10 methodology).
+3. **No build signing existed.** `build sign` runs the full release gate
+   (typecheck + tests + supply-chain) and Ed25519-signs a build manifest
+   binding the tree digest (git blob SHAs), SBOM digest, git head, and the
+   gate result; `build verify` is the deploy-time check — fail-closed with
+   distinct reasons. Unsigned-artifact deploy now means "verify refuses".
+4. ~~**The dependency update review gate was a paragraph.**~~ The
+   `ADMITTED_RUNTIME_DEPS` allowlist is code: a new runtime dep fails the
+   gate with the instruction to write the admission ADR and update the
+   allowlist in the same reviewed PR.
+
+Tests: `tests/h10-supply-chain.test.ts` (20, red-confirmed before the module
+existed). The gate is wired into the local pre-commit hook (hooks are
+untracked; the wiring is documented, not enforced in-repo — no CI exists).
+Residuals (Claim 32): signing-key custody is an env var (known-gap #4
+family), no transparency log, no CI enforcement, and the trusted-maintainer
+residual is unchanged — a coerced maintainer can still land a reviewed PR;
+H10 raises the cost of a malicious dependency from "edit a JSON file" to
+"forge a reviewable diff AND an ADR in the same PR".
+
 ## Watch-items from the M9 audit
 
 Not vulnerabilities — deliberate ceilings with named upgrade paths (details in
@@ -820,7 +882,8 @@ Claim 23's limitations and RELIABILITY §8):
 ## Reproducing this snapshot
 
 ```bash
-npm install
+npm install            # exact-pinned; CI should use npm ci (H10)
+npm run supply-chain   # H10 gate: SBOM diff vs artifacts/sbom.json, pins, integrity, allowlist
 npm run typecheck
 npm test
 npm run demo

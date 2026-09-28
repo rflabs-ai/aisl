@@ -9,6 +9,19 @@ plane, five state planes, no code merges. This milestone makes control-plane
 **Independent of Stage 2 H1** (H1 is now [DONE] — M17 never waited on it).
 Disjoint surfaces (M17 is integration +
 config across repos; H1 was `src/capability.ts` issuance). M17's dispatch
+
+## Async with the H track
+
+M17 is implemented ~90% in the control-plane repo; the ASL side is
+consume-only by design — REST gaps come back as tickets, never as silent
+in-M17 scope growth. Concurrent ASL work is safe by surface:
+
+- **Safe alongside M17:** H10 (build/supply chain), H12 (secure updates) —
+  pipeline work, disjoint from everything M17 touches.
+- **Sequence after M17's ASL gap-closure lands:** H13 (touches `src/pdp.ts`,
+  the revoke path M17's custody checks read) and H15 (touches
+  `src/rest-api.ts`, the surface an M17 anchor-registration route would land
+  on). Do not run those in the same session as an M17 gap fix.
 authorization uses the human-gated M4 capability-request flow over the M14
 REST API and does NOT depend on signed delegation. The sibling agent-arch
 audit found: control-plane orchestrates agent workers with zero sandboxing

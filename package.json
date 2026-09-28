@@ -13,14 +13,19 @@
     "benchmark": "node src/cli.ts benchmark",
     "attack": "node src/cli.ts attack",
     "policy:diff": "node src/policy-diff.ts",
+    "supply-chain": "node src/cli.ts build gate",
+    "sbom": "node src/cli.ts build sbom",
+    "build:keygen": "node src/cli.ts build keygen",
+    "build:sign": "node src/cli.ts build sign",
+    "build:verify": "node src/cli.ts build verify",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^22.20.3",
-    "typescript": "^7.0.2"
+    "@types/node": "22.20.3",
+    "typescript": "7.0.2"
   },
   "dependencies": {
-    "jose": "^6.2.12",
-    "postgres": "^3.4.9"
+    "jose": "6.2.12",
+    "postgres": "3.4.9"
   }
 }

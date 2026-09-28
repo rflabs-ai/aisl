@@ -8,7 +8,7 @@
  * Run: node src/cli.ts demo
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runAttackCorpus } from './attacks.ts';
@@ -30,6 +30,18 @@ import { CommandCheck } from './check-command.ts';
 import { SandboxRegistry } from './sandbox-registry.ts';
 import { JsonlTelemetry } from './telemetry.ts';
 import { evaluateSlo } from './slo.ts';
+import {
+  computeSbom,
+  computeTreeDigest,
+  generateSigningKeyPair,
+  gitHead,
+  releaseGate,
+  runSupplyChainGate,
+  sbomDigest,
+  signManifest,
+  verifyManifest,
+  type BuildManifest,
+} from './supply-chain.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -525,8 +537,54 @@ async function demo(): Promise<void> {
   const m16LifecycleEvents = world.eventLog.all().filter((e) => e.action.startsWith('sandbox.'));
   line('lifecycle evidence (sealed, digest-only)', 'LOG', m16LifecycleEvents.map((e) => e.action.replace('sandbox.', '')).join(' -> '));
 
+  // H10: signed builds + supply-chain gate (ADR-024). The gate runs offline;
+  // the manifest binds source, dependencies, and gate result when a release
+  // key exists. Absence of a manifest is honest state, not a failure.
+  heading('20. H10: supply-chain gate + signed build manifest');
+  const h10Gate = runSupplyChainGate({ repoRoot: ROOT, baselineSbomPath: join(ROOT, 'artifacts', 'sbom.json') });
+  const pinned = h10Gate.sbom.packages.filter((p) => p.direct).length;
+  line(
+    'supply-chain gate',
+    h10Gate.ok ? 'PASS' : 'FAIL',
+    `${pinned} direct deps pinned; ${h10Gate.sbom.packages.length} packages inventoried; sbom ${h10Gate.digest.slice(0, 19)}...`,
+  );
+  for (const v of h10Gate.violations) console.log(`         violation: ${v}`);
+  if (h10Gate.drift.changed) {
+    console.log(`         drift: added=${h10Gate.drift.added.join(',')} removed=${h10Gate.drift.removed.join(',')} changed=${h10Gate.drift.versionChanged.join(',')}`);
+  }
+  const manifestPath = join(ROOT, 'artifacts', 'build-manifest.json');
+  const sigPath = join(ROOT, 'artifacts', 'build-manifest.sig');
+  const pubKey = process.env.BUILD_SIGNING_PUBLIC_PEM;
+  if (!existsSync(manifestPath) || !existsSync(sigPath)) {
+    line('build manifest', 'NOT ISSUED', 'no release manifest yet — sign at release: npm run build:sign');
+  } else if (pubKey === undefined) {
+    line('build manifest', 'UNVERIFIED', 'manifest present but BUILD_SIGNING_PUBLIC_PEM is not set');
+  } else {
+    const verifyResult = verifyManifest(
+      JSON.parse(readFileSync(manifestPath, 'utf8')),
+      readFileSync(sigPath, 'utf8').trim(),
+      pubKey,
+      { repoRoot: ROOT },
+    );
+    line('build manifest verify', verifyResult.valid ? 'VERIFIED' : 'REFUSED', verifyResult.reason ?? `source=${verifyManifestSourceDigest(manifestPath)}`);
+  }
+  if (!h10Gate.ok) process.exitCode = 1;
+
   // Postgres mode: close the store's pool or the process hangs at exit.
   world.eventLog.close();
+}
+
+function verifyManifestSourceDigest(manifestPath: string): string {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return 'unparsable manifest';
+    const source = (parsed as { source?: unknown }).source;
+    if (typeof source !== 'object' || source === null) return 'unknown';
+    const treeDigest = (source as { treeDigest?: unknown }).treeDigest;
+    return typeof treeDigest === 'string' ? `tree=${treeDigest.slice(0, 19)}...` : 'unknown';
+  } catch {
+    return 'unparsable manifest';
+  }
 }
 
 async function attack(): Promise<void> {
@@ -729,11 +787,134 @@ function ratio(n: number, d: number): number {
   return d === 0 ? 0 : Math.round((n / d) * 1000) / 1000;
 }
 
+/**
+ * H10 supply-chain commands (ADR-024): `build gate|sbom|keygen|sign|verify`.
+ *
+ * The gate is the commit/release blocker; sign runs the full release gate
+ * (typecheck + tests + supply-chain) and refuses to sign on any failure;
+ * verify is the deploy-time check. Key material comes from env vars and is
+ * never printed.
+ */
+async function buildCommand(): Promise<void> {
+  const sub = process.argv[3] ?? 'gate';
+  const artifactsDir = join(ROOT, 'artifacts');
+  const sbomPath = join(artifactsDir, 'sbom.json');
+
+  if (sub === 'gate') {
+    const result = runSupplyChainGate({ repoRoot: ROOT, baselineSbomPath: sbomPath });
+    heading('SUPPLY-CHAIN GATE (H10, ADR-024)');
+    line('sbom digest', result.digest ? 'OK' : 'FAIL', result.digest);
+    line('packages inventoried', 'INFO', String(result.sbom.packages.length));
+    for (const v of result.violations) console.log(`  violation: ${v}`);
+    if (result.drift.changed) {
+      console.log(`  drift vs baseline: added=[${result.drift.added}] removed=[${result.drift.removed}] version-changed=[${result.drift.versionChanged}]`);
+      console.log('  dependency change detected — regenerate the baseline and name the admission ADR in the same PR:');
+      console.log('    npm run sbom -- --write');
+    }
+    if (!result.ok) process.exitCode = 1;
+    else console.log('  supply-chain gate passed.');
+    return;
+  }
+
+  if (sub === 'sbom') {
+    const sbom = computeSbom(ROOT);
+    if (process.argv.includes('--write')) {
+      mkdirSync(artifactsDir, { recursive: true });
+      writeFileSync(sbomPath, `${JSON.stringify(sbom, null, 2)}\n`);
+      console.log(`sbom written: ${sbomPath} (digest ${sbomDigest(sbom)})`);
+    } else {
+      process.stdout.write(`${JSON.stringify(sbom, null, 2)}\n`);
+    }
+    return;
+  }
+
+  if (sub === 'keygen') {
+    const keysDir = join(ROOT, '.build-keys');
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    mkdirSync(keysDir, { recursive: true });
+    writeFileSync(join(keysDir, 'build-signing-private.pem'), privateKeyPem);
+    writeFileSync(join(keysDir, 'build-signing-public.pem'), publicKeyPem);
+    console.log('build signing keypair generated (gitignored):');
+    console.log(`  private: ${join(keysDir, 'build-signing-private.pem')} -> set BUILD_SIGNING_PRIVATE_PEM (never commit, never print)`);
+    console.log(`  public:  ${join(keysDir, 'build-signing-public.pem')} -> set BUILD_SIGNING_PUBLIC_PEM for verification`);
+    return;
+  }
+
+  if (sub === 'sign') {
+    const gate = releaseGate(ROOT);
+    heading('RELEASE GATE (H10) — typecheck + tests + supply-chain');
+    for (const [step, pass] of Object.entries(gate.steps)) {
+      line(`gate: ${step}`, pass ? 'PASS' : 'FAIL', '');
+    }
+    if (!gate.pass) {
+      console.error('  release gate FAILED — nothing is signed. Fix the failures and re-run.');
+      process.exitCode = 1;
+      return;
+    }
+    const privateKey = process.env.BUILD_SIGNING_PRIVATE_PEM;
+    if (privateKey === undefined) {
+      console.error('  BUILD_SIGNING_PRIVATE_PEM is not set — refusing to sign (fail closed).');
+      console.error('  Dev keys: npm run build:keygen (see DEPLOYMENT.md for the release key ceremony).');
+      process.exitCode = 1;
+      return;
+    }
+    const manifest: BuildManifest = {
+      type: 'asl-build-manifest',
+      version: 1,
+      gitHead: gitHead(ROOT),
+      source: { treeDigest: computeTreeDigest(ROOT) },
+      dependencies: {
+        sbomDigest: sbomDigest(computeSbom(ROOT)),
+        runtimeDeps: computeSbom(ROOT).packages.filter((p) => p.direct && !p.dev).map((p) => p.name),
+      },
+      gate: { typecheck: true, tests: true, supplyChain: true },
+      issuedAt: new Date().toISOString(),
+      issuedBy: process.env.BUILD_SIGNING_IDENTITY ?? 'unidentified-operator',
+    };
+    const signature = signManifest(manifest, privateKey);
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(join(artifactsDir, 'build-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    writeFileSync(join(artifactsDir, 'build-manifest.sig'), `${signature}\n`);
+    line('build manifest signed', 'SIGNED', `tree=${manifest.source.treeDigest.slice(0, 19)}... sbom=${manifest.dependencies.sbomDigest.slice(0, 19)}...`);
+    console.log('  verify before start: npm run build:verify');
+    return;
+  }
+
+  if (sub === 'verify') {
+    const manifestPath = join(artifactsDir, 'build-manifest.json');
+    const sigPath = join(artifactsDir, 'build-manifest.sig');
+    const publicKey = process.env.BUILD_SIGNING_PUBLIC_PEM;
+    if (!existsSync(manifestPath) || !existsSync(sigPath)) {
+      console.error(`  build manifest not issued (${manifestPath}) — refusing (fail closed).`);
+      process.exitCode = 1;
+      return;
+    }
+    if (publicKey === undefined) {
+      console.error('  BUILD_SIGNING_PUBLIC_PEM is not set — refusing to verify (fail closed).');
+      process.exitCode = 1;
+      return;
+    }
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const result = verifyManifest(manifest, readFileSync(sigPath, 'utf8').trim(), publicKey, { repoRoot: ROOT });
+    if (result.valid) {
+      console.log('  build manifest VERIFIED');
+      return;
+    }
+    console.error(`  build manifest REFUSED: ${result.reason} — this artifact does not match the signed release state.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.error(`unknown build subcommand: ${sub} (try gate | sbom | keygen | sign | verify)`);
+  process.exitCode = 1;
+}
+
 const command = process.argv[2] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
 else if (command === 'benchmark') await benchmark();
+else if (command === 'build') await buildCommand();
 else {
-  console.error(`unknown command: ${command} (try demo | attack | benchmark)`);
+  console.error(`unknown command: ${command} (try demo | attack | benchmark | build)`);
   process.exitCode = 1;
 }

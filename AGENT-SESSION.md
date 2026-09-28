@@ -24,6 +24,70 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 25 — 2026-09-28 — opencode/h10-signed-builds
+
+**Did:**
+- **H10 landed** — **ROADMAP Stage 2 H10 (signed builds + supply chain) is
+  [DONE]**. **ADR-024** (Phase 0) written into `DECISIONS.md`: the source tree
+  is the artifact of record; four controls in code, zero new dependencies.
+- Expanded `PROMPTS/H-Track/H10-signed-builds-supply-chain.md` to the full
+  M4–M16 format (was a queue stub) per the kickoff contract, then executed it.
+- `src/supply-chain.ts`: deterministic `ASL-SBOM v1` from the lockfile
+  (`computeSbom`, digest over `canonicalJson`), pin checks (exact versions
+  only), lockfile integrity checks (sha512 + registry-pinned resolved URLs +
+  direct-pin/version match), the `ADMITTED_RUNTIME_DEPS` allowlist
+  (jose — ADR-015, postgres — ADR-018), the drift gate
+  (`runSupplyChainGate` vs committed `artifacts/sbom.json`), the tree digest
+  (`git ls-files -s` blob SHAs — platform-independent, artifacts/ +
+  benchmarks/results.json excluded as outputs), Ed25519
+  `signManifest`/`verifyManifest` (fail-closed, distinct reasons,
+  dependencies-before-source so lockfile edits report
+  `stale-dependencies`), and `releaseGate` (typecheck + tests +
+  supply-chain via npm-cli.js — argv-array, no shell, no .cmd spawn).
+- CLI: `node src/cli.ts build gate|sbom|keygen|sign|verify`; npm scripts
+  `supply-chain`, `sbom`, `build:keygen`, `build:sign`, `build:verify`.
+  Demo section 20 shows the gate + honest `NOT ISSUED` manifest state.
+- `package.json` exact-pinned (`^` ranges gone — the first thing the new pin
+  rule enforces); lockfile root section regenerated (`npm install`, same
+  resolved versions); `artifacts/sbom.json` committed as the review baseline.
+- Local pre-commit hook extended: supply-chain gate runs before
+  typecheck+tests (hooks are untracked; wiring documented in DEPLOYMENT.md).
+- Tests first (red confirmed via targeted run — `ERR_MODULE_NOT_FOUND` before
+  the module existed): 20 cases in `tests/h10-supply-chain.test.ts` (SBOM
+  determinism/completeness 2, pins 4, drift gate 5, tree digest 2,
+  manifest sign/verify 7). Two red-phase contract fixes caught by the tests
+  themselves: the direct-dep pin/lockfile mismatch check, and the
+  stale-reason precedence (dependencies before source).
+- Docs sweep: ADR-024; ROADMAP (H10 [DONE] + mechanism, working order →
+  H12/H13/H15, M18 gate column → H12); CURRENT_STATE (counts 527/512/15,
+  41 modules, what-works, What H10 closed, gap #6 note, reproduce steps);
+  COMPLIANCE (LLM05 weak→partial, SI-7 absent→partial, RS-MA-02 evidence);
+  THREAT_MODEL supply-chain row open→limited; TM-004 (attack paths + controls
+  + test methodology); DEPLOYMENT (Build and release section + ops list);
+  SECURITY_CLAIMS Claim 32.
+
+**Left:**
+- No release manifest issued — signing needs a real key ceremony
+  (`BUILD_SIGNING_PRIVATE_PEM`); the interim unsigned state is documented and
+  the demo reports `NOT ISSUED` honestly. Key custody is env-var
+  (known-gap #4 family); HSM/CI-secret custody, CI wiring, and
+  transparency-log publication are the named upgrade paths (Claim 32).
+- Known-gap #4/#6 residuals unchanged by design (H10 raises the cost of a
+  malicious dependency; it does not close trusted-maintainer risk).
+
+**Next session should:**
+- H12 (secure updates — the build manifest is its verification primitive) or
+  H13/H15; M17 federation remains the parallel track.
+
+**Evidence:**
+- Gate: 527 tests (512 pass, 15 PG-mode skips, 0 fail); typecheck clean;
+  supply-chain gate passes on the committed state. Files: `src/supply-chain.ts`,
+  `src/cli.ts`, `tests/h10-supply-chain.test.ts`, `artifacts/sbom.json`,
+  `package.json`, `package-lock.json`, `.gitignore`, `.git/hooks/pre-commit`
+  (untracked), docs; commits on `feat/h10-signed-builds`.
+
+---
+
 ### SESSION 24 — 2026-09-27 — opencode/prompts-reorg
 
 **Did:**

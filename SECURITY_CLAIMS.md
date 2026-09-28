@@ -1405,3 +1405,81 @@ migration path).
 `Sandbox`) to the agent bypasses the registry's gating exactly as handing out
 the `AuthorizationService` would — the handle is the embedder's credential, and
 the claim covers the registry's surface, not a deployment that leaks it.
+
+---
+
+## Claim 32 — The supply-chain gate fails closed and the build manifest binds source, dependencies, and gate result (H10)
+
+**Claim:** Every commit that changes the dependency set fails the
+supply-chain gate until the SBOM baseline is regenerated in a reviewed PR;
+every runtime dependency is exact-pinned, integrity-hashed, registry-pinned,
+and named in the code-enforced allowlist; and a build manifest — when issued —
+refuses to verify unless the signature is valid, both digests match the live
+repository, and the recorded gate fields all say the full gate passed.
+Verification is fail-closed with distinct reasons; no path prints
+"verified" without a verified signature over a matching recomputed state.
+
+**Mechanism:** `src/supply-chain.ts` (ADR-024). The gate
+(`runSupplyChainGate`) regenerates the deterministic `ASL-SBOM v1` from
+`package-lock.json` (every package: name/version/resolved/integrity/direct/dev,
+canonically sorted, digest = `sha256(canonicalJson(sbom))` — the Claim 26
+primitive) and byte-diffs it against the committed baseline
+`artifacts/sbom.json`: added/removed/version-changed entries fail the gate
+with remediation instructions (regenerate via `npm run sbom -- --write`, name
+the admission ADR). `checkPins` refuses range characters in `package.json`
+(exact versions only — every bump is a visible diff); `checkLockfileIntegrity`
+requires a `sha512-` integrity value and a `https://registry.npmjs.org/`
+resolved URL on every lockfile package and catches a direct-dep pin/lockfile
+version mismatch; `checkRuntimeAllowlist` refuses any runtime dep outside
+`ADMITTED_RUNTIME_DEPS` (jose — ADR-015, postgres — ADR-018). Malformed
+manifest/lockfile/baseline is a violation, never a crash-past. The build
+manifest is Ed25519-signed over its canonical form; `build sign` runs the
+full release gate (typecheck + tests + supply-chain) first and refuses to
+sign on any failure; `verifyManifest` checks structure → gate fields →
+signature → `sbomDigest`+`runtimeDeps` (dependencies first: a lockfile change
+also changes the tree digest, so the specific reason wins) → `treeDigest`
+(over `git ls-files -s` blob SHAs, `artifacts/*` and `benchmarks/results.json`
+excluded — committed-content hashes, platform-independent by construction).
+
+**Threat model:** TM-004 (malicious dependency; direct code change;
+"rewrite the event log" class of host-access attacks extends to the source
+tree), H10's recorded residuals (trusted maintainer going rogue; a malicious
+update to an already-trusted dep inside a pinned version).
+
+**Assumptions:** the Ed25519 release key is held by the honest signer and not
+by an adversary (custody is an env var until ADR-008's KMS path — the same
+known-gap #4 family); `git ls-files` reports the true tracked set; the gate
+runs wherever the commit or release is produced (locally via the pre-commit
+hook — hooks are untracked; CI wiring is documented, not in-repo).
+
+**Evidence:** `tests/h10-supply-chain.test.ts` — 20 cases (written
+red-first): SBOM determinism and direct/transitive/dev completeness with
+integrity + registry assertions; exact pins pass on the committed manifest
+and refuse `^`/`~`/`*`/`>=`/`1.x` fixtures naming each dep; lockfile
+integrity refuses stripped hashes, non-registry URLs, and pin/version
+mismatches; the allowlist refuses an unadmitted dep with the ADR
+instruction; the drift gate catches added/removed/version-changed
+dependencies and a missing/malformed baseline, and passes on the committed
+repository state; the tree digest is deterministic, artifacts-exclusion
+holds, and staging a source change flips it; sign/verify round trip;
+verify refuses tampered payload, foreign key, stale source, stale
+dependencies, and gate-not-passed with distinct reasons; garbage key
+material refuses (verify) and throws (sign).
+
+**Test:** `tests/h10-supply-chain.test.ts`; the gate runs in the pre-commit
+hook and `npm run supply-chain`.
+
+**Known limitations:** the artifact of record is the source tree — there is
+no compiled binary, so provenance binds inputs (source + lockfile + gate),
+not a byte-reproducible output (reproducible builds are Stage 3). The
+manifest binds the git index (committed content): uncommitted working-tree
+changes do not flip `treeDigest` — deploy discipline is verify on a clean
+checkout, and a dirty tree is not a control. No transparency-log publication
+(H11), no CI enforcement, no hardware key custody — each is a named upgrade
+path, not an accepted-by-silence gap.
+
+**Residual risk:** a trusted maintainer going rogue is unchanged by any
+software control here — the gate raises the cost of a malicious dependency
+from "edit a JSON file" to "forge a reviewable diff AND land an admission
+ADR in the same PR". An attacker with host access who also holds the signing
+key can sign anything; that is the key-custody residual, not a gate defect.

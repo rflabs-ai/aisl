@@ -1370,3 +1370,106 @@ portable across processes (M17 federation multi-hop delegation); chain-depth
 policy if workloads demand long chains.
 
 ---
+
+## ADR-024: Signed builds and the supply-chain gate — the source tree is the artifact (H10)
+
+**Context:** H10. The dependency admission policy (ADR-015) exists on paper —
+named-in-ADR, zero-transitive, pinned-with-lockfile, review gate, SBOM diffed
+on build (item 5), no native compilation (item 6) — but item 5 was enforced by
+session discipline, not by code: there is no SBOM artifact, no diff gate, no
+hash verification of the dependency set, no build signing, no provenance
+attestation, and `package.json` carries `^` ranges (the lockfile pins; the
+manifest does not). TM-004 records "add a malicious dependency" as
+detected/limited by policy; a malicious *update* to an already-trusted dep is
+the recorded residual.
+
+**Decision:** Four controls, all in code, zero new dependencies.
+
+1. **The artifact of record is the source tree.** There is no compiled binary
+   — TypeScript ships as source and the process is the runtime. The build
+   input set is every git-tracked file except `artifacts/*` (outputs). Its
+   identity is `treeDigest = sha256(canonicalJson([[path, blobSha], ...]))`
+   over `git ls-files -s`, excluding `artifacts/`. Blob SHAs hash committed
+   content, so the digest is platform-independent (CRLF checkouts cannot
+   break or forge a manifest across machines) and binds the commit, not the
+   working tree.
+2. **SBOM as a review artifact.** `ASL-SBOM v1` is generated from
+   `package-lock.json`: every package entry as
+   `{ name, version, resolved, integrity, direct, dev }`, canonically sorted,
+   hash `sha256(canonicalJson(sbom))` (the Claim 26 primitive). The committed
+   baseline `artifacts/sbom.json` is diffed by the gate: byte drift fails with
+   the added/removed/changed list and instructions to regenerate the baseline
+   and name the admission ADR in the same PR. The SBOM diff IS the dependency
+   review gate — every dependency change becomes a reviewable artifact.
+3. **Pinning with hash verification.** Exact versions only in `package.json`
+   (range characters `^ ~ * > < x` refuse); every lockfile package entry must
+   carry a `sha512-` integrity value; `resolved` must be
+   `https://registry.npmjs.org/...`; the runtime dependency set must equal the
+   code-enforced `ADMITTED_RUNTIME_DEPS` (`jose` — ADR-015, `postgres` —
+   ADR-018). A new runtime dep fails the gate until an admission ADR and the
+   allowlist change land in the same reviewed PR.
+4. **Signed build manifest (SLSA-shaped provenance).** An Ed25519 signature
+   (node:crypto — no dependency) over the canonical manifest
+   `{ type, version, gitHead, source: { treeDigest }, dependencies:
+   { sbomDigest, runtimeDeps }, gate: { typecheck, tests, supplyChain },
+   issuedAt, issuedBy }`, written to `artifacts/build-manifest.json` +
+   `.sig`. `build sign` runs the full gate (typecheck + tests +
+   supply-chain gate) and refuses to sign on any failure. `build verify`
+   recomputes both digests from the live repo, demands the recorded gate
+   fields are `pass`, and verifies the signature fail-closed with distinct
+   reasons (tampered payload / stale tree / stale dependencies / gate not
+   passed / wrong key / missing manifest). Deploy discipline
+   (DEPLOYMENT.md): verify before start.
+
+Keys: `BUILD_SIGNING_PRIVATE_PEM` / `BUILD_SIGNING_PUBLIC_PEM` env vars (the
+ADR-008 posture). `build keygen` writes dev keys to gitignored `.build-keys/`
+and prints paths, never key material. No production key ships in this change:
+issuing one is a key ceremony (DEPLOYMENT.md), and the unsigned interim state
+is honest — the gate runs, the manifest is "not issued".
+
+**Alternatives:**
+- **Sigstore/cosign/in-toto/SLSA tooling** — rejected: runtime or CI
+  dependencies that would fail the admission policy they exist to enforce.
+  The manifest is deliberately ASL-SBOM-shaped and small; upgrading to
+  standard formats is a mechanical rewrite when a verifier demands it.
+- **CycloneDX/SPDX exact conformance** — the format was never the control;
+  the diff and the signature are. Declaring conformance without the tooling
+  would be an overclaim.
+- **Digest the working tree bytes** — rejected: platform-dependent (CRLF),
+  forgeable by a dirty tree, and not bound to a commit. Blob SHAs bind the
+  git index.
+- **Hash the lockfile only** — insufficient: it misses the source tree, which
+  for a source-artifact project is the payload an attacker actually wants to
+  modify.
+
+**Reasoning:** The gate turns ADR-015's prose into checks that refuse. Each
+violation names the dep and the rule; each refusal names the reason. The
+manifest is the first artifact in the repo that binds "what the gate approved"
+to "what is on disk" under a signature, which is the seam every later
+supply-chain upgrade (CI provenance, transparency log, controlled update
+channels H12) extends rather than replaces.
+
+**Security implications:** Closes the enforcement gap between the admission
+policy and the repository. Does NOT close: signing-key custody (env var,
+known-gap #4 family), a maintainer with repo-write replacing the allowlist
+and regenerating everything in one reviewed-but-coerced PR (the ADR-015
+"trusted maintainer" residual), or a compromised machine running the gate.
+The gate raises the cost of a malicious dependency from "edit a JSON file"
+to "forge a reviewable diff AND land an ADR in the same PR".
+
+**Tradeoffs:** One more pre-commit step (fast: fs reads + hashing). Exact
+pins move update burden to humans (deliberate — every bump is a diff).
+Signing requires the gate to run first (release-time cost, by design).
+
+**Residual risk (ponytail):** signing key in an env var, no transparency log,
+no CI — `ponytail: no CI in-repo; gate runs at pre-commit + release sign —
+wire `npm run supply-chain` into CI when a pipeline exists; transparency-log
+publication is H11/Stage-3`. Residual accepted: a trusted maintainer going
+rogue (ROADMAP H10 residual) is unchanged by any software control here.
+
+**Future migration path:** CI wiring; transparency-log publication of the
+manifest + SBOM (H11); key custody per ADR-008; H12 consumes the manifest as
+the update-verification primitive (signed updates verify the manifest
+signature, not a hash somebody pasted in a chat).
+
+---

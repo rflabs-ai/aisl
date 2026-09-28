@@ -49,7 +49,7 @@ at this stage.
 | Sandbox escape | none — `LocalSandbox` is not isolation | **open** | arbitrary code runs in-process |
 | Evidence tampering | hash chain + per-event Ed25519 + head-hash anchor + append-only triggers | **detected**; durable when anchor lives outside runtime trust domain | anchor rewrite by an attacker with host access to both the SQLite store and the anchor; key compromise |
 | Policy tampering (operator) | none | **open** | B10 |
-| Supply chain | none | **open** | no pinning, signing, or SBOM |
+| Supply chain | supply-chain gate (SBOM diff vs committed baseline, exact pins, sha512 integrity, runtime-dep allowlist) + signed build manifest verified at deploy (H10) | **limited** | signing-key custody (env var); a coerced maintainer; no transparency log |
 | Model provider compromise | no provider is wired in | **not applicable yet** | becomes critical at provider integration |
 | Replay | single-use consumption, expiry | **mitigated** | multi-node consistency not solved |
 

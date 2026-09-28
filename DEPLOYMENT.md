@@ -188,7 +188,6 @@ ingress. Its own in-process story is deliberately modest: it binds
   artifacts, model packaging, transfer manifests.
 
 ### Sandbox lifecycle (M16, ADR-021)
-
 Who creates, who destroys, and what happens on process exit:
 
 - **Who creates:** the embedder/runtime — not the agent. `SandboxRegistry.create`
@@ -217,6 +216,48 @@ Who creates, who destroys, and what happens on process exit:
   present. Without Docker the sandbox degrades to in-process execution and
   says so — treat that as a deployment misconfiguration, not a mode.
 
+### Build and release (H10, ADR-024)
+
+The artifact of record is the source tree (TypeScript ships as source). The
+release flow is gate → sign → verify-before-start:
+
+1. **Gate (every commit, every release):** `npm run supply-chain` — generates
+   the deterministic `ASL-SBOM v1` from the lockfile and diffs it against the
+   committed `artifacts/sbom.json`, enforces exact version pins, sha512
+   integrity + `registry.npmjs.org` resolved URLs on every lockfile package,
+   and the `ADMITTED_RUNTIME_DEPS` allowlist. Dependency changes fail until
+   the baseline is regenerated (`npm run sbom -- --write`) and the admission
+   ADR is named in the same reviewed PR. The local pre-commit hook runs this
+   gate (hooks are untracked — copy `.git/hooks/pre-commit` on a fresh clone;
+   wire `npm run supply-chain` into CI when a pipeline exists). CI installs
+   with `npm ci` — never `npm install` (drift prevention).
+2. **Sign (release only):** `npm run build:sign` — runs the full release gate
+   (typecheck + tests + supply-chain), then Ed25519-signs the canonical
+   manifest binding `treeDigest` (git blob SHAs over tracked files,
+   `artifacts/*` and `benchmarks/results.json` excluded — outputs, not
+   inputs), `sbomDigest`, `gitHead`, and the gate result; writes
+   `artifacts/build-manifest.json` + `.sig`. Requires
+   `BUILD_SIGNING_PRIVATE_PEM`; refuses to sign on any gate failure.
+3. **Verify (before every start):** `npm run build:verify` — recomputes both
+   digests from the live tree and the lockfile, demands the recorded gate
+   fields are true, and verifies the Ed25519 signature with
+   `BUILD_SIGNING_PUBLIC_PEM`. Fail-closed with distinct reasons:
+   `bad-signature` / `stale-source` / `stale-dependencies` /
+   `gate-not-passed` / `not-a-build-manifest`. A start script in a controlled
+   deployment runs this before boot; refusal is a stop condition, not a
+   warning.
+4. **Key custody:** dev keys via `npm run build:keygen` into gitignored
+   `.build-keys/`. The production release key lives OUTSIDE the repo (CI
+   secret or HSM per the hardware tier; ceremony documented in the operator's
+   key-management procedure — ADR-008 is the rotation/migration path). Env
+   vars: `BUILD_SIGNING_PRIVATE_PEM` (sign), `BUILD_SIGNING_PUBLIC_PEM`
+   (verify), `BUILD_SIGNING_IDENTITY` (recorded in the manifest as `issuedBy`).
+   Key material is never printed.
+5. **Residuals:** no transparency-log publication of the manifest/SBOM
+   (H11/Stage-3); no CI enforcement in-repo; a coerced maintainer with
+   repo-write can still land a reviewed PR — H10 raises the cost, it does not
+   remove the trusted-maintainer risk (IMPOSSIBLE+).
+
 ## 2. Hardware tiers
 
 | Tier | Compute | Storage | Keys | Network |
@@ -242,7 +283,8 @@ Security is not only software. These belong on the roadmap and in runbooks:
 - **Vulnerability disclosure:** published policy, safe harbour, response SLAs.
 - **Penetration testing:** annual external test, plus a standing internal red team.
 - **Supply-chain management:** SBOM for every release, pinning, provenance,
-  vendor review.
+  vendor review — the SBOM/pinning/provenance parts are built (H10, above);
+  vendor review stays operational.
 - **Vendor management:** security review before integration, annual re-review.
 - **Backups:** 3-2-1, encrypted, restore tested on a schedule with recorded results.
 - **DR / business continuity:** declared RPO/RTO, annual exercise, documented

@@ -138,10 +138,11 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 
 - **Working order** (pick list, AGENT-SESSION SESSION 19): ~~H1 [NEXT]~~
   **H1 [DONE]** (ADR-023) — it was the root of trust for everything above it.
-  Next: H10, H12, H13, H15. **M17 (federation, ADR-022) runs as a parallel
-  track** — disjoint surfaces; its dispatch phase uses the human-gated M4
-  flow. The remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized
-  after those four clear.
+  ~~Next: H10, H12, H13, H15~~ **H10 [DONE]** (ADR-024) — signed builds and
+  the supply-chain gate. Next: H12, H13, H15. **M17 (federation, ADR-022)
+  runs as a parallel track** — disjoint surfaces; its dispatch phase uses the
+  human-gated M4 flow. The remaining ten (H2–H9, H11, H14) stay open [ ]
+  until prioritized after those three clear.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
@@ -257,7 +258,7 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Residual risk:** zero-day malware; polyglot files.
 - **Class:** P/E.
 
-### H10 — Signed builds and supply-chain security
+### H10 — Signed builds and supply-chain security **[DONE]** (ADR-024)
 
 - **Attack surface:** dependencies, build pipeline, registry, developer laptops.
 - **Failure modes:** malicious dependency; compromised CI; unsigned artifact
@@ -268,6 +269,19 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
   dependency update review gate.
 - **Residual risk:** a trusted maintainer going rogue; compiler-level attacks.
 - **Class:** E/HA.
+
+**Closed (ADR-024):** the source tree IS the artifact — `src/supply-chain.ts`
++ `npm run supply-chain` (the gate: deterministic `ASL-SBOM v1` from the
+lockfile, diffed against the committed `artifacts/sbom.json` baseline; exact
+version pins; sha512 integrity + registry URL on every lockfile entry; the
+`ADMITTED_RUNTIME_DEPS` allowlist — a new runtime dep fails the gate until an
+admission ADR lands in the same PR); `build sign` runs the full release gate
+(typecheck + tests + supply-chain) and Ed25519-signs a build manifest binding
+`treeDigest` (git blob SHAs — platform-independent), `sbomDigest`, `gitHead`,
+and the gate result; `build verify` is the deploy-time check, fail-closed with
+distinct reasons. Tests-first suite: `tests/h10-supply-chain.test.ts` (20).
+The gate is wired to the local pre-commit hook; CI wiring, transparency-log
+publication, and hardware key custody are the documented upgrade paths.
 
 ### H11 — Tamper-evident evidence (signatures, anchoring, retention)
 
@@ -373,7 +387,7 @@ rationale (why the client's own core promise requires it).
 | Milestone | Client | Why structurally necessary | Gate | Status |
 | --- | --- | --- | --- | --- |
 | M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[ ]** |
-| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H10/H12); static device key (H2); unattended fail-closed (H13/H15) | H10/H12 partially | **[ ]** |
+| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 | **[ ]** |
 | M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
 | M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
 
@@ -538,7 +552,7 @@ results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
 
 Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. The open
 frontier is Stage 2 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE],
-next H10 → H12 → H13 → H15) plus M17 federation.
+H10 [DONE], next H12 → H13 → H15) plus M17 federation.
 
 ### M0 — Architectural foundation (done)
 

@@ -1,9 +1,9 @@
 {
   "type": "asl-build-manifest",
   "version": 1,
-  "gitHead": "f1557460f1f6066156dd1e20b9759d59fa3388aa",
+  "gitHead": "fb09a30c5d6111b13869e81ce559b81f2f6d813f",
   "source": {
-    "treeDigest": "sha256-98f519cd408fcdd50fe73d245e5c029b63644a2eb181831b8a94b2f2cba8d088"
+    "treeDigest": "sha256-8ae1473fdb1d36e1ef2ac2c944af4349b2d566881458ba9f25ae1a8db1e31e28"
   },
   "dependencies": {
     "sbomDigest": "sha256-14b0008eb4572f506ec4a4c4e750a692b5f4d34443e5dd38e630fc944581b116",
@@ -17,6 +17,6 @@
     "tests": true,
     "supplyChain": true
   },
-  "issuedAt": "2026-09-29T23:04:05.936Z",
-  "issuedBy": "dev key 2026-09-28"
+  "issuedAt": "2026-09-29T23:06:06.452Z",
+  "issuedBy": "dev key 2026-09-29"
 }

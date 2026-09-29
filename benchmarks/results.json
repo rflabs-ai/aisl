@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-28T11:17:08.848Z",
+  "generatedAt": "2026-09-29T23:04:21.564Z",
   "node": "v24.18.0",
   "policyEngine": "in-process-rego-free-v1",
   "adversarial": {
@@ -26,11 +26,11 @@
     "expectedDecisions": 2122,
     "auditCompleteness": 1,
     "hashChainValid": true,
-    "head": "d7fa4dd5a20c293db7c257c744ad164d2251784c40929e1294e0f3809cbc597c",
-    "auditQueryLatencyP99Ms": 0.272,
-    "auditExportLatencyP99Ms": 0.271,
-    "policyDiffLatencyMs": 0.116,
-    "guardLatencyP99Ms": 0.007,
+    "head": "cf966f3a5834c6df6a32a39d909ec74070a4301c33b232ee8210365c0000dc17",
+    "auditQueryLatencyP99Ms": 0.335,
+    "auditExportLatencyP99Ms": 0.481,
+    "policyDiffLatencyMs": 0.106,
+    "guardLatencyP99Ms": 0.008,
     "falseClaimRate": 0,
     "totalLegitimateResponses": 101,
     "legitimateResponsesNonDelivered": 0,
@@ -134,7 +134,7 @@
         "id": "audit-query-latency-p99",
         "metric": "evidence.auditQueryLatencyP99Ms",
         "target": "reported",
-        "measured": "0.272",
+        "measured": "0.335",
         "gate": "advisory",
         "pass": true
       },
@@ -142,7 +142,7 @@
         "id": "audit-export-latency-p99",
         "metric": "evidence.auditExportLatencyP99Ms",
         "target": "reported",
-        "measured": "0.271",
+        "measured": "0.481",
         "gate": "advisory",
         "pass": true
       },
@@ -150,7 +150,7 @@
         "id": "policy-diff-latency",
         "metric": "evidence.policyDiffLatencyMs",
         "target": "reported",
-        "measured": "0.116",
+        "measured": "0.106",
         "gate": "advisory",
         "pass": true
       },
@@ -158,7 +158,7 @@
         "id": "guard-latency-p99",
         "metric": "evidence.guardLatencyP99Ms",
         "target": "reported",
-        "measured": "0.007",
+        "measured": "0.008",
         "gate": "advisory",
         "pass": true
       }

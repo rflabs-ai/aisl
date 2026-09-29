@@ -24,14 +24,16 @@ was left, and what the next session should pick up.
 
 ---
 
-### SESSION 26 — 2026-09-28 — opencode/h10-key-ceremony
+### SESSION 26 — 2026-09-29 — opencode/h10-key-ceremony
 
 **Did:**
 - H10 key ceremony (dev key) + first signed build manifest. Keypair generated
   via `npm run build:keygen` into gitignored `.build-keys/`; public-key
   fingerprint recorded
   (`sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`);
-  `BUILD_SIGNING_IDENTITY = dev key 2026-09-28`.
+  `BUILD_SIGNING_IDENTITY = dev key 2026-09-29` (re-signed once to fix
+  a date label in the first issue — post-signing edits stale a manifest; the
+  correction cycle is edit -> re-sign -> verify).
 - Docs recorded BEFORE signing (the manifest binds the docs tree):
   DEPLOYMENT.md ceremony record + custody model; COMPLIANCE SI-7 status;
   H10 prompt resolution updated; CURRENT_STATE artifacts line.

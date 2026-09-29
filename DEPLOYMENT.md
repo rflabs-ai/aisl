@@ -254,10 +254,10 @@ release flow is gate → sign → verify-before-start:
    (verify), `BUILD_SIGNING_IDENTITY` (recorded in the manifest as `issuedBy`).
    Key material is never printed.
 
-   **Ceremony record (2026-09-28, dev key):** first keypair generated via
+   **Ceremony record (2026-09-29, dev key):** first keypair generated via
    `npm run build:keygen`; public-key fingerprint
    `sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`;
-   `BUILD_SIGNING_IDENTITY = dev key 2026-09-28`. Custody: working copy
+   `BUILD_SIGNING_IDENTITY = dev key 2026-09-29`. Custody: working copy
    in gitignored `.build-keys/`; durable copy in a dedicated encrypted
    container on a whole-drive-encrypted external SSD plus an offline bank-HDD
    copy; container passphrase and fingerprint in a password manager. The

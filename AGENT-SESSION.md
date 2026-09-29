@@ -45,6 +45,9 @@ was left, and what the next session should pick up.
   flips `NOT ISSUED` → `VERIFIED`.
 - Manifest + signature committed. Safe by design: `artifacts/` is excluded
   from the tree digest, so the commit does not invalidate the manifest.
+- Custody runbook ("Key custody runbook") added to DEPLOYMENT.md and the
+  ceremony record corrected to durable-copy-pending-hardware; manifest
+  re-signed after the runbook commit.
 
 **Left:**
 - User custody steps delivered (encrypted container on a whole-drive-encrypted

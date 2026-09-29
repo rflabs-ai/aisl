@@ -257,10 +257,12 @@ release flow is gate → sign → verify-before-start:
    **Ceremony record (2026-09-29, dev key):** first keypair generated via
    `npm run build:keygen`; public-key fingerprint
    `sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`;
-   `BUILD_SIGNING_IDENTITY = dev key 2026-09-29`. Custody: working copy
-   in gitignored `.build-keys/`; durable copy in a dedicated encrypted
-   container on a whole-drive-encrypted external SSD plus an offline bank-HDD
-   copy; container passphrase and fingerprint in a password manager. The
+   `BUILD_SIGNING_IDENTITY = dev key 2026-09-29`. Custody (durable
+   copy pending hardware): working copy in gitignored `.build-keys/`; the
+   durable copy is planned for a dedicated encrypted container on a
+   whole-drive-encrypted external SSD plus an offline bank-HDD copy
+   (procedure: "Key custody runbook" below); container passphrase and
+   fingerprint go in a password manager. The
    public key is distributed out-of-band and never committed — an in-repo
    key could be swapped together with an attacker-signed manifest. The first
    signed manifest landed the same day (`artifacts/build-manifest.json` +
@@ -269,8 +271,46 @@ release flow is gate → sign → verify-before-start:
    private key, record the rotation.
 5. **Residuals:** no transparency-log publication of the manifest/SBOM
    (H11/Stage-3); no CI enforcement in-repo; a coerced maintainer with
-   repo-write can still land a reviewed PR — H10 raises the cost, it does not
+   repo-write can still land a reviewed PR - H10 raises the cost, it does not
    remove the trusted-maintainer risk (IMPOSSIBLE+).
+
+### Key custody runbook (operator steps)
+
+One-time procedure for a new signing key (or after a rotation). Steps that
+touch secrets are human-only: passphrases never enter an agent session, a
+shell command line, a chat, or a repository file.
+
+1. **Know what you protect.** The private PEM (~120 bytes) is the signing
+   identity; the public PEM is shareable. Working copies live in gitignored
+   `.build-keys/` and are what `build:sign` reads.
+2. **Encrypt the carrier drive.** Windows Pro: BitLocker To Go (right-click
+   the drive -> Turn on BitLocker; save the recovery key). Windows Home:
+   VeraCrypt -> Create Volume -> encrypt a non-system partition. Use a strong
+   unique passphrase; store it in the password manager. Result: someone who
+   finds the drive sees ciphertext only.
+3. **Build the key container (second layer).** Select both PEM files in
+   Explorer -> 7-Zip -> "Add to archive": format `7z`, AES-256, **Encrypt
+   file names ON**, long unique passphrase. Result: `build-signing-keys.7z`.
+   Never store loose PEMs on the carrier.
+4. **Place copies.** `build-signing-keys.7z` -> the encrypted SSD (e.g.
+   `E:\asl-backup\`) and -> the offline bank-HDD. The working copies stay in
+   `.build-keys/` for day-to-day signing; never delete them.
+5. **Password-manager entry.** Fingerprint (public), container passphrase,
+   copy locations, ceremony date. The fingerprint is how a restored or
+   swapped key is detected.
+6. **Restore drill (do not skip).** Extract the `.7z` into a temp folder,
+   fingerprint the extracted public key, compare against the recorded value:
+
+   ```powershell
+   node -e "const c=require('node:crypto'),f=require('node:fs');const k=c.createPublicKey(f.readFileSync('<extracted>\build-signing-public.pem','utf8'));console.log('sha256-'+c.createHash('sha256').update(k.export({type:'spki',format:'der'})).digest('hex'))"
+   ```
+
+   A matching output proves the backup is real. Delete the temp extraction.
+7. **Rules.** Never commit, print, email, or cloud-sync the private key;
+   GitHub is for projects only. Re-sign manifests only at release points.
+   Lost or stolen carrier -> treat as compromise -> rotate (ADR-008 path):
+   new pair, re-sign, destroy the old private key, record the rotation here
+   and in the session log.
 
 ## 2. Hardware tiers
 

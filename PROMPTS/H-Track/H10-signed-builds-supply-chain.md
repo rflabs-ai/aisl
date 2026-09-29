@@ -202,8 +202,9 @@ maintainer makes the process control real.
   SECURITY_CLAIMS Claim 32, AGENT-SESSION SESSION 25.
 - First manifest issued 2026-09-29 after the dev-key ceremony (fingerprint
   `sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`;
-  identity `dev key 2026-09-29`; encrypted SSD container + offline
-  bank-HDD custody, passphrase + fingerprint in a password manager). Re-sign
+  identity `dev key 2026-09-29`; custody model + operator runbook in
+  DEPLOYMENT.md — durable copy pending SSD arrival, passphrase + fingerprint
+  go to a password manager). Re-sign
   at release points — everyday commits make a manifest stale by design
   (`stale-source`). Residuals per Claim 32: dev-key custody (HSM/CI is the
   upgrade), no CI enforcement, no transparency log, trusted-maintainer risk

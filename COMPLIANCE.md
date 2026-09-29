@@ -44,7 +44,7 @@ implementation needed / external validation needed.
 | SC-12 key management | capability key (env) | weak | env var, no rotation, no HSM | — | ADR-008 | yes |
 | SC-28 protection at rest | none | absent | — | — | encryption | yes |
 | SI-10 information input validation | `parseModelOutput` | implemented | model output only | parser tests | extend to all inputs | no |
-| SI-7 software integrity | build manifest signing (H10) | partial | release manifests unsigned until a key ceremony runs `npm run build:sign`; gate verifies pins/integrity/SBOM | `build verify` output + manifest + signature | CI signing + key custody (ADR-008) | yes |
+| SI-7 software integrity | build manifest signing (H10) | partial | dev-key custody (encrypted SSD + offline bank HDD); first manifest signed 2026-09-28; gate verifies pins/integrity/SBOM | `build verify` output + manifest + signature | CI signing + HSM custody (ADR-008) | yes |
 
 ## NIST SP 800-207 (Zero Trust)
 

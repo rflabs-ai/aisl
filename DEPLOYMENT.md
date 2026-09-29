@@ -253,6 +253,20 @@ release flow is gate → sign → verify-before-start:
    vars: `BUILD_SIGNING_PRIVATE_PEM` (sign), `BUILD_SIGNING_PUBLIC_PEM`
    (verify), `BUILD_SIGNING_IDENTITY` (recorded in the manifest as `issuedBy`).
    Key material is never printed.
+
+   **Ceremony record (2026-09-28, dev key):** first keypair generated via
+   `npm run build:keygen`; public-key fingerprint
+   `sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`;
+   `BUILD_SIGNING_IDENTITY = dev key 2026-09-28`. Custody: working copy
+   in gitignored `.build-keys/`; durable copy in a dedicated encrypted
+   container on a whole-drive-encrypted external SSD plus an offline bank-HDD
+   copy; container passphrase and fingerprint in a password manager. The
+   public key is distributed out-of-band and never committed — an in-repo
+   key could be swapped together with an attacker-signed manifest. The first
+   signed manifest landed the same day (`artifacts/build-manifest.json` +
+   `.sig`; `gitHead` inside the manifest records the commit it was signed
+   from). Rotation is the ADR-008 path: new pair, re-sign, destroy the old
+   private key, record the rotation.
 5. **Residuals:** no transparency-log publication of the manifest/SBOM
    (H11/Stage-3); no CI enforcement in-repo; a coerced maintainer with
    repo-write can still land a reviewed PR — H10 raises the cost, it does not

@@ -24,6 +24,44 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 26 — 2026-09-28 — opencode/h10-key-ceremony
+
+**Did:**
+- H10 key ceremony (dev key) + first signed build manifest. Keypair generated
+  via `npm run build:keygen` into gitignored `.build-keys/`; public-key
+  fingerprint recorded
+  (`sha256-caa343b2a11a22e941727013950c6b95d402fb0f05776848d61fd43ec1518cb7`);
+  `BUILD_SIGNING_IDENTITY = dev key 2026-09-28`.
+- Docs recorded BEFORE signing (the manifest binds the docs tree):
+  DEPLOYMENT.md ceremony record + custody model; COMPLIANCE SI-7 status;
+  H10 prompt resolution updated; CURRENT_STATE artifacts line.
+- `npm run build:sign` — release gate (typecheck + tests + supply-chain) ran
+  green inside it, then the manifest was Ed25519-signed and written to
+  `artifacts/build-manifest.json` + `.sig` (`gitHead` records the commit it
+  was signed from).
+- `npm run build:verify` VERIFIED against the live tree; demo section 20
+  flips `NOT ISSUED` → `VERIFIED`.
+- Manifest + signature committed. Safe by design: `artifacts/` is excluded
+  from the tree digest, so the commit does not invalidate the manifest.
+
+**Left:**
+- User custody steps delivered (encrypted container on a whole-drive-encrypted
+  SSD + offline bank HDD + passphrase/fingerprint in a password manager);
+  pending user execution. Working copy stays in `.build-keys/` until then.
+- Re-signing cadence: release points only; everyday commits show
+  `stale-source` by design.
+
+**Next session should:**
+- H12 (secure updates — the manifest is its update-verification primitive) or
+  H13/H15; M17 federation parallel.
+
+**Evidence:**
+- Release gate inside `build:sign`: 527 tests (512 pass, 15 PG skips, 0 fail),
+  typecheck clean, supply-chain green. Fingerprint above; manifest at
+  `artifacts/build-manifest.json`; verify output.
+
+---
+
 ### SESSION 25 — 2026-09-28 — opencode/h10-signed-builds
 
 **Did:**

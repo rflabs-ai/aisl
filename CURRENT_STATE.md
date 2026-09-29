@@ -23,8 +23,9 @@ corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json`),
 a static operator UI (`tools/ui/index.html`), developer setup scripts
 (`scripts/setup.ps1`, `scripts/setup.sh`), the supply-chain gate artifacts
-(`artifacts/sbom.json` — the committed SBOM review baseline), and this
-documentation set.
+(`artifacts/sbom.json` — the committed SBOM review baseline;
+`artifacts/build-manifest.json` + `.sig` — the first signed release manifest),
+and this documentation set.
 
 Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
 `postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps),

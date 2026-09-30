@@ -1483,3 +1483,68 @@ software control here — the gate raises the cost of a malicious dependency
 from "edit a JSON file" to "forge a reviewable diff AND land an admission
 ADR in the same PR". An attacker with host access who also holds the signing
 key can sign anything; that is the key-custody residual, not a gate defect.
+
+---
+
+## Claim 33 — Cross-repo evidence anchoring and capability-gated dispatch (M17)
+
+**Claim:** A federation client can register its event-log head-hash with ASL,
+and the digest is recorded in ASL's own append-only signed event log — an
+attestation of the client's evidence that exists independently of the client's
+repo. A claimed previous head that disagrees with the tenant's last accepted
+head is flagged as `tamper`. A client can read back a capability request's
+outcome and, once a human approves it, the minted capability projection. Both
+routes derive the tenant from the verified principal, refuse a mismatched body
+tenant, and carry no plaintext project content (a sha256 digest and event
+counts only). ASL mints no authority for a federation client that a human did
+not approve through the ordinary M4 flow.
+
+**Mechanism:** `src/rest-anchors.ts` (`AnchorRegistry`, `POST /v1/anchors`)
+and `src/rest-sessions.ts` (`GET /v1/capability-requests/:id`, backed by
+`CapabilityRequestService.capabilityFor`). `POST /v1/anchors` validates
+`headHash`/`previousHeadHash` as sha256 hex, requires `tenant ===
+ctx.principal.tenantId` (else `tenant-mismatch`), and appends an
+`anchor.register` event (action added to `KnownAction`) carrying the digest,
+count, and a `tamper` flag when the claimed previous head mismatches the last
+accepted head for that tenant. `GET /v1/capability-requests/:id` returns the
+whitelisted request projection plus, when approved, the same
+`projectCapability` projection the approval response uses (no signature/issuer
+internals). Registration is wired into `createRestApi`; the control-plane
+client (`control-plane/src/asl/`) is eligible to call them.
+
+**Threat model:** TM-004 (host-access rewrite of client evidence), TM-003
+(cross-tenant reach), the M17 control-plane thesis that "external verification
+decides" — a client cannot self-attest without ASL's durable record.
+
+**Assumptions:** ASL's own event log is append-only and signed (Claims 8/19);
+the federation client is a registered principal with a resolvable bearer token;
+client-side bypass is outside ASL's boundary (a client that skips the gate is
+its own failure, not ASL's).
+
+**Evidence:** `tests/m17-federation.test.ts` — 13 cases (written red-first):
+anchor round trip (register → `anchor.register` event → chained anchor with no
+tamper → mismatched previous head flags tamper on response and event);
+tenant-from-principal refusal with no evidence on a refused anchor; non-sha256
+refusal; unauthenticated 401; a throwing event append leaves the registry's
+last-accepted head unchanged (session-audit ticket 01 — the in-memory head
+advances only when the evidence append landed); capability status pending
+(no capability), approved (capability scope equals the approved scope, no
+signature leaked), denied, 404 unknown, 403 cross-tenant, 401 unauthenticated.
+
+**Test:** `tests/m17-federation.test.ts`.
+
+**Known limitations:** the anchor registry is in-memory, so "first anchor" vs
+"lost predecessor" is not distinguished across an ASL restart — mismatch
+detection is advisory; the durable attestation is the `anchor.register` event
+itself, which the EventStore already persists append-only (upgrade: a
+persisted accepted-head table). Tenant isolation remains the shared-process
+residual (ASL known-gap #7); H8 closes it for non-personal tenants. Anchoring
+is non-blocking-but-loud on the control-plane side; the dispatch gate is
+fail-closed (H15 direction). Client-side bypass, worker sandbox execution, and
+rate limiting on the federation seam are out of M17 scope (named in the
+prompt's skip list).
+
+**Residual risk:** a client that holds a valid bearer token and never calls the
+gate is unconstrained by ASL — the federation makes authorization and evidence
+available and durable, it cannot make a non-cooperating client ask.
+

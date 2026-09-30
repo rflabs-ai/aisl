@@ -139,6 +139,21 @@ export function registerSessionRoutes(api: RestApi, deps: SessionRouteDeps): voi
     return { status: 200, body: { requests: pending } };
   });
 
+  api.addRoute('GET', '/v1/capability-requests/:id', (ctx): RestResponse => {
+    const id = ctx.params.id ?? '';
+    const request = deps.requests.get(id);
+    if (request === undefined) throw new RestRejection(404, 'not-found');
+    if (request.tenantId !== ctx.principal.tenantId) throw new RestRejection(403, 'tenant-mismatch');
+    const capability = deps.requests.capabilityFor(id);
+    return {
+      status: 200,
+      body: {
+        request: projectRequest(request),
+        ...(capability !== undefined ? { capability: projectCapability(capability) } : {}),
+      },
+    };
+  });
+
   api.addRoute('POST', '/v1/capability-requests/:id/approvals', async (ctx): Promise<RestResponse> => {
     if (!hasMfa(ctx.auth)) throw new RestRejection(403, 'approval-mfa-required');
     const id = ctx.params.id ?? '';

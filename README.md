@@ -75,6 +75,18 @@ Optional environment:
 Convenience setup: `scripts/setup.ps1` (Windows) or `scripts/setup.sh`; pass
 `-WithPostgres` / `--with-postgres` to bootstrap a Postgres 16 container.
 
+## Running ASL
+
+ASL is a **library + proof suite**, not a running service. There is no
+start/daemon command today — the commands above are the whole surface. The M14
+REST API (`createRestApi`) exists and is fully exercised by the test suite, but
+it is wired to an HTTP server **only in tests**; there is no production
+entrypoint yet. Cross-repo federation (control-plane as an ASL client,
+ADR-022) is **opt-in and currently off**; turning it on is what would require a
+`serve` command, which is not built. For how to run every project in this stack
+(start/stop/status/ports, on-demand vs always-on), see
+`../shared-docs/RUNBOOK.md`.
+
 ## Status
 
 Stage 0 (conventional engineering) is **[DONE]**, and Stage 1/2 milestones

@@ -1,22 +1,24 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H10 — signed builds and supply-chain security
-(ADR-024), the second Stage 2 (HARD) item. Stage 0 (ADR-020) and Stage 1
-(M16, ADR-021) are fully [DONE]: deterministic document ingestion, read-only
-Git integration, the capability-request persistence seam, the developer setup
-scripts, the minimal UI served by the M14 server, and the sandbox lifecycle —
-zero new runtime dependencies. H1 (ADR-023, signed delegation) and H10
-(ADR-024, supply-chain gate + signed build manifests) are the landed Stage 2
-items. M14's REST API, M12's Postgres control plane, M13's runtime realism,
-M11's authz depth and M10's SLO gate remain the non-regression baseline.
-Next frontier: M17 federation (ADR-022) and H12/H13/H15.
+Honest snapshot. Updated after M17 — federation, control-plane as the first
+federation client (ADR-022). Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
+fully [DONE]: deterministic document ingestion, read-only Git integration, the
+capability-request persistence seam, the developer setup scripts, the minimal
+UI served by the M14 server, and the sandbox lifecycle — zero new runtime
+dependencies. H1 (ADR-023, signed delegation) and H10 (ADR-024, supply-chain
+gate + signed build manifests) are the landed Stage 2 items. M17 closed both
+ASL-side REST gaps the control-plane client found (anchor registration,
+capability-request status) with no new runtime dependencies. M14's REST API,
+M12's Postgres control plane, M13's runtime realism, M11's authz depth and
+M10's SLO gate remain the non-regression baseline.
+Next frontier: H12/H13/H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~9,600 lines of source across 41 modules
-(`src/` — `ingestion.ts`, `git-reader.ts`, and `supply-chain.ts` are the
-latest additions), 527 tests
-(`tests/`, `security-tests/`; 512 pass, 15 Postgres-mode tests skip cleanly
+TypeScript foundation on Node 24, ~9,700 lines of source across 42 modules
+(`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`, and
+`rest-anchors.ts` are the latest additions), 540 tests
+(`tests/`, `security-tests/`; 525 pass, 15 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -308,14 +310,24 @@ Dev dependencies: `typescript`, `@types/node`.
 - Verification plane: post-execution checks with recorded results.
 - Demo (`npm run demo`), attack harness (`npm run attack`), benchmark
   (`npm run benchmark`).
+- **Federation client authority + evidence (M17, ADR-022):** control-plane is
+  the first client over the M14 REST seam, no code merge. `POST /v1/anchors`
+  (`src/rest-anchors.ts`) accepts a foreign evidence-log head-hash — tenant
+  from the verified principal (body tenant must match, else `tenant-mismatch`),
+  sha256-hex only, recorded in ASL's own append-only signed event log as an
+  `anchor.register` event; a claimed `previousHeadHash` that disagrees with the
+  last accepted head flags `tamper`. `GET /v1/capability-requests/:id` lets the
+  requester read its request's outcome (pending/approved/denied/expired) and,
+  once approved, the minted capability projection — closing the gap where an
+  approved request vanished from the pending-only list.
 - Typecheck: clean (`npx tsc --noEmit`).
 
 ## What was tested
 
-All 527 tests pass (512 green; 15 Postgres-mode tests skip without
+All 540 tests pass (525 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, H1, H10:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -847,6 +859,35 @@ family), no transparency log, no CI enforcement, and the trusted-maintainer
 residual is unchanged — a coerced maintainer can still land a reviewed PR;
 H10 raises the cost of a malicious dependency from "edit a JSON file" to
 "forge a reviewable diff AND an ADR in the same PR".
+
+## What M17 closed
+
+M17 (ADR-022) made control-plane the first federation client. The integration
+itself lives in the control-plane repo (config + a thin `fetch` client, no code
+merge); ASL's side closed the two REST gaps that client surfaced, ticketed
+rather than absorbed during the control-plane implementation:
+
+1. ~~**No route accepted a foreign evidence head-hash.**~~ `POST /v1/anchors`
+   registers a federation client's log head (the M3 anchor pattern across
+   repos) and records it in ASL's own signed event log. Tamper signal: a
+   claimed `previousHeadHash` disagreeing with the tenant's last accepted head
+   flags `tamper` on the response and in the event metadata.
+2. ~~**A requester could not learn its capability request's outcome.**~~
+   `GET /v1/capability-requests/:id` returns the request status and, once
+   approved, the minted capability projection — so the client can poll for
+   approval and record the granted scope instead of the request vanishing from
+   the pending-only list.
+
+Both routes enforce the tenant from the verified principal (body tenant must
+match, else `tenant-mismatch`), carry no plaintext project content (hash +
+counts only), and add no new authority path — the mint remains exactly M4's.
+Tests: `tests/m17-federation.test.ts` (13 — the 12 route cases red-confirmed
+before the routes existed, plus the session-audit regression test proving a
+throwing event append cannot poison the anchor registry). Residuals: the
+anchor registry is in-memory (mismatch detection is
+advisory; the durable attestation is the event itself) and this is a
+shared-process tenant residual (known-gap #7). Client-side bypass is outside
+ASL's claim boundary.
 
 ## Watch-items from the M9 audit
 

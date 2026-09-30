@@ -157,7 +157,8 @@ export type KnownAction =
   | 'task.approve'
   | 'evidence.decrypt'
   | 'query.audit'
-  | 'audit.export';
+  | 'audit.export'
+  | 'anchor.register';
 
 export type Action = KnownAction | (string & {});
 

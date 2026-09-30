@@ -48,6 +48,13 @@ export function requestHasNoAuthority(request: CapabilityRequest): boolean {
 
 export class CapabilityRequestService {
   private readonly requests = new Map<string, CapabilityRequest>();
+  /**
+   * Capabilities minted by approval, keyed by request id. Kept so a requester
+   * can read back the granted scope over REST (M17 `GET /v1/capability-requests/:id`)
+   * instead of the request vanishing from the pending-only list. In-memory,
+   * same lifetime as `requests` — the durable decision surface stays this service.
+   */
+  private readonly minted = new Map<string, Capability>();
   private readonly eventLog: EventStore;
   private readonly authorization: AuthorizationService;
   private readonly root: Principal;
@@ -168,6 +175,7 @@ export class CapabilityRequestService {
       capabilityId: capability.id,
     };
     this.requests.set(requestId, approved);
+    this.minted.set(requestId, capability);
 
     this.eventLog.append({
       tenantId: request.tenantId,
@@ -254,6 +262,11 @@ export class CapabilityRequestService {
 
   get(requestId: string): CapabilityRequest | undefined {
     return this.requests.get(requestId);
+  }
+
+  /** The capability minted by approving this request, if it was approved. */
+  capabilityFor(requestId: string): Capability | undefined {
+    return this.minted.get(requestId);
   }
 
   all(): readonly CapabilityRequest[] {

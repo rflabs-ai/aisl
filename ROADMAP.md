@@ -119,9 +119,11 @@ requests + audit + tasks + healthz) then `M15-stage0-cleanup.md`
 API seam, setup script, minimal UI served by the M14 server). Both landed —
 **Stage 0 is fully [DONE]**. `M16-sandbox-lifecycle.md` (ADR-021 —
 sandbox lifecycle: create, limit, destroy, attest) closed the last Stage 1
-row. `PROMPTS/M17-federation-control-plane.md` (ADR-022 — control-plane as
-the first federation client) runs parallel to Stage 2 H1; M18–M20 prompts
-are written just-in-time per the M4–M16 convention.
+row. `M17-federation-control-plane.md` (ADR-022 — control-plane as the
+first federation client) landed — evidence anchoring + capability-gated
+dispatch across repos; its full-format spec moved to
+`PROMPTS/M-Track--DONE/`. M18–M20 prompts are written just-in-time per the
+M4–M16 convention.
 
 The Stage 2 (HARD) queue lives in `PROMPTS/H-Track/` — one stub per open H
 item (H2–H15; H1 is a tombstone for ADR-023), each pointing at its ROADMAP
@@ -139,9 +141,10 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 - **Working order** (pick list, AGENT-SESSION SESSION 19): ~~H1 [NEXT]~~
   **H1 [DONE]** (ADR-023) — it was the root of trust for everything above it.
   ~~Next: H10, H12, H13, H15~~ **H10 [DONE]** (ADR-024) — signed builds and
-  the supply-chain gate. Next: H12, H13, H15. **M17 (federation, ADR-022)
-  runs as a parallel track** — disjoint surfaces; its dispatch phase uses the
-  human-gated M4 flow. The remaining ten (H2–H9, H11, H14) stay open [ ]
+  the supply-chain gate. **M17 federation [DONE]** — control-plane is the
+  first federation client (anchoring + capability-gated dispatch); its two
+  ASL-side REST gaps (anchor registration, capability-request status) closed.
+  Next: H12, H13, H15. The remaining ten (H2–H9, H11, H14) stay open [ ]
   until prioritized after those three clear.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
@@ -386,7 +389,7 @@ rationale (why the client's own core promise requires it).
 
 | Milestone | Client | Why structurally necessary | Gate | Status |
 | --- | --- | --- | --- | --- |
-| M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[ ]** |
+| M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[DONE]** |
 | M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 | **[ ]** |
 | M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
 | M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
@@ -550,9 +553,11 @@ same way and also all landed — their full-format specifications live in
 `PROMPTS/M-Track--DONE/`, and the completion evidence (counts, commits, benchmark
 results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
 
-Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. The open
-frontier is Stage 2 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE],
-H10 [DONE], next H12 → H13 → H15) plus M17 federation.
+Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
+federation (ADR-022) landed with control-plane as the first client — its
+full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
+(HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], next
+H12 → H13 → H15).
 
 ### M0 — Architectural foundation (done)
 
@@ -638,7 +643,7 @@ verification, signature forgery, and the structural API check. Residual risk
 remains (anchor rewrite by an attacker with host access) — see Claim 8 and
 ADR-004.
 
-### M17 — Federation: control-plane as first client (ADR-022)
+### M17 — Federation: control-plane as first client (ADR-022) **[DONE]**
 
 - **Purpose:** make control-plane the first federation client — anchored
   evidence + capability-gated dispatch across repos, no code merge.
@@ -646,9 +651,8 @@ ADR-004.
   rests on a writable JSONL log and unsandboxed workers; the federation
   closes both without changing its semantics.
 - **Dependencies:** M14 REST API, M4 capability-request flow, M16 sandbox
-  lifecycle — all shipped. Runs **parallel** to Stage 2 H1 (disjoint
-  surfaces; dispatch uses the human-gated M4 flow, so signed delegation is
-  not a prerequisite).
+  lifecycle — all shipped. The dispatch phase uses the human-gated M4 flow,
+  so signed delegation (H1, now done) was never a prerequisite.
 - **Complexity:** M.
 - **Security significance:** the first cross-repo trust boundary — REST
   clients become bearer-token principals, one tenant per project.
@@ -664,4 +668,4 @@ ADR-004.
 - **Tests required:** anchor tamper detection; capability-request denial
   without approval; sealed-event secret scan on the federation path.
 - **Evidence produced:** anchor receipts in control-plane state, ASL audit
-  export showing federation events. Full prompt: `PROMPTS/M17-federation-control-plane.md`.
+  export showing federation events. Full prompt: `PROMPTS/M-Track--DONE/M17-federation-control-plane.md`.

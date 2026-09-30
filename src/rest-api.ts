@@ -17,6 +17,7 @@ import type { IdentityProvider } from './identity.ts';
 import type { EventStore } from './events.ts';
 import { registerSessionRoutes, type SessionRouteDeps } from './rest-sessions.ts';
 import { registerAuditRoutes, type AuditRouteDeps } from './rest-audit.ts';
+import { registerAnchorRoutes, type AnchorRouteDeps } from './rest-anchors.ts';
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 
@@ -168,13 +169,14 @@ export function staticPageFromFile(route: string, filePath: string, contentType:
   return { route, body: readFileSync(filePath, 'utf8'), contentType };
 }
 
-export interface RestApiFullDeps extends RestApiDeps, SessionRouteDeps, AuditRouteDeps {}
+export interface RestApiFullDeps extends RestApiDeps, SessionRouteDeps, AuditRouteDeps, AnchorRouteDeps {}
 
-/** Assembly point for the full ADR-019 route table (core routes + sessions + capability requests + audit + tasks). */
+/** Assembly point for the full ADR-019 route table (core routes + sessions + capability requests + audit + tasks + federation anchors). */
 export function createRestApi(deps: RestApiFullDeps): RestApi {
   const api = new RestApi(deps);
   registerSessionRoutes(api, deps);
   registerAuditRoutes(api, deps);
+  registerAnchorRoutes(api, deps);
   return api;
 }
 

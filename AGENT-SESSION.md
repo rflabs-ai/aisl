@@ -24,6 +24,45 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 27 — 2026-09-29 — opencode/m17-federation-asl-gap-closure
+
+**Did:**
+- M17 federation (ADR-022) closed on the ASL side: the two REST gaps the
+  control-plane client surfaced (ticketed at
+  `control-plane/.scratch/m17-federation/issues/04` and `05`) are now routes.
+- `POST /v1/anchors` (`src/rest-anchors.ts`): registers a foreign event-log
+  head-hash (M3 anchor pattern across repos), tenant from the verified
+  principal (body mismatch → `tenant-mismatch`), sha256-hex only, recorded in
+  ASL's signed event log as an `anchor.register` event; a claimed previous head
+  that disagrees with the last accepted head flags `tamper`. Wired into
+  `createRestApi`; `anchor.register` added to `KnownAction`.
+- `GET /v1/capability-requests/:id` (`src/rest-sessions.ts` +
+  `CapabilityRequestService.capabilityFor`): a requester reads its request's
+  outcome and, once approved, the minted capability projection — the gap where
+  an approved request vanished from the pending-only list.
+- Tests red-first: `tests/m17-federation.test.ts` (13 cases, including the
+  session-audit fix: a throwing event append must not poison the anchor
+  registry).
+- Docs sweep: ROADMAP (M17 row + spec → [DONE], working order), CURRENT_STATE
+  (counts 527→539, what-works entry, "What M17 closed"), SECURITY_CLAIMS
+  Claim 33, this entry. M17 prompt moved to `PROMPTS/M-Track--DONE/`.
+
+**Left:**
+- control-plane spec/tickets to mark resolved (separate repo, same session).
+- H12/H13/H15 remain the open Stage 2 queue. H13 touches `src/pdp.ts`
+  (revoke path) and H15 `src/rest-api.ts` (anchor route file) — sequence
+  normally; M17's ASL gap closure is landed, so both are unblocked.
+
+**Next session should:**
+- H12 (secure updates), H13, or H15. M18–M20 federation clients are separate
+  prompts.
+
+**Evidence:**
+- `npm run typecheck` clean; `npm test`: 540 tests (525 pass, 15 PG skips,
+  0 fail) — gate green.
+
+---
+
 ### SESSION 26 — 2026-09-29 — opencode/h10-key-ceremony
 
 **Did:**

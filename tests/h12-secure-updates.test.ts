@@ -392,7 +392,7 @@ describe('Emergency rollback: signed, single-use, mark preserved', () => {
     const dir = fixtureRepo();
     const { statePath } = statePathIn();
     try {
-      const { v1, v1sig, v2, v2sig } = appliedPair(dir, statePath);
+      const { v2, v2sig } = appliedPair(dir, statePath);
       const grant: RollbackGrant = {
         type: 'asl-rollback-grant', version: 1,
         targetVersion: 1, fromVersion: 2, generation: 0,
@@ -409,7 +409,6 @@ describe('Emergency rollback: signed, single-use, mark preserved', () => {
       const next = applyUpdate(v3.descriptor, v3sig, { publicKeyPem: PUBLIC_PEM, repoRoot: dir, statePath });
       assert.equal(next.ok, true, next.reason);
       assert.equal(next.state?.highWaterMark, 3);
-      assert.ok(v1.releaseVersion === 1 && v1sig.length > 0, 'v1 fixture was used');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

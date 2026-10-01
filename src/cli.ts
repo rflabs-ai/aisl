@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { createPublicKey } from 'node:crypto';
 import { runAttackCorpus } from './attacks.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyRule } from './policy.ts';
 import { type Resource } from './domain.ts';
@@ -55,7 +56,6 @@ import {
   type RollbackGrant,
   type UpdateDescriptor,
 } from './updates.ts';
-import { createPublicKey } from 'node:crypto';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1033,6 +1033,11 @@ async function updateCommand(): Promise<void> {
       return;
     }
     const channel = process.argv[5] ?? 'stable';
+    if (channel.trim() === '') {
+      console.error('  channel must be non-empty — refusing to sign a descriptor that can never verify (fail closed).');
+      process.exitCode = 1;
+      return;
+    }
     const stages = (process.argv[6] ?? '1,100').split(',').map((s) => Number(s.trim()));
     if (stages.length === 0 || stages.some((s) => !Number.isInteger(s) || s < 1 || s > 100) || stages[stages.length - 1] !== 100) {
       console.error('  stages must be ascending percentages ending in 100 (e.g. 10,50,100) — refusing (fail closed).');
@@ -1138,7 +1143,8 @@ async function updateCommand(): Promise<void> {
     }
     const result = promoteUpdate({ statePath, healthOk: health === 'ok' });
     if (result.state !== undefined) {
-      line('rollout', result.state.rollout.status.toUpperCase(), `stage=${result.state.rollout.stageIndex}/${result.state.rollout.stages.length - 1}${result.state.rollout.haltReason ? ` halt=${result.state.rollout.haltReason}` : ''}`);
+      const stage = result.state.rollout.stages.length === 0 ? '-' : result.state.rollout.stages.length - 1;
+      line('rollout', result.state.rollout.status.toUpperCase(), `stage=${result.state.rollout.stageIndex}/${stage}${result.state.rollout.haltReason ? ` halt=${result.state.rollout.haltReason}` : ''}`);
     }
     if (!result.ok) {
       if (result.reason === 'no-pending-rollout') console.log('  no rollout in flight — nothing to promote.');

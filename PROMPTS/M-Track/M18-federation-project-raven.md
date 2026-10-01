@@ -32,7 +32,10 @@ user-level units, bash entry scripts, swappable brain. Relevant facts:
 - Raven's own tracker frontier: 19 (voice), 20 (brain-switch, shipped), 21
   (builder headless), 22 (resilience drill).
 
-## Phase 0 — ADR-026 (docs only, to be written at execution)
+## Phase 0 — ADR-027 (docs only, to be written at execution)
+
+Note: H13 landed first (ADR-026), so M18's ADR number shifted from the kickoff
+note's 026 to 027.
 
 M18 needs decisions the current code cannot settle:
 

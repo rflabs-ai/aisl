@@ -109,6 +109,40 @@ export class SessionManager {
     }
     return count;
   }
+
+  /** All sessions, including revoked/expired — the incident reconstruction view. */
+  all(): readonly Session[] {
+    return [...this.sessions.values()];
+  }
+
+  /**
+   * H13: revoke every active session for one tenant, optionally only those
+   * created at or before `createdBefore` — the fence that lets a replayed
+   * channel record avoid killing sessions created after the incident.
+   */
+  revokeAllForTenant(tenantId: string, createdBefore = Number.POSITIVE_INFINITY): number {
+    let count = 0;
+    for (const s of this.sessions.values()) {
+      if (s.principal.tenantId !== tenantId) continue;
+      if (s.status !== 'active') continue;
+      if (s.createdAt > createdBefore) continue;
+      s.status = 'revoked';
+      count++;
+    }
+    return count;
+  }
+
+  /** H13: revoke every active session (global kill switch), timestamp-fenced. */
+  revokeAll(createdBefore = Number.POSITIVE_INFINITY): number {
+    let count = 0;
+    for (const s of this.sessions.values()) {
+      if (s.status !== 'active') continue;
+      if (s.createdAt > createdBefore) continue;
+      s.status = 'revoked';
+      count++;
+    }
+    return count;
+  }
 }
 
 /**

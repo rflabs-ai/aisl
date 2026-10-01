@@ -145,8 +145,12 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   ASL-side REST gaps (anchor registration, capability-request status) closed.
   ~~Next: H12, H13, H15~~ **H12 [DONE]** (ADR-025) — signed update channel:
   descriptor chain, high-water mark, signed single-use rollback, sticky
-  canary halt. Next: H13, H15. The remaining ten (H2–H9, H11, H14) stay
-  open [ ] until prioritized after those two clear.
+  canary halt. **H13 [DONE]** (ADR-026) — incident response: tenant/global
+  kill switch (freeze + revoke-all, `incident-frozen`), multi-writer
+  revocation channel with bounded cross-node propagation, and paged evidence
+  preservation (`asl-incident-bundle`) + reconstruction. Next: H15. The
+  remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after it
+  clears.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
@@ -334,7 +338,7 @@ per ADR-025: caller-supplied health signal, one release key (ADR-008
 custody), no transport (this repo verifies updates, it does not host them),
 signed-but-maintainer-rogue release unchanged.
 
-### H13 — Incident response mechanisms — *structurally necessary at federation (ADR-022)*
+### H13 — Incident response mechanisms — *structurally necessary at federation (ADR-022)* **[DONE]** (ADR-026)
 
 - **Attack surface:** everything, under the assumption of an active incident.
 - **Failure modes:** cannot revoke a session or a capability quickly; cannot
@@ -344,6 +348,32 @@ signed-but-maintainer-rogue release unchanged.
   revocation propagation (target <= 5 s)**, and evidence export completeness.
 - **Residual risk:** incident response is slower than the attack.
 - **Class:** MVP/E.
+
+**Closed (ADR-026):** `src/incident.ts` + `src/incident-store-pg.ts` (migration
+4) + two chokepoint edits in `src/pdp.ts`. `IncidentService.engage` is one
+operator action — freeze issuance + revoke every registered capability in
+scope + revoke sessions in scope — enforced at the two chokepoints
+(`AuthorizationService.issue` refuses `incident-frozen`; `authorize` denies
+with the distinct reason, evidence-read actions excepted so an incident can be
+reconstructed while frozen). `lift` clears the freeze only; revoked authority
+stays revoked. Revocation coordination is a separate multi-writer,
+append-only `revocation_channel` (the event chain stays single-writer); the
+`RevocationChannel` port has an in-memory backend (default; shared instance =
+multi-node test seam) and a Postgres backend (mirror + async refresh, the
+`PostgresEventLog` pattern) so an operator CLI can reach a running node.
+Propagation is pull-on-decision — throttled on `authorize` (default 1 s ≤ the
+5 s target), forced on `issue`; a fresh node replays from cursor 0 and
+reconstructs freeze + revocation state; a channel outage still engages locally
+and reports `broadcastOk: false`. `preserve` pages past M6's silent
+1000-event cap into an independently verifiable `asl-incident-bundle`
+(digest + offline chain/signature verification + anchor check) and records
+only digest + head + counts; `reconstruct` summarizes the same authorized
+slice. Tests-first: `tests/h13-incident-response.test.ts` (22) + the
+PG-channel suite (3 live, skip cleanly). Residuals per ADR-026: poll-based
+propagation, a channel writer can freeze (DoS is the H15 accepted trade),
+single-node freeze state is in-memory (durability is the Postgres channel's),
+and the ROADMAP residual — incident response slower than the attack — is
+unchanged.
 
 ### H14 — Adversarial evaluation harness (continuous)
 
@@ -357,7 +387,7 @@ signed-but-maintainer-rogue release unchanged.
 - **Residual risk:** unknown-unknown attacks.
 - **Class:** MVP/HA.
 
-### H15 — Fail-closed availability engineering
+### H15 — Fail-closed availability engineering **[NEXT]**
 
 - **Attack surface:** the failure modes of the safety mechanisms themselves.
 - **Failure modes:** a broken policy engine, a full disk, or a closed evidence
@@ -511,8 +541,13 @@ harness:
 - Approval replay acceptance: 0 (single-use + expiry).
 - Secret values at rest in the store: 0 occurrences (sealing tests scan the store).
 - Model independence of the security core: structural, by construction (model swap test).
-- Capability revocation propagation: ≤ 5 s — immediate in-process (M4 tests); multi-node broadcast = H13.
-- Session revocation propagation: ≤ 5 s — immediate in-memory (SessionManager tests).
+- Capability revocation propagation: ≤ 5 s — immediate in-process (M4 tests);
+  cross-node via the revocation channel (H13: throttled pull, default 1 s;
+  forced on issuance). The live Postgres multi-node proof is the skipped
+  PG-channel suite, run when `DATABASE_URL` exists.
+- Session revocation propagation: ≤ 5 s — immediate in-memory (SessionManager
+  tests); bulk tenant/global revocation is on the kill switch and the same
+  channel (H13).
 
 Not yet measured (named so the gap cannot hide; ADR-014's honesty rule):
 
@@ -583,7 +618,7 @@ Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12
-[DONE], next H13 → H15).
+[DONE], H13 [DONE], next H15).
 
 ### M0 — Architectural foundation (done)
 

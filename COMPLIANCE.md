@@ -23,7 +23,7 @@ implementation needed / external validation needed.
 | PR-PS-06 secure disposal | none | absent | no retention or deletion policy | retention records | retention lifecycle | yes |
 | DE-AE-03 event correlation | EventLog | partial | no shipping, no alerting | queryable evidence | OTel + SIEM export | no |
 | DE-AE-06 deletion/destruction alerts | none | absent | no detection for destructive actions | alert records | verification plane + alerting | no |
-| DE-CM-06 incident drill | none | absent | no IR plan | game-day report | H13 | yes |
+| DE-CM-06 incident drill | kill switch + revocation broadcast + preservation (H13) | partial | automated measured drill (H13 suites + demo section 22: kill-switch latency, ≤ 1 s cross-node propagation, evidence preservation); no organizational game-day cadence | `tests/h13-*` output + demo section 22 + preserved `asl-incident-bundle` | recurring game days (process) | yes |
 | RS-MA-02 remediation | supply-chain gate (H10) + signed update channel (H12) | partial | no patch process as operations; dependency freshness is gated (SBOM diff, exact pins, integrity verification); applying/rolling back a release is signed and anti-replay but has no cadence | `npm run supply-chain` output + `artifacts/sbom.json` history + `update status`/descriptor signatures | patch cadence + review records (process) | yes |
 | RC-CO communication | none | absent | no notification process | notification records | operating model | yes |
 
@@ -45,6 +45,7 @@ implementation needed / external validation needed.
 | SC-28 protection at rest | none | absent | — | — | encryption | yes |
 | SI-10 information input validation | `parseModelOutput` | implemented | model output only | parser tests | extend to all inputs | no |
 | SI-7 software integrity | build manifest signing (H10) + signed update channel (H12) | partial | dev-key custody (encrypted SSD + offline bank HDD); first manifest signed 2026-09-29; gate verifies pins/integrity/SBOM; updates verify descriptor + manifest vs live tree and refuse rollback | `build verify` / `update verify` output + manifest + descriptor + signatures | CI signing + HSM custody (ADR-008) | yes |
+| IR-4/IR-6 incident handling | kill switch + revocation channel + evidence preservation (H13) | partial | freeze + bulk revoke + bounded cross-node propagation + verifiable preservation exist in code; no organizational IR process, reporting, or on-call rotation | incident events + `asl-incident-bundle` + `incident status` | IR process + game-day cadence (DEPLOYMENT runbook) | yes |
 
 ## NIST SP 800-207 (Zero Trust)
 
@@ -56,7 +57,7 @@ implementation needed / external validation needed.
 | Application/workload | partial | capabilities exist; no workload identity |
 | Data | partial | classification exists; no encryption or DLP |
 | Visibility & analytics | partial | events exist; no analytics or alerting |
-| Automation & orchestration | partial | decisions are automated; response is not |
+| Automation & orchestration | partial | decisions are automated; incident containment (freeze/revoke/broadcast/preserve) exists (H13); no analytics or alerting |
 
 ## OWASP
 
@@ -85,7 +86,7 @@ implementation needed / external validation needed.
 | CC6.7 transmission/movement | partial | no encryption, no DLP |
 | CC6.8 unauthorized software | absent | no change control |
 | CC7.2 monitoring | partial | events exist, no alerting |
-| CC7.3/7.4 incident | absent | no IR plan |
+| CC7.3/7.4 incident | partial | H13 gives freeze + revoke + bounded propagation + preservation in code; no organizational IR plan or reporting |
 | CC8.1 change management | absent | no SDLC controls |
 | A1.2 availability | absent | no SLAs, no HA, no DR |
 
@@ -96,7 +97,9 @@ control) partial; A.10 (cryptography) weak — env-var key, no rotation; A.12
 (operations security) partial — logging yes, malware protection no, backup no;
 A.13 (communications) absent; A.14 (system acquisition/development) partial —
 ADRs exist, secure SDLC does not; A.15 (supplier) absent; A.16 (incident)
-absent; A.17 (BCP/DR) absent; A.18 (compliance) partial — this mapping.
+partial — H13 kill switch + revocation channel + verifiable preservation in
+code; no organizational incident process; A.17 (BCP/DR) absent; A.18
+(compliance) partial — this mapping.
 
 ## HIPAA Security Rule (if deployed with PHI)
 
@@ -106,7 +109,7 @@ absent; A.17 (BCP/DR) absent; A.18 (compliance) partial — this mapping.
 | §164.308(a)(3) workforce security | absent | no HR controls |
 | §164.308(a)(4) information access mgmt | partial | capabilities; no authenticated users |
 | §164.308(a)(5) security awareness | absent | no training |
-| §164.308(a)(6) incident procedures | absent | H13 |
+| §164.308(a)(6) incident procedures | partial | H13: kill switch, revocation broadcast, evidence preservation + reconstruction in code; no organizational incident process |
 | §164.308(a)(7) contingency plan | absent | no DR |
 | §164.310 physical safeguards | N/A | deployment-dependent |
 | §164.312(a)(1) access control | partial | no unique user identification yet |

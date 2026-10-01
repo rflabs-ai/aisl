@@ -20,6 +20,9 @@ import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 import { type IdPHealth } from './identity.ts';
 import { AuditQueryService } from './audit-query.ts';
 import { type CapabilityRequestService } from './capability-request.ts';
+import { SessionManager } from './session-manager.ts';
+import { InMemoryRevocationChannel, IncidentService, type RevocationChannel } from './incident.ts';
+import { PostgresRevocationChannel } from './incident-store-pg.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -78,6 +81,10 @@ export interface World {
   readonly clock: Clock;
   readonly resources: Readonly<Record<string, string>>;
   readonly audit: AuditQueryService;
+  /** H13: session lifecycle usable by the incident service (REST wires its own). */
+  readonly sessions: SessionManager;
+  /** H13: the incident response seam (kill switch, broadcast, preservation). */
+  readonly incident: IncidentService;
   /** Set IdP health status for degraded-mode testing */
   setIdPHealth(status: IdPHealth): void;
   session(model: ModelPort, overrides?: Partial<SessionOverrides>): AgentSession;
@@ -151,7 +158,34 @@ function makeEventLog(options: { sqlitePath?: string }): EventStore {
     : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
 }
 
-export function buildWorld(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): World {
+/**
+ * H13: the revocation channel follows the event store's backend — the
+ * in-memory channel is single-process (the default), the Postgres channel is
+ * the multi-node/operator-CLI story. Tests and the demo can inject a shared
+ * in-memory channel to simulate two nodes.
+ */
+function makeRevocationChannel(injected?: RevocationChannel): RevocationChannel {
+  if (injected) return injected;
+  return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
+    ? new PostgresRevocationChannel({ url: process.env.DATABASE_URL })
+    : new InMemoryRevocationChannel();
+}
+
+export interface WorldOptions {
+  readonly sqlitePath?: string;
+  readonly policies?: readonly PolicyRule[];
+  /** H13: inject a shared channel to simulate multiple nodes in one process. */
+  readonly channel?: RevocationChannel;
+  /**
+   * Default true: issue the fixture bootstrap capabilities (demo/tests).
+   * `false` builds the world with no bootstrap issuance — for operator
+   * commands that must not mint fixture authority or append fixture events
+   * to a shared (Postgres) evidence chain.
+   */
+  readonly bootstrap?: boolean;
+}
+
+export function buildWorld(options: WorldOptions = {}): World {
   return assembleWorld(makeEventLog(options), options);
 }
 
@@ -162,13 +196,13 @@ export function buildWorld(options: { sqlitePath?: string; policies?: readonly P
  * append happens. The synchronous buildWorld stays for the SQLite/in-memory
  * backends, which need no readiness.
  */
-export async function buildWorldAsync(options: { sqlitePath?: string; policies?: readonly PolicyRule[] } = {}): Promise<World> {
+export async function buildWorldAsync(options: WorldOptions = {}): Promise<World> {
   const eventLog = makeEventLog(options);
   if (eventLog instanceof PostgresEventLog) await eventLog.whenReady();
   return assembleWorld(eventLog, options);
 }
 
-function assembleWorld(eventLog: EventStore, options: { sqlitePath?: string; policies?: readonly PolicyRule[] }): World {
+function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
   const clock = createClock();
   const registry = new ResourceRegistry();
 
@@ -247,28 +281,41 @@ function assembleWorld(eventLog: EventStore, options: { sqlitePath?: string; pol
   };
 
   // Narrow bootstrap capability: read only, internal and below, one hour.
-  authorization.issue(root, {
-    subject: agent.id,
-    tenantId: TENANT_A,
-    resourceIds: [RESOURCE_IDS.repoA, RESOURCE_IDS.internalDoc],
-    actions: ['read'],
-    maxClassification: 'internal',
-    expiresAt: clock.now() + 3_600_000,
-    provenance: { source: 'session-bootstrap', taskId: 'task:summarize-repo', note: 'MVP bootstrap' },
-  });
+  // `bootstrap: false` skips these fixture issuances for consumers whose world
+  // must not mint or append anything (the incident CLI's evidence commands).
+  if (options.bootstrap !== false) {
+    authorization.issue(root, {
+      subject: agent.id,
+      tenantId: TENANT_A,
+      resourceIds: [RESOURCE_IDS.repoA, RESOURCE_IDS.internalDoc],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: clock.now() + 3_600_000,
+      provenance: { source: 'session-bootstrap', taskId: 'task:summarize-repo', note: 'MVP bootstrap' },
+    });
 
-  authorization.issue(root, {
-    subject: agent.id,
-    tenantId: TENANT_A,
-    resourceIds: [`net:api.internal.example.com`],
-    actions: ['network.egress'],
-    maxClassification: 'restricted',
-    expiresAt: clock.now() + 3_600_000,
-    constraints: [{ kind: 'network-host', hosts: ['api.internal.example.com'] }],
-    provenance: { source: 'policy-grant', note: 'internal billing API only' },
-  });
+    authorization.issue(root, {
+      subject: agent.id,
+      tenantId: TENANT_A,
+      resourceIds: [`net:api.internal.example.com`],
+      actions: ['network.egress'],
+      maxClassification: 'restricted',
+      expiresAt: clock.now() + 3_600_000,
+      constraints: [{ kind: 'network-host', hosts: ['api.internal.example.com'] }],
+      provenance: { source: 'policy-grant', note: 'internal billing API only' },
+    });
+  }
 
   const audit = new AuditQueryService(authorization, eventLog, clock.now);
+  const sessions = new SessionManager({ now: clock.now });
+  const incident = new IncidentService({
+    authorization,
+    sessions,
+    audit,
+    eventLog,
+    channel: makeRevocationChannel(options.channel),
+    clock: clock.now,
+  });
 
   return {
     registry,
@@ -287,6 +334,8 @@ function assembleWorld(eventLog: EventStore, options: { sqlitePath?: string; pol
     clock,
     resources: RESOURCE_IDS,
     audit,
+    sessions,
+    incident,
     setIdPHealth(status) {
       idpHealthStatus = status;
     },

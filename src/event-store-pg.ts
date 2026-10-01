@@ -15,6 +15,7 @@ import type { KeyObject } from 'node:crypto';
 import postgres from 'postgres';
 import { RLS_MIGRATION } from './tenant-rls.ts';
 import { PERSISTENCE_MIGRATION } from './persistence.ts';
+import { INCIDENT_MIGRATION } from './incident-store-pg.ts';
 import {
   type AuditFilters,
   type AuditExport,
@@ -67,6 +68,9 @@ export const MIGRATIONS: readonly StoreMigration[] = [
   // ADR-018 phase 2: control-plane state tables (persistence + their RLS),
   // wired from src/persistence.ts.
   PERSISTENCE_MIGRATION,
+  // ADR-026 (H13): the multi-writer revocation channel, wired from
+  // src/incident-store-pg.ts.
+  INCIDENT_MIGRATION,
 ];
 
 interface AppliedMigration {

@@ -1,26 +1,28 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H12 — the signed update channel (ADR-025).
+Honest snapshot. Updated after H13 — incident response (ADR-026).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
 UI served by the M14 server, and the sandbox lifecycle — zero new runtime
 dependencies. H1 (ADR-023, signed delegation), H10 (ADR-024, supply-chain
-gate + signed build manifests), and H12 (ADR-025, signed update channel with
-anti-rollback and sticky canary) are the landed Stage 2 items. M17 closed both
+gate + signed build manifests), H12 (ADR-025, signed update channel with
+anti-rollback and sticky canary), and H13 (ADR-026, kill switch + revocation
+channel + evidence preservation) are the landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H13/H15.
+Next frontier: H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~11,400 lines of source across 43 modules
+TypeScript foundation on Node 24, ~11,870 lines of source across 45 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
-`rest-anchors.ts`, and `updates.ts` are the latest additions), 560 tests
-(`tests/`, `security-tests/`; 545 pass, 15 Postgres-mode tests skip cleanly
+`rest-anchors.ts`, `updates.ts`, `incident.ts`, and `incident-store-pg.ts`
+are the latest additions), 592 tests
+(`tests/`, `security-tests/`; 573 pass, 19 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -112,8 +114,37 @@ Dev dependencies: `typescript`, `@types/node`.
   current again; replay → `grant-mismatch`), backward-only, mark preserved.
   Staged rollout: stages ascend to 100, `apply` lands canary, `update
   promote ok|fail` advances one stage per explicit health pass, a failing
-  signal halts and the halt is sticky. State is code-written only, atomic
+  signal halts and the halt is sticky.   State is code-written only, atomic
   (temp + rename), gitignored per instance.
+- **Incident response (H13):** `src/incident.ts` (ADR-026) +
+  `src/incident-store-pg.ts` (migration 4). `IncidentService.engage` is the
+  kill switch — freeze issuance + authorization, revoke every registered
+  capability in scope (evidence-read capabilities survive so the incident can
+  be reconstructed), revoke sessions in scope — enforced at the two
+  chokepoints (`issue` refuses `incident-frozen` + audits; `authorize` denies
+  with the distinct `denyReason: 'incident-frozen'`); `lift` clears the freeze
+  only and revoked authority stays revoked. A multi-writer, append-only
+  `revocation_channel` (Postgres migration 4; the in-memory channel is the
+  default and the multi-node test seam) broadcasts freeze/revoke records
+  across nodes and from an operator CLI to a running node; the PDP pulls it
+  throttled on `authorize` (default 1 s, inside the ≤ 5 s target) and forced
+  on `issue`, a fresh node replays from cursor 0, and a channel outage still
+  engages locally with `broadcastOk: false`. A malformed/unknown channel row
+  is rejected and skipped with the cursor advancing past it (a rejected row
+  can never stall propagation; the table is append-only). `preserve` pages
+  past M6's silent 1000-event cap into an independently verifiable
+  `asl-incident-bundle` (content digest, offline chain + signature
+  verification, anchor check; filtered views — global incidents, interleaved
+  tenants — verify per-event with `contiguous: false` instead of requiring
+  slice linkage) and records digest + head + counts only; `reconstruct`
+  summarizes the authorized slice, with `tenantId: '*'` as the global view
+  over the events recorded with no tenant. CLI:
+  `node src/cli.ts incident status|engage|lift|revoke-cap|revoke-session|
+  preserve|report` (+ `npm run incident:status`; the CLI builds a
+  bootstrap-free world so operator commands mint and append no fixture
+  evidence). Demo section 22 shows a
+  measured engage→deny latency, a two-node interval-bounded broadcast, and a
+  verified preservation round trip.
 - **Audit query + export API (M6):** In-process query and export API
   (`src/audit-query.ts`, `AuditQueryService`). Authorized through
   `AuthorizationService.queryAudit` gating on synthetic `audit-log:<tenantId>`
@@ -344,10 +375,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 560 tests pass (545 green; 15 Postgres-mode tests skip without
+All 592 tests pass (573 green; 19 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -366,6 +397,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **H1 signed delegation (32: parent refusals 7, custody + audit-event 2, chain traceability 3, constraint/single-use dimensions 6, root-with-parent 2, extremes fuzz 11, structural src-wide scan 1)**; invariant 6 rewritten against signed parents (4).
 | **H10 supply chain (20: SBOM deterministic + complete 2, pins 4, drift gate 5, tree digest 2, manifest sign/verify 5)**.
 | **H12 secure updates (20: descriptor signature 4, chain vs live tree 4, anti-rollback 3, rollout 3, grant 4, structural invariants 2)**.
+| **H13 incident response (32: kill switch 7, session bulk revocation 2, broadcast + REST sync 7, preservation/reconstruction 7, world wiring + import-cycle regression 2; 4 of these are the Postgres-channel suite, skip-clean without `DATABASE_URL`)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -472,11 +504,17 @@ Ordered by severity.
     `provenance.delegatedFrom` under the child's signature; the service
     refuses revoked/unregistered parents (ADR-023). Residual: the HMAC key is
     symmetric and process-wide (known-gap #4).
-12. **No multi-node capability revocation broadcast.** In-process revocation is
-    immediate; a multi-node deployment needs a revocation channel (H13). M12
-    gives Postgres mode the storage it needs (one writer is still enforced:
-    `PostgresEventLog` is single-process, single-writer — a second node must
-    land the revocation channel first).
+12. ~~**No multi-node capability revocation broadcast.**~~ **H13 closed**: the
+    revocation channel (ADR-026) propagates kill-switch and single-target
+    revocations across nodes and from an operator CLI to a running node;
+    pull-on-decision is bounded by the default 1 s interval (≤ 5 s target),
+    and issuance force-syncs so a post-freeze mint cannot slip through a
+    throttle window. Residual: propagation is poll-based (a channel outage
+    widens the window and is reported via `broadcastOk`/health, never silent),
+    a channel writer can freeze legitimate work (DoS is the H15 accepted
+    trade), in-memory freeze state is lost on restart unless the Postgres
+    channel replays it, and the event chain itself remains single-writer by
+    design (the channel is the one deliberate multi-writer table).
 13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
     evidence store denies everything silently, with no health signal or degraded
     mode (H15). IdP outage now has a distinct deny reason and health signal.
@@ -953,6 +991,58 @@ Residuals
 canary), one release key under the ADR-008 env posture, no transport (this
 repo verifies updates; hosting them is a release endpoint away), and the
 signed-but-maintainer-rogue release residual from H10 is unchanged.
+
+## What H13 closed
+
+H13 was the incident-response milestone (ADR-026; one module pair, two
+chokepoint edits, zero new runtime dependencies). It did not change decision
+semantics: capability AND policy still gate every action; the kill switch adds
+a state that trumps both, and its evidence is the ordinary decision log.
+
+1. ~~**No kill switch.**~~ `IncidentService.engage` freezes issuance and
+   authorization (tenant or global) and revokes every registered capability +
+   session in scope in one operator action. The PDP denies a frozen tenant
+   with the distinct `incident-frozen` reason; `issue` refuses with an audited
+   `capability.issue` deny. `lift` clears the freeze only — revoked authority
+   remains revoked. Evidence-read capabilities (`query.audit`, `audit.export`,
+   `evidence.decrypt`) survive the bulk revoke and remain authorized while
+   frozen, so an incident can be reconstructed and preserved during the
+   response instead of after it.
+2. ~~**No cross-node revocation.**~~ The `revocation_channel` (Postgres
+   migration 4; in-memory default) is the deliberate multi-writer control
+   table beside the single-writer event chain. Records are scope-level
+   (`freeze`/`unfreeze`/`revoke-caps`/`revoke-sessions`) and single-target
+   (`revoke-cap`/`revoke-session`); nodes pull on decision (throttled
+   `authorize`, forced `issue`), replay from cursor 0 reconstructs state, and
+   a channel outage still engages locally with the failure reported.
+   `revoke-caps` is fenced by issuance time, so replay cannot kill authority
+   issued after the incident.
+3. ~~**Cannot reconstruct or preserve evidence at scale.**~~ `preserve` pages
+   the ordinary authorized audit export past M6's silent 1000-event cap,
+   verifies the bundle offline (content digest + chain + Ed25519 signatures +
+   anchor), writes an `asl-incident-bundle`, and records digest + head +
+   counts only; `reconstruct` summarizes decisions by reason/action, actors,
+   and incident actions over the same authorized slice.
+
+Tests: `tests/h13-incident-response.test.ts` (24, red-confirmed before the
+module existed - `ERR_MODULE_NOT_FOUND` recorded as the red signal),
+`tests/h13-revocation-pg.test.ts` (7: 3 static/redaction + 4 live, skip
+cleanly), and `tests/h13-import-order.test.ts` (1: the channel module must be
+importable first - the audit-found import-cycle regression). The
+trust-boundary invariant test asserts no key material or secret canaries
+reach channel records, incident events, or the preservation artifact.
+The same-day session audit (`.scratch/session-audit/2026-10-01-h13-incident-response/`)
+found and fixed four must-fix defects: a malformed channel row stalled the
+cursor forever (now skip-and-count), cross-process `preserve` failed on the
+default ephemeral event key (now a named precondition + actionable refusal),
+an inline-type import cycle crashed the channel module (now `import type`),
+and global-incident events (`tenantId: ''`) were unreachable (now the
+`tenantId: '*'` view). Filtered views are verified per-event
+(`contiguous: false` bundles) instead of requiring slice linkage. Residuals
+(Claim 35/ADR-026): poll-based propagation, a channel writer can freeze (the
+H15 DoS trade), single-node freeze state is in-memory (durability is the
+Postgres channel's), the skip-clean live Postgres tests, and the ROADMAP
+residual that incident response can be slower than the attack.
 
 ## Watch-items from the M9 audit
 

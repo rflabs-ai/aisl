@@ -1586,3 +1586,166 @@ signed-but-maintainer-rogue release (H10 residual, unchanged here).
 when a release endpoint exists; separate update key after a key ceremony;
 H11 anchoring of applied-descriptor records; M18 raven consumes
 `verifyUpdate`/`applyUpdate` as its self-update gate.
+
+---
+
+## ADR-026: Incident response — kill switch, revocation channel, evidence preservation (H13)
+
+**Context:** H13. ROADMAP names the failure modes under an active incident:
+cannot revoke a session or a capability quickly; cannot freeze issuance; cannot
+reconstruct what happened; cannot preserve evidence. Today: in-process
+capability revocation is immediate (M4 `revoked` set, `capability-revoked`),
+session revocation is immediate in-memory (M2), audit export is authorized and
+offline-verifiable (M6), and the event chain is signed and anchored (M3). What
+does not exist: a tenant/global kill switch, a freeze on issuance, cross-node
+propagation (two processes sharing Postgres each keep their own in-memory
+revocation set), bulk revocation, an incident preservation artifact, or an
+answer to M6's silent 1000-event export cap. ADR-022 pulls H13 forward at
+federation: control-plane dispatch and M18's unattended raven need an operator
+kill switch that reaches a **running** node, not just the calling process.
+
+**Decision:** One module pair — `src/incident.ts` (channel port + in-memory
+backend + `IncidentService`) and `src/incident-store-pg.ts` (Postgres channel +
+migration 4) — plus two chokepoint edits in `src/pdp.ts` and bulk methods on
+`src/session-manager.ts`. Zero new runtime dependencies.
+
+1. **The kill switch is one operator action enforced at the two chokepoints.**
+   `IncidentService.engage(scope)` freezes issuance, revokes every registered
+   capability in scope, and revokes sessions in scope. Freeze is checked in
+   `AuthorizationService.evaluate()` first (deny with the distinct
+   `denyReason: 'incident-frozen'`, ordinary decision event) and at the top of
+   `issue()` (refusal + a `capability.issue` deny event, the H1 custody-refusal
+   pattern). `lift` clears the freeze only: revoked capabilities stay revoked.
+   Freeze is reversible; revocation is not.
+2. **Revocation coordination is a separate multi-writer channel, not the event
+   log.** The hash chain is single-writer by construction, and the kill switch
+   must be publishable from an operator CLI process and from one node to
+   another. `revocation_channel` (migration 4) is append-only
+   (`app_rw` INSERT/SELECT, no UPDATE/DELETE grants) and carries records
+   `{ seq, action, scope, tenantId?, targetId?, reason, at }` where action is
+   `freeze | unfreeze | revoke-caps | revoke-sessions | revoke-cap |
+   revoke-session`. It is control-plane data: no secrets, no claim content.
+   The evidence of record stays each node's signed event log (the local
+   `incident.engage` event; the resulting `incident-frozen` /
+   `capability-revoked` deny events everywhere). The `RevocationChannel` port
+   has an in-memory backend (default single node; a shared instance is the
+   multi-node test seam) and a Postgres backend (the real multi-node/CLI
+   story, live-tested only when `DATABASE_URL` exists).
+3. **Propagation is pull-on-decision and bounded by the channel interval.**
+   `IncidentService.sync(force)` pulls `since(cursor)` and applies records
+   idempotently in seq order. `authorize` syncs throttled (default interval
+   1000 ms — inside the ROADMAP ≤ 5 s target); `issue` syncs forced (issuance
+   is rare and a post-freeze mint must not slip through a throttle window).
+   A fresh node replays from cursor 0, so a restart reconstructs freeze state
+   and revocations from the channel. A channel outage never blocks local
+   enforcement: the failure is counted, surfaced in status, and recorded as
+   `broadcastOk: false` on the engage event.
+4. **Evidence preservation is a first-class artifact.** `IncidentService.
+   preserve` pages the ordinary authorized audit export (page size 1000,
+   cursor on seq — removing M6's silent truncation), verifies the slice
+   offline with the event public key, checks the live global chain and the
+   anchor head, writes an `ASL incident bundle v1` file (tenant, requested and
+   actual seq bounds, events with signatures, head `previousHead`,
+   `chainValid`, `anchorMatch`, `digest`), and appends one `incident.preserve`
+   event carrying digest + head + counts only — never event content.
+   `reconstruct` summarizes the same authorized slice: decision counts by
+   reason and action, revocation/freeze events, actors, first/last timestamp.
+5. **No new authority path.** Engage/lift/preserve/reconstruct call existing
+   services (authorization, sessions, audit query); the CLI is an operator
+   surface over the local world, and in Postgres mode its channel publish
+   reaches the running node. No REST route is added until a client calls one
+   (M17/M18 precedent).
+
+**Alternatives:**
+- **Ride the event log as the broadcast.** Rejected: the chain is
+  single-writer, and a second writer racing the chain would corrupt the
+  tamper-evidence that makes the log trustworthy. Revocation coordination and
+  evidence are different planes; they stay separate.
+- **Push (SSE/`LISTEN`/webhooks).** Rejected: a second process, a second
+  runtime dependency surface, and a reconnect story for a target that 1 s
+  polling already meets. Pull-on-decision has no daemon to keep alive.
+- **Poll every request with no throttle.** Rejected: a DB round-trip per
+  decision, for a state that changes in an incident. Throttled on the hot
+  path, forced on issuance gets both latency bound and no throttled mint.
+- **Durable local freeze state (a file).** Rejected: a second source of truth
+  that can drift from the channel; the channel *is* the state, and cursor-0
+  replay reconstructs it. The in-memory backend is explicitly single-node —
+  restart durability is the Postgres channel's property, named as such.
+- **Publish per-capability revocations to the channel.** Rejected: a
+  kill-switch record should be one small control-plane row, not a fan-out of
+  thousands; `revoke-caps` is scope-level and each node applies it to its own
+  registry, so the node's local audit shows exactly what that node killed.
+- **Unbounded export in M6's service.** Rejected: the M6 service boundary
+  (≤ 1000 per page) is deliberate; H13 pages through it in `preserve` instead
+  of weakening the service for every caller.
+- **Sign the incident bundle with a separate key.** Rejected for now: the
+  bundle's integrity chains back to the per-event signatures and the anchored
+  head that are already verified inside it; a separate custody key is an
+  ADR-008 ceremony, not a code decision.
+
+**Reasoning:** Incident response is a *control*, and a control that cannot be
+measured against a latency target is a promise. The design makes three
+properties testable and distinct: the kill switch is immediate locally, the
+broadcast is bounded cross-node, and the preserved artifact is independently
+verifiable offline. It reuses what already exists (one issuance path, one
+decision path, one authorized export) rather than inventing an emergency
+authority path — the incident itself is exactly when a parallel path would be
+abused.
+
+**Security implications:** Closes the incident-response failure modes as
+mechanisms: freeze + bulk revoke (tenant/global), cross-node propagation
+within the poll bound, single-target revocation, restart reconstruction from
+the channel, an unbounded-during-incident preservation artifact, and a
+reconstruction summary. Does NOT close: a compromised operator with channel
+write access (they can freeze legitimate work — denial of service is the
+accepted H15 trade; make it loud), a channel outage wider than the sync
+interval (bounded by polling, not prevented), or an incident that is faster
+than the on-call human (the ROADMAP residual, unchanged).
+
+**Tradeoffs:** One more Postgres table and one more in-memory map; a forced
+channel read on issuance (rare path); the channel carries tenant ids and
+operator reasons, so it must not carry secrets — reason text is operator-typed
+and treated as non-secret. Frozen state on a single in-memory node is lost on
+restart (documented; Postgres replay is the durable story). Local-first
+engage means a channel outage still kills the local node and reports the
+broadcast failure rather than refusing the operator's emergency action.
+
+**Residual risk (ponytail):** poll-based propagation and a non-enforcing
+remote client — `ponytail: pull-on-decision with a 1 s interval and a
+Postgres channel; a push transport or a second-node integration test when a
+real second node exists; the operator CLI mints audit.export authority for
+preserve through the existing root path — split operator identity from root
+when an operator service exists`. Residual accepted and named: an adversary
+who can write the channel can freeze; incident response is slower than the
+attack (ROADMAP H13 residual).
+
+**Future migration path:** push/`LISTEN` transport and a dedicated operator
+identity service; legal-hold/retention policies over the preservation
+artifacts; H11 external anchoring of preserved bundle digests; federation
+clients (M18+) consume the kill switch over the channel or a REST route when
+one is actually needed.
+
+**Addendum (session-audit fixes, 2026-10-01):** four corrections the same-day
+audit proved by probe, all consistent with the decisions above:
+
+1. **A rejected channel row never stalls the cursor.** `PostgresRevocationChannel.load`
+   skips rows `parseChannelRow` refuses, records the rejection through
+   `health()`, and advances `maxSeq` past them. The table is append-only, so
+   without the skip one hostile (or future-version) row would halt all
+   revocation propagation on every node forever.
+2. **The global-incident evidence view is `tenantId: '*'`.** Global-scope
+   events are recorded with `tenantId: ''` (no tenant owns them); `'*'`
+   reaches exactly those events through the ordinary authorized window,
+   gated by the caller's own tenant `audit.export` capability. Tenant
+   isolation is unchanged — no other tenant's events are reachable.
+3. **Filtered bundles record `contiguous: false`.** A slice of events with
+   gaps (global view, or one tenant interleaved with another) cannot pass
+   linkage verification. `preserve` records whether the slice is an unbroken
+   chain; `verifyIncidentBundle` verifies contiguous slices with the full
+   linkage walk and non-contiguous slices per-event (hash + signature + the
+   recorded live-chain state + anchor head).
+4. **Operator CLI commands build a bootstrap-free world** (`buildWorld({ bootstrap: false })`):
+   `incident status|engage|lift|revoke-cap|revoke-session|preserve|report`
+   must not mint fixture capabilities or append fixture events to a shared
+   (Postgres) evidence chain, and refusals print a diagnosable line rather
+   than a stack trace.

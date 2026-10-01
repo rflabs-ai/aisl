@@ -197,7 +197,8 @@ export type DenyReason =
   | 'approval-mfa-required'
   | 'approval-session-bound'
   | 'capability-revoked'
-  | 'capability-request-denied';
+  | 'capability-request-denied'
+  | 'incident-frozen';
 
 export interface AuthorizationDecision {
   readonly decision: Decision;

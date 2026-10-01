@@ -156,6 +156,13 @@ export interface RestApiDeps {
    * client (bearer JWT typed by the operator at runtime).
    */
   readonly staticPages?: readonly StaticPage[];
+  /**
+   * H13 (ADR-026): pull revocation-channel records once per authorized
+   * request, so a running server converges inside the poll interval even when
+   * the traffic is session/audit-only (the PDP path syncs itself). Optional —
+   * without it the M14 surface is unchanged.
+   */
+  readonly incidentSync?: () => void;
 }
 
 export interface StaticPage {
@@ -187,6 +194,7 @@ export class RestApi {
   private readonly resolvePrincipalFn: (auth: AuthContext) => Principal | undefined;
   private readonly storeHealth: () => 'ok' | 'unavailable';
   private readonly maxBodyBytes: number;
+  private readonly incidentSync?: () => void;
   private readonly routes = new Map<string, CompiledRoute>();
   private server: Server | undefined;
   private port: number | undefined;
@@ -198,6 +206,7 @@ export class RestApi {
     this.resolvePrincipalFn = deps.resolvePrincipal;
     this.storeHealth = deps.storeHealth ?? (() => 'ok');
     this.maxBodyBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    this.incidentSync = deps.incidentSync;
 
     this.addRoute('GET', '/healthz', () => ({
       status: 200,
@@ -297,6 +306,17 @@ export class RestApi {
     } else {
       principal = ANONYMOUS_PRINCIPAL;
       auth = ANONYMOUS_AUTH;
+    }
+
+    // H13: converge on the revocation channel once per authorized request.
+    // Unauthenticated floods do not reach this line, and a sync failure never
+    // blocks the request (the PDP's own fail-closed paths still apply).
+    if (route.needsAuth) {
+      try {
+        this.incidentSync?.();
+      } catch {
+        // Surfaced via incident status counters, not request failure.
+      }
     }
 
     let body: unknown = undefined;

@@ -47,6 +47,33 @@ export interface RevokedCapability {
   readonly reason: string;
 }
 
+/**
+ * H13 (ADR-026): a freeze entry — the kill switch. Scope 'global' freezes every
+ * tenant; scope 'tenant' freezes one. `reason`/`actor` are operator-supplied
+ * and must not contain secrets (same posture as event metadata).
+ */
+export interface FreezeEntry {
+  readonly scope: 'tenant' | 'global';
+  readonly tenantId?: string;
+  readonly reason: string;
+  readonly at: number;
+  readonly actor: string;
+}
+
+/**
+ * Structural shape of a revocation-channel record, as the PDP needs it. The
+ * channel types live in src/incident.ts; the PDP accepts this subset so the
+ * dependency direction stays pdp <- incident (no cycle).
+ */
+export interface IncidentRecordLike {
+  readonly action: string;
+  readonly scope: 'tenant' | 'global';
+  readonly tenantId?: string;
+  readonly targetId?: string;
+  readonly reason: string;
+  readonly at: number;
+}
+
 const REASON_PRIORITY: readonly DenyReason[] = [
   'capability-revoked',
   'capability-expired',
@@ -57,9 +84,33 @@ const REASON_PRIORITY: readonly DenyReason[] = [
   'capability-scope',
 ];
 
+/**
+ * H13 (ADR-026): actions that read evidence rather than act. The kill switch
+ * freezes acting authority; evidence reads stay authorized (under their own
+ * capability + policy) so an incident can be reconstructed and preserved
+ * while the switch is engaged. `revokeAll` also spares capabilities whose
+ * action set is entirely evidence-read, so the responder's export ability
+ * survives the kill switch and `lift` restores no authority — it only lifts
+ * the freeze.
+ */
+const EVIDENCE_READ_ACTIONS: ReadonlySet<string> = new Set(['query.audit', 'audit.export', 'evidence.decrypt']);
+
 export class AuthorizationService {
   private readonly capabilities = new Map<string, Capability>();
   private readonly revoked = new Map<string, RevokedCapability>();
+  /**
+   * H13: issuance timestamps (local bookkeeping, not part of the signed
+   * capability). Used to fence replayed `revoke-caps` records: a bulk revoke
+   * applies only to capabilities that existed at the record's timestamp, so a
+   * capability issued after an incident (and after `lift`) is not killed by a
+   * replayed channel record.
+   */
+  private readonly registeredAt = new Map<string, number>();
+  private readonly frozenTenants = new Map<string, FreezeEntry>();
+  private globalFreeze?: FreezeEntry;
+  private broadcastSync?: (force: boolean) => void;
+  private syncIntervalMs = 1_000;
+  private lastSyncAt = Number.NEGATIVE_INFINITY;
   private readonly registry: ResourceRegistry;
   private readonly engine: PolicyEngine;
   private readonly eventLog: EventStore;
@@ -94,6 +145,29 @@ export class AuthorizationService {
     request: IssueRequest,
     parent?: Capability,
   ): Capability {
+    // H13 (ADR-026): issuance force-syncs the revocation channel — issuance is
+    // rare, and a kill switch published while this node's throttle window is
+    // open must not let a mint through. Fail-closed: a sync failure is counted
+    // but never blocks the decision path here; the local freeze check below
+    // and the event store's own failure semantics still apply.
+    this.syncBroadcast(true);
+    const freeze = this.freezeFor(issuer.tenantId);
+    if (freeze) {
+      const refusal = `incident-frozen: incident response has frozen issuance for tenant ${issuer.tenantId} (${freeze.reason})`;
+      this.eventLog.append({
+        tenantId: issuer.tenantId,
+        principal: issuer.id,
+        actor: issuer.id,
+        actorKind: issuer.kind,
+        action: 'capability.issue',
+        resourceId: request.resourceIds.join(','),
+        decision: 'deny',
+        denyReason: 'incident-frozen',
+        result: 'denied',
+        metadata: { phase: 'capability-issuance-refused', refusal },
+      });
+      throw new CapabilityIssuanceError(refusal);
+    }
     if (parent) {
       const custodyError = !this.capabilities.has(parent.id)
         ? `parent capability ${parent.id} is not registered with this authorization service`
@@ -120,6 +194,7 @@ export class AuthorizationService {
     }
     const cap = issueCapability(issuer, request, this.now(), parent);
     this.capabilities.set(cap.id, cap);
+    this.registeredAt.set(cap.id, this.now());
     this.eventLog.append({
       tenantId: cap.tenantId,
       principal: issuer.id,
@@ -161,6 +236,7 @@ export class AuthorizationService {
 
   grant(cap: Capability): void {
     this.capabilities.set(cap.id, cap);
+    this.registeredAt.set(cap.id, this.now());
   }
 
   capabilitiesFor(subject: string): readonly Capability[] {
@@ -210,7 +286,151 @@ export class AuthorizationService {
     return [...this.revoked.values()];
   }
 
+  // ---- H13 (ADR-026): incident-response state -----------------------------
+
+  /**
+   * Install the revocation-channel sync hook. Called throttled from
+   * `authorize` (bounded by `intervalMs`, default 1 s — inside the ≤ 5 s
+   * propagation target) and forced from `issue`.
+   */
+  setBroadcastSync(sync: (force: boolean) => void, intervalMs = 1_000): void {
+    this.broadcastSync = sync;
+    this.syncIntervalMs = intervalMs;
+  }
+
+  private syncBroadcast(force: boolean): void {
+    if (!this.broadcastSync) return;
+    if (!force && this.now() - this.lastSyncAt < this.syncIntervalMs) return;
+    this.lastSyncAt = this.now();
+    try {
+      this.broadcastSync(force);
+    } catch {
+      // A hook bug must never block the decision path; the service's own sync
+      // counters (IncidentService.status) are the operator-visible health.
+    }
+  }
+
+  /** The freeze covering this tenant, if any (a global freeze covers all). */
+  freezeFor(tenantId: string): FreezeEntry | undefined {
+    return this.globalFreeze ?? this.frozenTenants.get(tenantId);
+  }
+
+  isFrozen(tenantId: string): boolean {
+    return this.freezeFor(tenantId) !== undefined;
+  }
+
+  freezeState(): readonly FreezeEntry[] {
+    return [...(this.globalFreeze ? [this.globalFreeze] : []), ...this.frozenTenants.values()];
+  }
+
+  /** H13 kill switch: freeze issuance and authorization for a tenant (or all). */
+  freeze(scope: 'tenant' | 'global', tenantId: string | undefined, reason: string, actor: string): void {
+    if (scope === 'tenant' && (!tenantId || tenantId.trim() === '')) {
+      throw new Error('a tenant freeze requires a tenant id');
+    }
+    const entry: FreezeEntry = { scope, ...(scope === 'tenant' ? { tenantId } : {}), reason, at: this.now(), actor };
+    if (scope === 'global') this.globalFreeze = entry;
+    else this.frozenTenants.set(tenantId!, entry);
+    this.eventLog.append({
+      tenantId: scope === 'global' ? '' : tenantId!,
+      principal: actor,
+      actor: actor,
+      actorKind: 'authorization',
+      action: 'incident.freeze',
+      resourceId: scope,
+      decision: 'allow',
+      result: 'success',
+      metadata: { phase: 'incident-freeze', scope, tenantId: tenantId ?? null, reason },
+    });
+  }
+
+  /** Lift a freeze. Revoked capabilities are NOT restored — freeze is reversible, revocation is not. */
+  unfreeze(scope: 'tenant' | 'global', tenantId: string | undefined, reason: string, actor: string): boolean {
+    const existed = scope === 'global' ? this.globalFreeze !== undefined : this.frozenTenants.delete(tenantId ?? '');
+    if (!existed) return false;
+    if (scope === 'global') this.globalFreeze = undefined;
+    this.eventLog.append({
+      tenantId: scope === 'global' ? '' : tenantId!,
+      principal: actor,
+      actor: actor,
+      actorKind: 'authorization',
+      action: 'incident.lift',
+      resourceId: scope,
+      decision: 'allow',
+      result: 'success',
+      metadata: { phase: 'incident-lift', scope, tenantId: tenantId ?? null, reason },
+    });
+    return true;
+  }
+
+  /**
+   * H13 bulk revocation: revoke every registered capability in scope, one
+   * audited `capability.revoke` event per capability (the evidence shows
+   * exactly what was killed, not just a count).
+   */
+  revokeAll(scope: 'tenant' | 'global', tenantId: string | undefined, reason: string): number {
+    if (scope === 'tenant' && (!tenantId || tenantId.trim() === '')) {
+      throw new Error('a tenant revokeAll requires a tenant id');
+    }
+    let count = 0;
+    for (const cap of [...this.capabilities.values()]) {
+      if (this.revoked.has(cap.id)) continue;
+      if (scope === 'tenant' && cap.tenantId !== tenantId) continue;
+      // Evidence-read capabilities (audit query/export, evidence decryption)
+      // are not acting authority: an incident responder must still be able to
+      // reconstruct and preserve evidence while the switch is engaged.
+      if (cap.actions.every((a) => EVIDENCE_READ_ACTIONS.has(a))) continue;
+      this.revoke(cap.id, reason);
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * Apply a revocation-channel record to local state (H13). Idempotent and
+   * eventless by design: the channel record is the coordination evidence, and
+   * the node's subsequent deny decisions are its local evidence. `revoke-caps`
+   * is fenced by issuance time so replay cannot kill authority issued after
+   * the incident.
+   */
+  applyIncidentRecord(record: IncidentRecordLike): void {
+    const inScope = (tenantId: string): boolean => record.scope === 'global' || tenantId === record.tenantId;
+    switch (record.action) {
+      case 'freeze':
+        if (record.scope === 'global') {
+          this.globalFreeze = { scope: 'global', reason: record.reason, at: record.at, actor: 'channel' };
+        } else if (record.tenantId) {
+          this.frozenTenants.set(record.tenantId, { scope: 'tenant', tenantId: record.tenantId, reason: record.reason, at: record.at, actor: 'channel' });
+        }
+        break;
+      case 'unfreeze':
+        if (record.scope === 'global') this.globalFreeze = undefined;
+        else if (record.tenantId) this.frozenTenants.delete(record.tenantId);
+        break;
+      case 'revoke-caps':
+        for (const cap of this.capabilities.values()) {
+          if (this.revoked.has(cap.id)) continue;
+          if (!inScope(cap.tenantId)) continue;
+          if (cap.actions.every((a) => EVIDENCE_READ_ACTIONS.has(a))) continue;
+          if ((this.registeredAt.get(cap.id) ?? 0) > record.at) continue;
+          this.revoked.set(cap.id, { capabilityId: cap.id, revokedAt: record.at, reason: record.reason });
+        }
+        break;
+      case 'revoke-cap':
+        if (record.targetId) {
+          this.revoked.set(record.targetId, { capabilityId: record.targetId, revokedAt: record.at, reason: record.reason });
+        }
+        break;
+      default:
+        // Session-scoped actions are applied by IncidentService.
+        break;
+    }
+  }
+
   authorize(input: AuthorizeInput): AuthorizationDecision {
+    // H13: pull revocation-channel records (throttled). Bounded by the
+    // configured interval, inside the ROADMAP ≤ 5 s propagation target.
+    this.syncBroadcast(false);
     const at = this.now();
     const { principal, action, resourceId } = input;
 
@@ -429,6 +649,24 @@ export class AuthorizationService {
   private evaluate(input: AuthorizeInput, at: number): AuthorizationDecision {
     const { principal, action, resourceId, params, networkHost, approvals } = input;
     try {
+      // H13 (ADR-026): the kill switch trumps every other consideration for a
+      // frozen tenant (or globally). Distinct reason so an incident is
+      // operator-distinguishable from a policy or capability denial.
+      const freeze = this.freezeFor(principal.tenantId);
+      if (freeze && !EVIDENCE_READ_ACTIONS.has(action)) {
+        return deny(
+          principal.id,
+          action,
+          resourceId,
+          'incident-frozen',
+          freeze.scope === 'global'
+            ? `global freeze active by incident response (${freeze.reason})`
+            : `tenant ${principal.tenantId} is frozen by incident response (${freeze.reason})`,
+          at,
+          '@incident-response',
+        );
+      }
+
       // The synthetic audit-log resource is registered by queryAudit() before it
       // delegates here. A direct authorize() call on a caller-constructed
       // audit-log:* id has no such registration and fails closed as

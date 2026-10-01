@@ -33,6 +33,8 @@ describe('H13: revocation channel migration (static DDL invariants)', () => {
   test('append-only by privilege: app_rw gets SELECT + INSERT only, no RLS, scope is constrained', () => {
     const sql = INCIDENT_MIGRATION.sql;
     assert.match(sql, /GRANT SELECT, INSERT ON revocation_channel TO app_rw/);
+    // The live run proved the sequence name: BIGSERIAL on column `seq`.
+    assert.match(sql, /GRANT USAGE, SELECT ON SEQUENCE revocation_channel_seq_seq TO app_rw/);
     assert.doesNotMatch(sql, /GRANT[^;]*UPDATE/i);
     assert.doesNotMatch(sql, /GRANT[^;]*DELETE/i);
     assert.doesNotMatch(sql, /ENABLE ROW LEVEL SECURITY/i);

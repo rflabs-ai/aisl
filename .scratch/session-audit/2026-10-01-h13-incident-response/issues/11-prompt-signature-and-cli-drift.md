@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -30,3 +30,7 @@ Update prompt lines 84/85 to the scope-based signatures and line 136 to the
 - `Select-String PROMPTS\H-Track\H13-incident-response.md -Pattern "freeze\(tenantId"` → `prompt:84: ... freeze(tenantId | '*', reason, actor)`
 - `Select-String ... -Pattern "node src/cli.ts incident status\|"` → `prompt:136: ... status|engage|lift|preserve|report`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+Phase 1 signatures updated to the shipped scope-based forms (`freeze(scope, tenantId, reason, actor)`, `unfreeze`, `revokeAll(scope, tenantId, reason)`, `applyIncidentRecord(record)`) and the Phase 3 CLI line now lists all 7 subcommands, matching ADR-026 and the prompt's own resolution section.

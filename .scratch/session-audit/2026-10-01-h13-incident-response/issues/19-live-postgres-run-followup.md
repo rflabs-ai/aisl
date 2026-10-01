@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -32,3 +32,31 @@ demo` to confirm exit and channel behavior (and check whether `demo`/`attack`/
 - `Start-Service com.docker.service` → `Cannot open 'com.docker.service' service on computer '.'`
 - `node --test tests/h13-revocation-pg.test.ts` → `﹣ ... # DATABASE_URL is not set (ADR-026: Postgres tests skip cleanly)`
 - `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md` row 35
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+Run executed against a disposable `postgres:16` container (Docker):
+`DATABASE_URL` + `MIGRATION_DATABASE_URL`; full suite serialized
+(`node --test --test-concurrency=1` — the suites assume an exclusive scratch DB)
+→ 612 tests / 611 pass / 1 environment-gated skip / 0 fail.
+`EVENT_STORE=postgres npm run demo` and `npm run attack` exit 0 (no hang);
+`npm run benchmark` exits 0 on a fresh chain.
+
+Live-only findings, all fixed in the same session:
+- migration 4's `GRANT ... ON SEQUENCE revocation_channel_seq` aborted the
+  migration on a live server — BIGSERIAL on `seq` names the sequence
+  `revocation_channel_seq_seq`; the static DDL test now pins the name.
+- `flush()` awaited a bare `SELECT 1` on a pooled connection rather than the
+  queued inserts; the channel now tracks pending queries and awaits them.
+- `eventBody` hashed raw `metadata`; an explicit `undefined` value (the
+  envelope-secrets deny path) made the stored hash irreproducible on reload
+  (Postgres and SQLite). Metadata is JSON-normalized before hashing;
+  regression test in `tests/m3-evidence-hardening.test.ts`.
+- demo section 22 built its two simulated nodes through the process's store;
+  it now forces in-memory worlds (`WorldOptions.memory`), and
+  `demo`/`attack`/`benchmark` close `world.incident` before exit.
+- one live-only test bug: M15 capability-requests reused an id across tenants
+  (ids are service-generated UUIDs); the test now proves isolation with
+  distinct ids.
+- PG-mode benchmark expects a fresh chain — a reused database inflates
+  `auditCompleteness` (noted in ADR-026 addendum 2).

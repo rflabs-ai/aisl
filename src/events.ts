@@ -237,6 +237,12 @@ export function bundleFromEvents(events: readonly SecurityEvent[]): string {
 /**
  * Canonical body used for hashing AND signing. Both must cover the same bytes
  * so a verifier can independently recompute both and detect any tamper.
+ *
+ * The body must also survive the JSON round trip every persistence backend
+ * performs: `JSON.stringify(event)` drops explicit `undefined` values and
+ * normalizes Dates, so hashing the raw object would produce a hash the stored
+ * event cannot reproduce after a reload (H13 live-Postgres finding). Metadata
+ * is normalized through the same round trip before hashing.
  */
 export function eventBody(e: Omit<SecurityEvent, 'eventHash' | 'signature'>): Record<string, unknown> {
   return {
@@ -253,7 +259,7 @@ export function eventBody(e: Omit<SecurityEvent, 'eventHash' | 'signature'>): Re
     policyId: e.policyId ?? null,
     capabilityId: e.capabilityId ?? null,
     result: e.result,
-    metadata: e.metadata ?? null,
+    metadata: e.metadata === undefined ? null : JSON.parse(JSON.stringify(e.metadata)),
     previousEventHash: e.previousEventHash,
   };
 }

@@ -19,7 +19,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionManager } from '../src/session-manager.ts';
+import { issueCapability } from '../src/capability.ts';
 import { eventPublicKey } from '../src/events.ts';
+import { authorizationRoot } from '../src/pdp.ts';
 import { RestApi } from '../src/rest-api.ts';
 import { createMockIdP, testWorld, mockAuth, testUser } from '../src/testing.ts';
 import { TENANT_A, TENANT_B, type World } from '../src/scenario.ts';
@@ -55,6 +57,25 @@ function issueAuditCapability(world: World): void {
 function tempDir(prefix: string): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/** Tenant-B authority registered through the embedder rehydration seam (grant). */
+function grantForeignCapability(world: World) {
+  const cap = issueCapability(
+    authorizationRoot(TENANT_B),
+    {
+      subject: world.foreignAgent.id,
+      tenantId: TENANT_B,
+      resourceIds: [world.resources.foreignDoc!],
+      actions: ['read'],
+      maxClassification: 'confidential',
+      expiresAt: world.clock.now() + 3_600_000,
+      provenance: { source: 'policy-grant', note: 'audit ticket 12 test authority' },
+    },
+    world.clock.now(),
+  );
+  world.authorization.grant(cap);
+  return cap;
 }
 
 /** A channel whose publish always fails — channel-outage behavior. */
@@ -397,6 +418,124 @@ describe('H13: revocation channel broadcast', () => {
     } finally {
       api.stop();
     }
+  });
+});
+
+describe('H13: audit follow-ups (tickets 10, 12, 16)', () => {
+  test('ticket 12: a tenant-scoped revoke-cap record cannot revoke another tenant\'s capability', () => {
+    const world = testWorld();
+    const foreignCap = grantForeignCapability(world);
+
+    world.authorization.applyIncidentRecord({
+      action: 'revoke-cap',
+      scope: 'tenant',
+      tenantId: TENANT_A,
+      targetId: foreignCap.id,
+      reason: 'cross-tenant probe',
+      at: world.clock.now(),
+    });
+    assert.equal(world.authorization.isRevoked(foreignCap.id), false, 'tenant A record must not revoke tenant B authority');
+
+    // The same record within its own tenant still applies.
+    const localCap = world.authorization.capabilitiesFor(world.agent.id)[0]!;
+    world.authorization.applyIncidentRecord({
+      action: 'revoke-cap',
+      scope: 'tenant',
+      tenantId: TENANT_A,
+      targetId: localCap.id,
+      reason: 'in-scope revoke',
+      at: world.clock.now(),
+    });
+    assert.equal(world.authorization.isRevoked(localCap.id), true);
+
+    // A global record reaches every tenant by design.
+    world.authorization.applyIncidentRecord({
+      action: 'revoke-cap',
+      scope: 'global',
+      targetId: foreignCap.id,
+      reason: 'global sweep',
+      at: world.clock.now(),
+    });
+    assert.equal(world.authorization.isRevoked(foreignCap.id), true);
+  });
+
+  test('ticket 12: the operator revoke path refuses a tenant mismatch for a locally registered capability', () => {
+    const world = testWorld();
+    const foreignCap = grantForeignCapability(world);
+    assert.throws(() => world.incident.revokeCapability(foreignCap.id, TENANT_A, 'wrong tenant'), IncidentInputError);
+    assert.equal(world.authorization.isRevoked(foreignCap.id), false);
+  });
+
+  test('ticket 10: a lifted freeze propagates cross-node while revoked authority stays revoked', () => {
+    const channel = new InMemoryRevocationChannel();
+    const nodeA = testWorld({ channel });
+    const nodeB = testWorld({ channel });
+    const capId = nodeB.authorization.capabilitiesFor(nodeB.agent.id)[0]!.id;
+
+    nodeA.incident.engage({ scope: 'tenant', tenantId: TENANT_A, reason: 'node A engage', actor: 'user:oncall' });
+    nodeB.incident.sync(true);
+    assert.equal(nodeB.authorization.isFrozen(TENANT_A), true);
+    assert.equal(nodeB.authorization.isRevoked(capId), true);
+
+    nodeA.incident.lift({ scope: 'tenant', tenantId: TENANT_A, reason: 'node A lift', actor: 'user:oncall' });
+    nodeB.incident.sync(true);
+    assert.equal(nodeB.authorization.isFrozen(TENANT_A), false, 'lift must propagate');
+    assert.equal(nodeB.authorization.isRevoked(capId), true, 'lift never restores revoked authority');
+  });
+
+  test('ticket 10: revoke-caps is fenced by local issuance time', () => {
+    const world = testWorld();
+    const before = world.authorization.capabilitiesFor(world.agent.id)[0]!;
+    const recordAt = world.clock.now() + 1_000;
+    world.clock.advance(2_000);
+    const after = world.authorization.issue(world.root, {
+      subject: world.agent.id,
+      tenantId: TENANT_A,
+      resourceIds: [world.resources.internalDoc!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: world.clock.now() + 60_000,
+      provenance: { source: 'policy-grant' },
+    });
+
+    world.authorization.applyIncidentRecord({
+      action: 'revoke-caps',
+      scope: 'tenant',
+      tenantId: TENANT_A,
+      reason: 'replayed bulk revoke',
+      at: recordAt,
+    });
+    assert.equal(world.authorization.isRevoked(before.id), true, 'authority issued before the record must be revoked');
+    assert.equal(world.authorization.isRevoked(after.id), false, 'authority issued after the record survives the replay');
+  });
+
+  test('ticket 16: grant() is the embedder rehydration seam — authority registered while frozen is unusable until lift', () => {
+    const world = testWorld();
+    const cap = issueCapability(
+      world.root,
+      {
+        subject: world.agent.id,
+        tenantId: TENANT_A,
+        resourceIds: [world.resources.internalDoc!],
+        actions: ['read'],
+        maxClassification: 'internal',
+        expiresAt: world.clock.now() + 3_600_000,
+        provenance: { source: 'policy-grant', note: 'ticket 16 rehydration probe' },
+      },
+      world.clock.now(),
+    );
+
+    world.incident.engage({ scope: 'tenant', tenantId: TENANT_A, reason: 'frozen during rehydration', actor: 'user:oncall' });
+    // Rehydration happens after the kill switch: the engage record's timestamp
+    // is strictly below registeredAt, so the issuance-time fence spares it.
+    world.clock.advance(1);
+    world.authorization.grant(cap);
+    const frozen = world.authorization.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.internalDoc! });
+    assert.equal(frozen.denyReason, 'incident-frozen', 'grant must not be a way around the freeze');
+
+    world.incident.lift({ scope: 'tenant', tenantId: TENANT_A, reason: 'contained', actor: 'user:oncall' });
+    const afterLift = world.authorization.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.internalDoc! });
+    assert.equal(afterLift.decision, 'allow');
   });
 });
 

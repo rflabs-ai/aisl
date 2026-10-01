@@ -81,10 +81,10 @@ Phase 0 is the ADR. Nothing else ships until ADR-026 lands.
 
 - `Domain.DenyReason` gains `'incident-frozen'` (distinct from
   `capability-revoked`, `store-unavailable`, etc.).
-- `AuthorizationService`: `freeze(tenantId | '*', reason, actor)`,
-  `unfreeze(...)`, `isFrozen(tenantId)`, `freezeState()`,
-  `revokeAll(tenantId | '*', reason)` (one audited `capability.revoke` event
-  per revoked capability), and `applyRevocationRecord(record)` for
+- `AuthorizationService`: `freeze(scope: 'tenant' | 'global', tenantId, reason,
+  actor)`, `unfreeze(...)`, `isFrozen(tenantId)`, `freezeState()`,
+  `revokeAll(scope, tenantId, reason)` (one audited `capability.revoke` event
+  per revoked capability), and `applyIncidentRecord(record)` for
   channel-applied state. Freeze entries are checked first in `evaluate()`
   (deny + the ordinary decision event) and at the top of `issue()` (refusal +
   a `capability.issue` deny event mirroring H1's custody refusals).
@@ -133,7 +133,7 @@ Phase 0 is the ADR. Nothing else ships until ADR-026 lands.
   stays `incident.close()` + `eventLog.close()` at the CLI's call sites.
 - `rest-api.ts`: optional `incidentSync` dependency called once per authorized
   request so a running server (not just PDP traffic) pulls the channel.
-- CLI: `node src/cli.ts incident status|engage|lift|preserve|report`.
+- CLI: `node src/cli.ts incident status|engage|lift|revoke-cap|revoke-session|preserve|report`.
 - Demo: section 22 (`H13: incident response — kill switch, broadcast,
   preservation`) with a measured engage→deny latency, a two-node broadcast,
   and a preservation round trip. Exits 0.
@@ -265,3 +265,18 @@ The same-day session audit (`.scratch/session-audit/2026-10-01-h13-incident-resp
 - 09 dead `broadcastSyncFailures` counter removed.
 
 The 04 fix surfaced a related verifier property: filtered slices (global view, interleaved tenants) are not contiguous, so bundles now record `contiguous` and `verifyIncidentBundle` verifies non-contiguous slices per-event (hash + signature + recorded live-chain state + anchor head) instead of requiring linkage. See ADR-026's addendum.
+
+## Audit follow-up (tickets 10–19, 2026-10-01)
+
+The nit tickets were worked on `fix/h13-audit-tickets-10-19`, which also ran the first live Postgres verification (ticket 19):
+
+- 10 tests: cross-node `unfreeze` propagation (revoked authority stays revoked) and the `revoke-caps` issuance-time fence are now suite cases.
+- 11 prompt: Phase 1 signatures are scope-based (`freeze(scope, tenantId, ...)`, `revokeAll(scope, ...)`, `applyIncidentRecord`) and the CLI list shows all 7 subcommands.
+- 12 `revoke-cap` tenant scope: a tenant-scoped record cannot revoke another tenant's registered capability; a locally registered tenant mismatch in `revokeCapability` refuses with `IncidentInputError`.
+- 13 REST owner `DELETE /v1/sessions/:id` is documented node-local; cross-node revocation is `incident revoke-session` (route ceiling + DEPLOYMENT).
+- 14 CLI narrow revocation now mirrors the engage branch: `broadcast OK|FAILED` from post-flush health and exit 1 on channel errors.
+- 15 report shape: `incident report` prints the action breakdown; `IncidentStatus.freezes` imports `FreezeEntry` instead of re-declaring it.
+- 16 `grant()` documented as the rehydration seam (bypasses the issuance freeze; `evaluate` still denies while frozen) with a regression test.
+- 17 benchmark artifact convention: `benchmarks/results.json` is committed at milestone boundaries only (CURRENT_STATE note).
+- 18 unbounded mirror: `ponytail:` marker with ceiling + upgrade path added.
+- 19 live Postgres run (`postgres:16`, Docker): the 4 live channel tests pass; the full serialized suite is 612 tests / 611 pass / 1 environment-gated skip / 0 fail. The run caught and fixed three real defects: the migration-4 sequence grant (`revocation_channel_seq_seq`), `flush()` not awaiting in-flight writes, and `eventBody` hashing raw metadata (explicit `undefined` values made stored hashes irreproducible — Claim 8). `EVENT_STORE=postgres` demo/attack exit 0; the demo's two-node section now forces in-memory worlds, and `demo`/`attack`/`benchmark` close `world.incident` as well as the store. In PG mode the benchmark expects a fresh chain (a reused database inflates `auditCompleteness`).

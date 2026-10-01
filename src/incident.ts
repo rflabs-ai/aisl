@@ -36,7 +36,7 @@ import {
   verifyBundle,
   verifyEventSignature,
 } from './events.ts';
-import { AuthorizationService } from './pdp.ts';
+import { AuthorizationService, type FreezeEntry } from './pdp.ts';
 import { SessionManager } from './session-manager.ts';
 import { AuditQueryService } from './audit-query.ts';
 
@@ -138,7 +138,7 @@ export interface IncidentSyncResult {
 }
 
 export interface IncidentStatus {
-  readonly freezes: readonly { scope: IncidentScope; tenantId?: string; reason: string; at: number; actor: string }[];
+  readonly freezes: readonly FreezeEntry[];
   readonly frozen: boolean;
   readonly revokedCapabilities: number;
   readonly channelCursor: number;
@@ -484,6 +484,13 @@ export class IncidentService {
   /** Single-target capability revocation, local audit + broadcast. */
   revokeCapability(capabilityId: string, tenantId: string, reason: string): void {
     if (!capabilityId || !tenantId || !reason) throw new IncidentInputError('revokeCapability requires capabilityId, tenantId, and reason');
+    // Tenant isolation (audit ticket 12): a locally registered target must
+    // belong to the record's tenant. An unregistered target is allowed — the
+    // operator CLI does not hold the node's capability registry.
+    const target = this.authorization.get(capabilityId);
+    if (target && target.tenantId !== tenantId) {
+      throw new IncidentInputError(`capability ${capabilityId} belongs to tenant ${target.tenantId}, not ${tenantId}`);
+    }
     this.authorization.revoke(capabilityId, reason);
     this.channel.publish({ action: 'revoke-cap', scope: 'tenant', tenantId, targetId: capabilityId, reason, at: this.clock() });
   }

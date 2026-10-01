@@ -1749,3 +1749,33 @@ audit proved by probe, all consistent with the decisions above:
    must not mint fixture capabilities or append fixture events to a shared
    (Postgres) evidence chain, and refusals print a diagnosable line rather
    than a stack trace.
+
+**Addendum 2 (audit follow-ups 10–19 + live-Postgres run, 2026-10-01):** the
+remaining audit nit tickets and the first live run of migration 4:
+
+1. **Single-target records are tenant-scoped.** `revoke-cap` applies the same
+   `inScope` rule as `revoke-caps` (pdp.ts); a target registered to another
+   tenant is skipped, an unregistered target is still revoked (revocation
+   ahead of registration is the safe direction). `revokeCapability` refuses a
+   locally registered tenant mismatch with `IncidentInputError` (audit 12).
+2. **`flush()` awaits in-flight work.** The pool runs queries on separate
+   connections, so a bare `SELECT 1` did not order behind a publish; the
+   channel tracks pending inserts/refreshes and `flush()` awaits them before
+   health is read. Without this the CLI's broadcast check could pass before a
+   failed write surfaced (audit 19, live PG).
+3. **Migration 4 grants the real sequence name.** `BIGSERIAL` on
+   `revocation_channel.seq` names the sequence `revocation_channel_seq_seq`;
+   the original `GRANT ... ON SEQUENCE revocation_channel_seq` aborted the
+   migration on a live server (audit 19). The static DDL test now pins it.
+4. **`grant()` stays the embedder rehydration seam.** It bypasses the
+   issuance freeze and channel force-sync by design; `evaluate()` still
+   refuses to use registered authority while frozen, and `lift` restores
+   nothing revoked (audit 16, documented + regression-tested).
+5. **The owner `DELETE /v1/sessions/:id` is node-local.** Cross-node session
+   revocation is the incident path (`incident revoke-session`); the REST
+   route does not publish to the channel (audit 13, named in DEPLOYMENT and
+   the route's ceiling note).
+6. **`benchmarks/results.json` is committed at milestone boundaries only**;
+   a rerun for a local check leaves it uncommitted (audit 17). In PG mode the
+   benchmark expects a fresh chain — on a reused database `auditCompleteness`
+   exceeds 1 by construction (live-run observation, ticket 19).

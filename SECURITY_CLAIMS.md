@@ -249,7 +249,10 @@ the verifier works offline against the exported bundle.
 
 **Mechanism:** SHA-256 hash chain over canonical JSON of each event including
 the previous event's hash (`src/events.ts:83`); Ed25519 signature per event
-covering the same body (`src/events.ts:147`); append-only SQLite with
+covering the same body (`src/events.ts:147`); the hashed body normalizes
+`metadata` through a JSON round trip so explicit `undefined` values (which
+persistence drops) cannot make a stored event irreproducible after reload
+(audit ticket 19, live PG); append-only SQLite with
 `BEFORE UPDATE/DELETE` triggers that raise `security_events is append-only`
 (`src/events.ts:204`); head-hash anchor file (`<seq>:<eventHash>\n`,
 `src/events.ts:269`); standalone `verifyBundle()` verifier that operates
@@ -263,9 +266,9 @@ silently rewrite (filesystem ACLs, WORM storage, or a customer-held witness).
 The signing key is kept separate from the evidence store.
 
 **Evidence:** invariant 8 tests; M3 tests (`tests/m3-evidence-hardening.test.ts`,
-13 cases including signature tamper, tail truncation, anchor tampering,
-offline verify, and the structural check that EventLog has no update or
-delete method); benchmark `hashChainValid`.
+14 cases including signature tamper, tail truncation, anchor tampering,
+offline verify, metadata-with-undefined persist/reload, and the structural
+check that EventLog has no update or delete method); benchmark `hashChainValid`.
 
 **Test:** `tests/invariants.test.ts` invariant 8;
 `tests/m3-evidence-hardening.test.ts`.
@@ -1661,13 +1664,17 @@ multi-writer table (append-only by privilege: `app_rw` SELECT/INSERT, no
 UPDATE/DELETE grant, no RLS — control-plane coordination data with no claim
 content); the event chain stays single-writer. Records are scope-level
 (`freeze`/`unfreeze`/`revoke-caps`/`revoke-sessions`) and single-target
-(`revoke-cap`/`revoke-session`); `revoke-caps` is fenced by local issuance
+(`revoke-cap`/`revoke-session`); a tenant-scoped `revoke-cap` record can only
+revoke a capability registered to that tenant (audit 12), and `revoke-caps`
+is fenced by local issuance
 time so replay cannot kill authority issued after the incident. A fresh node
 replays from cursor 0. A malformed/unknown channel row is rejected and
 skipped with the cursor advancing past it (audit 01) — one hostile or
 future-version row can never stall propagation on a node, and the rejection is
 loud through `health()`. A channel outage still engages locally and reports
-`broadcastOk: false`; async backends surface failures through `health()`.
+`broadcastOk: false`; async backends surface failures through `health()`, and
+`flush()` awaits every in-flight write and refresh before health is read
+(audit 19, live PG).
 CLI: `node src/cli.ts incident status|engage|lift|revoke-cap|
 revoke-session|preserve|report`; operator commands build a bootstrap-free
 world (no fixture issuance/appends) and print a diagnosable refusal instead of
@@ -1684,7 +1691,7 @@ wall clocks); the channel is control-plane data and its reason text contains
 no secrets; a channel writer is an operator (write access is the incident
 authority).
 
-**Evidence:** `tests/h13-incident-response.test.ts` — 24 cases (written
+**Evidence:** `tests/h13-incident-response.test.ts` — 29 cases (written
 red-first): engage denies the next decision with `incident-frozen` + records
 it; issuance blocked with an audited refusal; `lift` restores authorization
 but not revoked capabilities; tenant vs global scope; `revokeAll`
@@ -1703,13 +1710,21 @@ reconstruction counts; the global-incident view (`tenantId: '*'`) reads
 `tenantId: ''` events, refuses without authority, and preserves a verified
 bundle; `bootstrap: false` builds a world that issues/appends nothing; all
 under the structural invariant — no key material or secret canaries in
-channel records, incident events, or the bundle.
+channel records, incident events, or the bundle. Audit follow-ups (tickets
+10/12/16): cross-node `unfreeze` propagation leaves revoked capability
+revoked; the `revoke-caps` issuance-time fence spares authority issued after
+the record; a tenant-scoped `revoke-cap` record cannot revoke another
+tenant's capability and the operator path refuses a locally registered
+tenant mismatch; `grant()` while frozen registers authority that `evaluate`
+still denies until `lift`.
 `tests/h13-revocation-pg.test.ts` — migration DDL static invariants
 (append-only privilege, no RLS, constrained scope, no secrets) and the live
 scratch-DB suite (two-instance broadcast, `app_rw` UPDATE/DELETE refusal,
 hostile-row refusal, and the audit-01 skip-and-count regression: a bad row
 does not stall later rows and the cursor advances), skip-clean without
-`DATABASE_URL`. `tests/h13-import-order.test.ts` — the channel module imports
+`DATABASE_URL`; verified live 2026-10-01 against `postgres:16` (ticket 19),
+which proved the migration-4 sequence grant and the flush write-tracking fix.
+`tests/h13-import-order.test.ts` — the channel module imports
 cleanly when loaded first (audit 03 import-cycle regression).
 
 **Test:** the two suites above; demo section 22 exercises a measured
@@ -1721,8 +1736,10 @@ decision or receives a REST request does not sync (default deployments route
 everything through the PDP/REST, named honestly); a channel outage widens the
 propagation window and is reported through `broadcastOk`/status counters
 rather than hidden; in-memory freeze state is lost on restart unless the
-Postgres channel replays it (cursor 0); the live multi-node Postgres proof is
-the skip-clean suite until a `DATABASE_URL` run; single-target session
+Postgres channel replays it (cursor 0); the live multi-node Postgres proof
+was run 2026-10-01 against a disposable `postgres:16` container (ticket 19):
+the four live channel tests pass, and the run caught the migration-4 sequence
+grant and the flush write-tracking defect (both fixed); single-target session
 revocation reaches a node only when its sync runs; cross-process
 `preserve`/`report` require the event-signing key to be shared
 (`EVENT_SIGNING_PRIVATE_KEY_PEM` + `EVENT_SIGNING_PUBLIC_KEY_PEM` on the

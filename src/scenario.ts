@@ -148,7 +148,12 @@ export const AUDIT_POLICY_RULE: PolicyRule = {
  * must be migrated and awaited — the SQLite/in-memory backends stay the
  * default for all runs that do not explicitly ask for Postgres (ADR-018).
  */
-function makeEventLog(options: { sqlitePath?: string }): EventStore {
+function makeEventLog(options: { sqlitePath?: string; memory?: boolean }): EventStore {
+  if (options.memory) {
+    // Self-contained worlds (the demo's two-node incident simulation) must
+    // not touch the process's configured store.
+    return new EventLog(undefined, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+  }
   return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
     ? new PostgresEventLog({
         url: process.env.DATABASE_URL,
@@ -176,6 +181,12 @@ export interface WorldOptions {
   readonly policies?: readonly PolicyRule[];
   /** H13: inject a shared channel to simulate multiple nodes in one process. */
   readonly channel?: RevocationChannel;
+  /**
+   * Force the in-memory event store regardless of `EVENT_STORE` — for
+   * self-contained worlds (the demo's two-node incident simulation) that must
+   * not touch the process's configured store.
+   */
+  readonly memory?: boolean;
   /**
    * Default true: issue the fixture bootstrap capabilities (demo/tests).
    * `false` builds the world with no bootstrap issuance — for operator

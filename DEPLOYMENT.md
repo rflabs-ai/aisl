@@ -392,7 +392,9 @@ process, and the CLI says so.
    re-issue authority through the ordinary issuance/approval paths.
 4. **Narrow revocation:** `incident revoke-cap <capabilityId> <tenantId>
    "<reason>"`, `incident revoke-session <sessionId> <tenantId> "<reason>"` —
-   local + broadcast, single-target.
+   local + broadcast, single-target. Cross-node session revocation is this
+   incident path; the ordinary `DELETE /v1/sessions/:id` is node-local
+   (single-node REST posture) and does not publish to the channel.
 5. **Preserve evidence:**
    `node src/cli.ts incident preserve <tenantId | *> <fromSeq> <toSeq> [outPath]`
    — pages the authorized audit export past the 1000-event cap, verifies the

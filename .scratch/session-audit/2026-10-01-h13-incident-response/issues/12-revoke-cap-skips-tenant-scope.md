@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -36,3 +36,7 @@ arrive later — a revocation ahead of registration is the safe direction).
 - `Select-String src\pdp.ts -Pattern "inScope\("` → `pdp.ts:397`, `pdp.ts:413` (revoke-caps only)
 - `Select-String src\pdp.ts -Pattern "case 'revoke-cap':"` → `pdp.ts:419`; body 420–421 has no `inScope`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+`pdp.ts applyIncidentRecord` now applies `inScope` to `revoke-cap`: a target registered to another tenant is skipped (unregistered targets are still recorded revoked — revocation ahead of registration is the safe direction). `IncidentService.revokeCapability` refuses a locally registered tenant mismatch with `IncidentInputError`. Regression tests: the two `ticket 12` cases in `tests/h13-incident-response.test.ts`.

@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -31,3 +31,7 @@ publish results in docs/CI artifacts instead.
 - `git diff HEAD --stat` → `benchmarks/results.json | 20 +-`
 - `git log --oneline -5 -- benchmarks/results.json` → `b31987c H12: secure updates — ...`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+Convention recorded in `CURRENT_STATE.md` ("Measured this run"): `benchmarks/results.json` is committed at milestone boundaries only; a rerun for a local check stays uncommitted because its absolute timestamps are never reproducible. The file stays tracked so the doc's read-at-run pointer keeps working; this session reverted its regenerated copy. ADR-026 addendum 2 also notes the PG-mode fresh-chain precondition.

@@ -7,7 +7,9 @@
  * claims, and attestation internals never reach the wire).
  *
  * Ceilings (deliberate simplifications):
- * - ponytail: DELETE /v1/sessions/:id is owner-only (same principal id); a
+ * - ponytail: DELETE /v1/sessions/:id is owner-only (same principal id) and
+ *   node-local: it does not publish through the H13 revocation channel —
+ *   cross-node session revocation is `incident revoke-session` (ADR-026). A
  *   deployment/service layer widens to admin revocation when one exists.
  * - ponytail: approval MFA is enforced HERE at the HTTP boundary (the M4
  *   approve() path itself does not check MFA); in-process callers need the

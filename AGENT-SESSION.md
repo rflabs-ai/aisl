@@ -24,6 +24,64 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 33 — 2026-10-01 — opencode/h13-tickets-10-19
+
+**Did:**
+- Closed H13 audit tickets 10–19 on branch `fix/h13-audit-tickets-10-19`:
+  - 10/12/16: new suite cases — cross-node `unfreeze` propagation, the
+    `revoke-caps` issuance-time fence, tenant-scoped `revoke-cap` (pdp.ts
+    applies `inScope`; `revokeCapability` refuses a locally registered tenant
+    mismatch), and `grant()`'s documented rehydration semantics (`evaluate`
+    still denies while frozen).
+  - 14: CLI `revoke-cap|revoke-session` mirrors the engage branch — post-flush
+    health, `broadcast OK|FAILED`, exit 1 on channel errors.
+  - 15: `incident report` prints the action breakdown;
+    `IncidentStatus.freezes` imports `FreezeEntry`.
+  - 11/13/17/18: prompt drift fixed (scope-based signatures, 7 subcommands);
+    REST owner-DELETE documented node-local; `benchmarks/results.json`
+    convention noted in CURRENT_STATE; mirror `ponytail:` marker added.
+- **Ticket 19: first live Postgres run** (`postgres:16` in Docker,
+  `DATABASE_URL` + `MIGRATION_DATABASE_URL`). Full serialized suite: 612 tests
+  / 611 pass / 1 environment-gated skip / 0 fail. Caught and fixed three real
+  defects the skip-clean suites could not:
+  - migration 4 granted `revocation_channel_seq`, but BIGSERIAL on `seq`
+    creates `revocation_channel_seq_seq` — migration 4 aborted on a live
+    server (static DDL test now pins the name);
+  - `PostgresRevocationChannel.flush()` did not await in-flight inserts
+    (pooled connections), so broadcast health could be read too early — now
+    tracks pending queries;
+  - `eventBody` hashed raw `metadata`, so an explicit `undefined` value
+    (envelope-secrets deny path) made PG/SQLite chain reload fail with an
+    event-hash mismatch — metadata is now JSON-normalized before hashing
+    (regression test in `tests/m3-evidence-hardening.test.ts`, Claim 8).
+- PG-mode `demo`/`attack`/`benchmark` now run to completion: demo section 22
+  forces in-memory worlds (`WorldOptions.memory`) and all three close
+  `world.incident` before exit. One live-only test bug fixed (M15
+  capability-requests reused an id across tenants; ids are service UUIDs).
+  Benchmark in PG mode expects a fresh chain (documented).
+
+**Left:**
+- Working tree uncommitted on `fix/h13-audit-tickets-10-19` (no commit
+  requested). The full PG suite must be run serially
+  (`--test-concurrency=1`) against a disposable database — parallel files
+  drop each other's tables.
+- H15 remains the Stage 2 frontier.
+
+**Next session should:**
+- Commit/merge `fix/h13-audit-tickets-10-19` if the diff is accepted, then H15
+  (fail-closed availability: `src/rest-api.ts` / health / degraded mode).
+
+**Evidence:**
+- No-DB gate: `npm run typecheck` clean; 598 tests (579 pass, 19 PG-mode
+  skips, 0 fail). Live PG: 612 tests (611 pass, 1 env-gated skip, 0 fail) on
+  `postgres:16` via Docker. `npm run demo` exit 0 (memory and PG);
+  `npm run attack` exit 0 (memory and PG); `npm run benchmark` exit 0 on a
+  fresh chain (memory and PG). `benchmarks/results.json` reverted (milestone
+  convention). Ticket files 10–19 updated to `Status: resolved` with
+  resolution notes.
+
+---
+
 ### SESSION 32 — 2026-10-01 — opencode/h13-audit-follow-up
 
 **Did:**

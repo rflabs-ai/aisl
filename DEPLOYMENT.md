@@ -312,6 +312,57 @@ shell command line, a chat, or a repository file.
    new pair, re-sign, destroy the old private key, record the rotation here
    and in the session log.
 
+### Updates (H12, ADR-025)
+
+Applying a release is its own fail-closed flow on top of build-and-release:
+the descriptor carries the signed build manifest, and the target machine's
+high-water mark decides freshness. Release-side and instance-side steps:
+
+1. **Issue (release machine, after `npm run build:sign`):**
+   `node src/cli.ts update sign <releaseVersion> <channel> [stages]` —
+   e.g. `update sign 3 stable 10,50,100`. Refuses without an issued build
+   manifest, refuses if the manifest does not match the live tree at sign
+   time, refuses malformed stages (ascending, ending in 100). Writes
+   `artifacts/update.json` + `.sig`. `releaseVersion` is a monotonic integer
+   per instance — never reuse a number.
+2. **Transport:** out of band (this repo verifies updates; it does not host
+   them). Move `update.json` + `update.sig` to the target the same way the
+   build manifest travels.
+3. **Verify (target, before start):** `npm run update:verify` — the full
+   chain against the live tree with `BUILD_SIGNING_PUBLIC_PEM`. Refusal is a
+   stop condition, never a warning.
+4. **Apply (target):** `node src/cli.ts update apply` — verification again
+   plus the high-water mark. Success lands the rollout at **canary** and
+   raises the mark. A stale or replayed descriptor is refused
+   (`rollback-blocked`) no matter how valid its signature is.
+5. **Promote:** `node src/cli.ts update promote ok|fail` — one stage per
+   explicit `ok`; `fail` halts the rollout (`halted` is sticky: a later `ok`
+   does not clear it). A halt is resolved by issuing a NEW descriptor or by
+   rollback. There is no default-healthy path.
+6. **Status:** `npm run update:status` — high-water mark, current release,
+   rollout stage/halt reason. A corrupt state file refuses (exit 1) rather
+   than resetting — investigate, do not delete.
+7. **Emergency rollback (incident):**
+   `node src/cli.ts update grant <targetVersion> "<reason>"` signs a
+   single-use grant (requires `BUILD_SIGNING_PRIVATE_PEM`; target must be
+   below current; the CLI embeds the current rollback generation), then
+   `node src/cli.ts update rollback` applies it. The grant works exactly once
+   against the exact version it names and generation it carries — a used
+   grant never revives, even if the same version becomes current again — and
+   the
+   high-water mark is NOT lowered — the version you rolled back from stays
+   burned; recovering forward means a new descriptor with a higher number.
+8. **State custody:** `artifacts/update-state.json` is per-instance runtime
+   state — code-written only, atomic, gitignored. It holds the mark and the
+   rollback generation; losing
+   or resetting it re-opens the replay window. Keep it on storage the update
+   process does not share with an untrusted writer, and back it up with the
+   instance.
+
+Key material: same `BUILD_SIGNING_*` env vars as build-and-release (one
+release key). Residuals: caller-supplied health signal, no descriptor
+transparency log (H11/Stage-3), signed-but-malicious release (Claim 34).
+
 ## 2. Hardware tiers
 
 | Tier | Compute | Storage | Keys | Network |

@@ -30,6 +30,8 @@ has already gained write access to infrastructure.
 | Delete the event log entirely | **detected** when the bundle is reconciled against the head-hash anchor file (and the anchor is on a different trust domain); still **succeeds** as a destruction if both store and anchor are on attacker-controlled storage |
 | Add a malicious dependency | **detected/limited** by the supply-chain gate (H10/ADR-024): exact pins, sha512 integrity + registry-pinned resolved URLs verified per lockfile entry, deterministic SBOM diffed against the committed `artifacts/sbom.json` baseline, and the `ADMITTED_RUNTIME_DEPS` allowlist — a new runtime dep fails the gate until an admission ADR lands in the same reviewed PR. A malicious update to an already-trusted dep is the residual (a version bump is a visible diff; content compromise inside a trusted version is outside this control). |
 | Direct code change | **detected/limited** since H10 (ADR-024): the signed build manifest binds `treeDigest` (git blob SHAs over all tracked files, outputs excluded), `sbomDigest`, and the gate result under an Ed25519 signature; `build verify` recomputes and refuses stale-source/stale-dependencies/bad-signature/gate-not-passed at deploy. Before a manifest exists, or with the signing key compromised, this path **succeeds** — that is the residual. |
+| Replay an old signed update (roll back to a vulnerable version) | **detected/limited** since H12 (ADR-025): the signed update descriptor must chain to the build manifest against the live tree AND beat the persisted high-water mark; a perfectly signed, stale descriptor is refused (`rollback-blocked`) and the mark never lowers, including under emergency rollback (the signed, single-use grant cannot re-open a burned version). Residual: an attacker who can delete the per-instance state file resets the mark — protect it like the manifest. |
+| Serve an unsigned update | **detected** since H12 (ADR-025): `update verify`/`update apply` refuse missing descriptor, missing signature, missing key env, and bad signature with distinct reasons — no path prints applied without the full chain. |
 | Administrator mints a broad capability | succeeds and is logged |
 
 ## Controls
@@ -49,6 +51,13 @@ has already gained write access to infrastructure.
   source, dependencies, and gate result under an Ed25519 signature; deploy
   verifies it before start (DEPLOYMENT.md). Residual: key custody is an env
   var until ADR-008's KMS path; no transparency log (H11/Stage-3).
+- The signed update channel (`src/updates.ts`, H12/ADR-025) consumes that
+  manifest: descriptor signature → manifest verified against the live tree →
+  the persisted high-water mark, which never lowers. Rollback exists only as
+  a signed, single-use, backward-only grant; promotion through canary stages
+  needs an explicit health pass and a failed pass halts stickily. Residual: a
+  signed-but-malicious release, a caller-supplied health signal, and state
+  file custody (code-written, atomic, gitignored per instance).
 - The third-party attack surface in production is small but not nil; the
   residual is what `jose` and `postgres` themselves do.
 
@@ -76,7 +85,10 @@ Invariant 8 (tamper detection); `tests/m3-evidence-hardening.test.ts`
 structural API check); `tests/policy.test.ts` deterministic evaluation;
 benchmark reports `hashChainValid` and `auditCompleteness` on every run;
 `tests/h10-supply-chain.test.ts` (SBOM determinism + drift gate, pin/integrity
-refusals, tree-digest staleness, manifest sign/verify fail-closed).
+refusals, tree-digest staleness, manifest sign/verify fail-closed);
+`tests/h12-secure-updates.test.ts` (descriptor signature fail-closed, chain
+vs live tree, anti-rollback mark holds under replay, signed single-use
+rollback, sticky canary halt, no key material in state/refusals).
 
 ## Residual risk
 

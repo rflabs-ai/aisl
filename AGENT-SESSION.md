@@ -24,6 +24,109 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 29 — 2026-10-01 — opencode/h12-audit-01-fix
+
+**Did:**
+- Session audit of H12 (uncommitted working tree): report + evidence ledger +
+  ticket 01 in `.scratch/session-audit/2026-10-01-h12-secure-updates/`.
+  Verdict needs-work — one must-fix: a used rollback grant re-applied after
+  `current` independently returned to its `fromVersion` (probe-confirmed:
+  `PROBE replay of used grantA: {"ok":true,"current":1,"mark":4}`),
+  falsifying the single-use claim in ADR-025 / Claim 34 / ROADMAP /
+  THREAT_MODEL / CURRENT_STATE.
+- Fix, test-first: added the regression test + `generation` on grant
+  fixtures; red run `ℹ pass 18 / ℹ fail 2` ("a used grant must not revive
+  when its from-version becomes current again" + state-shape contract). Then
+  `UpdateState.rollbackGeneration` + `RollbackGrant.generation` (validated in
+  both structure gates), `rollbackUpdate` requires generation equality and
+  increments on success, CLI `update grant` embeds and prints the current
+  generation. Green: H12 suite 20/20.
+- Docs swept for the mechanism and counts: ADR-025 item 3 (grant shape +
+  audit note), Claim 34 mechanism/evidence (19→20), ROADMAP H12 (19→20 +
+  generation), CURRENT_STATE (counts 559→560 / 544→545; source-size line
+  corrected from the stale ~9,900 to the measured ~11,400; H12 rows; What
+  H12 closed item 3 + audit note), DEPLOYMENT runbook item 7 (generation).
+- Gate: typecheck clean, full suite 560 (545 pass, 15 PG skips, 0 fail).
+
+**Left:**
+- Ticket 01 marked resolved (working tree; no commit requested, so no hash).
+- Audit nits not ticketed (promote `stage=0/-1` display, `update sign`
+  accepts an empty channel, unused exports, import order, filler assert)
+  remain as notes in the audit report.
+
+**Next session should:**
+- H13 (incident response) or H15 (fail-closed availability); M18's raven
+  updater consumes `verifyUpdate`/`applyUpdate`.
+
+**Evidence:**
+- Red: `ℹ pass 18` / `ℹ fail 2`. Green: `ℹ tests 20` / `ℹ pass 20` /
+  `ℹ fail 0`. Full gate: `ℹ tests 560` / `ℹ pass 545` / `ℹ skipped 15`.
+
+---
+
+### SESSION 28 — 2026-10-01 — opencode/h12-secure-updates
+
+**Did:**
+- **H12 landed** — **ROADMAP Stage 2 H12 (secure updates) is [DONE]**
+  (ADR-025). The signed update channel consumes the H10 build manifest as its
+  verification primitive (DECISIONS.md:1471's stated migration path).
+- Expanded `PROMPTS/H-Track/H12-secure-updates.md` stub to the full
+  M4–M16/H10 prompt format (phases, hard requirements, docs sweep, skip
+  list), then Phase 0 ADR first (docs only) per the kickoff contract.
+- `src/updates.ts`: signed update descriptor (Ed25519 over canonicalJson,
+  embedding the H10 manifest + its signature) → `verifyManifest` against the
+  live tree → persisted high-water mark that never lowers
+  (`rollback-blocked` on any descriptor ≤ mark, signature notwithstanding) →
+  canary rollout state. Emergency rollback = signed, single-use, backward-only
+  grant naming the exact `fromVersion` (replay → `grant-mismatch`), mark
+  preserved. Staged rollout: ascending stages ending in 100 (`bad-stages`
+  otherwise), one stage per explicit health pass, failed pass → sticky
+  `halted`. State: code-written only, atomic temp+rename, malformed → refusal
+  (`state-malformed`), never a reset. Every refusal has a distinct reason;
+  `no-verification-key` refuses before any signature claim.
+- CLI `node src/cli.ts update sign|verify|apply|promote|status|grant|
+  rollback`; npm scripts `update:verify`, `update:status`; `.gitignore`
+  gains `artifacts/update-state.json` (per-instance runtime state).
+- Tests red-first: `tests/h12-secure-updates.test.ts` (19 cases) — red
+  confirmed as `ERR_MODULE_NOT_FOUND` before the module existed. Two contract
+  fixes the red run surfaced: stages must end at 100 (a rollout finishing
+  short is not a promotion), and semantically-invalid rollback grants must be
+  *signed* in tests to reach the semantic check (structure runs before
+  signature). Trust-boundary invariant test: no key material/PEM in state,
+  descriptor, grant, signatures, or refusal text.
+- Demo section 21 (`H12: signed update channel — anti-rollback + canary
+  halt`) — full chain on ephemeral demo keys over the live tree, six PASS
+  steps + honest ABSENT line for real state; exits 0.
+- Docs sweep: ROADMAP (H12 [DONE] + mechanism, working order → next
+  H13/H15, M18 gate cleared), CURRENT_STATE (header, counts 540→559
+  (544 pass), module 43, what-works entry, What H12 closed), DECISIONS
+  ADR-025, SECURITY_CLAIMS Claim 34, COMPLIANCE (CM-3 absent→partial,
+  SI-7 extended, RS-MA-02 evidence), THREAT_MODEL (new Update-channel row +
+  Replay row cross-ref), TM-004 (two attack-path rows + control + test
+  methodology), DEPLOYMENT (Updates runbook), this entry, prompt resolution.
+
+**Left:**
+- No real update descriptor issued (honest: `update sign` needs a release
+  point — everyday commits make it stale by design, same as `build:sign`).
+- H13/H15 remain the Stage 2 queue; M18's gate column now reads H12 [DONE],
+  so raven's updater can consume `verifyUpdate`/`applyUpdate` (M18 prompt
+  itself still unwritten, per the just-in-time convention).
+
+**Next session should:**
+- H13 (incident response — touches `src/pdp.ts` revoke path) or H15
+  (fail-closed availability — `src/rest-api.ts` anchor route). M18–M20
+  federation clients are separate prompts.
+
+**Evidence:**
+- Gate: 559 tests (544 pass, 15 PG-mode skips, 0 fail), typecheck clean,
+  supply-chain gate green on the committed state, demo exits 0 with section
+  21, benchmark exits 0.
+- Not committed (no commit requested); branch `feat/h12-secure-updates`
+  off `main` holds the working tree. `docs/readme` (2 README commits) remains
+  unmerged and untouched.
+
+---
+
 ### SESSION 27 — 2026-09-29 — opencode/m17-federation-asl-gap-closure
 
 **Did:**

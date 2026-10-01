@@ -1,24 +1,26 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after M17 — federation, control-plane as the first
-federation client (ADR-022). Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
+Honest snapshot. Updated after H12 — the signed update channel (ADR-025).
+Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
 UI served by the M14 server, and the sandbox lifecycle — zero new runtime
-dependencies. H1 (ADR-023, signed delegation) and H10 (ADR-024, supply-chain
-gate + signed build manifests) are the landed Stage 2 items. M17 closed both
+dependencies. H1 (ADR-023, signed delegation), H10 (ADR-024, supply-chain
+gate + signed build manifests), and H12 (ADR-025, signed update channel with
+anti-rollback and sticky canary) are the landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H12/H13/H15.
+Next frontier: H13/H15.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~9,700 lines of source across 42 modules
-(`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`, and
-`rest-anchors.ts` are the latest additions), 540 tests
-(`tests/`, `security-tests/`; 525 pass, 15 Postgres-mode tests skip cleanly
+TypeScript foundation on Node 24, ~11,400 lines of source across 43 modules
+(comments and blanks included)
+(`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
+`rest-anchors.ts`, and `updates.ts` are the latest additions), 560 tests
+(`tests/`, `security-tests/`; 545 pass, 15 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -26,8 +28,9 @@ threat models (`threat-models/`), a measured benchmark (`benchmarks/results.json
 a static operator UI (`tools/ui/index.html`), developer setup scripts
 (`scripts/setup.ps1`, `scripts/setup.sh`), the supply-chain gate artifacts
 (`artifacts/sbom.json` — the committed SBOM review baseline;
-`artifacts/build-manifest.json` + `.sig` — the first signed release manifest),
-and this documentation set.
+`artifacts/build-manifest.json` + `.sig` — the first signed release manifest;
+the per-instance update state `artifacts/update-state.json` is runtime-only,
+gitignored — H12), and this documentation set.
 
 Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
 `postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps),
@@ -91,9 +94,26 @@ Dev dependencies: `typescript`, `@types/node`.
   `treeDigest` (over `git ls-files -s` blob SHAs, artifacts excluded —
   platform-independent), `sbomDigest`, `gitHead`, and the gate result;
   `build verify` recomputes and verifies fail-closed with distinct reasons
-  (bad-signature / stale-source / stale-dependencies / gate-not-passed /
-  not-a-build-manifest). Deploy discipline: verify before start
-  (DEPLOYMENT.md). The gate also runs in the local pre-commit hook.
+   (bad-signature / stale-source / stale-dependencies / gate-not-passed /
+   not-a-build-manifest). Deploy discipline: verify before start
+   (DEPLOYMENT.md). The gate also runs in the local pre-commit hook.
+- **Signed update channel (H12):** `src/updates.ts` (ADR-025) consumes the
+  H10 manifest as its update-verification primitive. A signed update
+  descriptor (`node src/cli.ts update sign`) wraps the issued build manifest;
+  `update verify` / `update apply` run the fail-closed chain — descriptor
+  structure → Ed25519 descriptor signature → embedded manifest verified
+  against the **live tree** (H10 `verifyManifest` recomputes digests) → the
+  persisted high-water mark. `apply` requires `releaseVersion > highWaterMark`
+  and raises it; the mark never lowers, so a perfectly signed, stale
+  descriptor is refused (`rollback-blocked`). Emergency rollback is a signed,
+  single-use grant (`update grant` / `update rollback`) naming the exact
+  from-version and carrying the state's `rollbackGeneration` (one use per
+  generation — a used grant stays used even if its from-version becomes
+  current again; replay → `grant-mismatch`), backward-only, mark preserved.
+  Staged rollout: stages ascend to 100, `apply` lands canary, `update
+  promote ok|fail` advances one stage per explicit health pass, a failing
+  signal halts and the halt is sticky. State is code-written only, atomic
+  (temp + rename), gitignored per instance.
 - **Audit query + export API (M6):** In-process query and export API
   (`src/audit-query.ts`, `AuditQueryService`). Authorized through
   `AuthorizationService.queryAudit` gating on synthetic `audit-log:<tenantId>`
@@ -324,10 +344,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 540 tests pass (525 green; 15 Postgres-mode tests skip without
+All 560 tests pass (545 green; 15 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live at 28 + 17 + 5 tests against a disposable container). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -345,6 +365,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **M16 sandbox lifecycle (10: round trip + refusal 2, tenant isolation 2, limits + attestation 2, PDP-gated execute 2, exit sweep 1, seal-scan 1)**.
 | **H1 signed delegation (32: parent refusals 7, custody + audit-event 2, chain traceability 3, constraint/single-use dimensions 6, root-with-parent 2, extremes fuzz 11, structural src-wide scan 1)**; invariant 6 rewritten against signed parents (4).
 | **H10 supply chain (20: SBOM deterministic + complete 2, pins 4, drift gate 5, tree digest 2, manifest sign/verify 5)**.
+| **H12 secure updates (20: descriptor signature 4, chain vs live tree 4, anti-rollback 3, rollout 3, grant 4, structural invariants 2)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -888,6 +909,50 @@ anchor registry is in-memory (mismatch detection is
 advisory; the durable attestation is the event itself) and this is a
 shared-process tenant residual (known-gap #7). Client-side bypass is outside
 ASL's claim boundary.
+
+## What H12 closed
+
+H12 was the secure-update milestone (ADR-025, the third Stage 2 item): it
+does not touch decision semantics — it decides whether the code running the
+enforcement may change, and refuses the failure modes ROADMAP named.
+
+1. ~~**The update channel did not exist; unsigned update was RCE by
+   design.**~~ `src/updates.ts` defines the signed update descriptor
+   (Ed25519 over the canonical descriptor, embedding the H10 build manifest +
+   its signature). Verification chains into `verifyManifest`, which recomputes
+   the live tree/SBOM digests — a transported value is never trusted. Missing
+   key env, bad structure, bad signature, or a stale tree each refuse with a
+   distinct reason.
+2. ~~**Nothing prevented rollback to a vulnerable version.**~~ A persisted
+   high-water mark: `apply` requires `releaseVersion > highWaterMark` and
+   raises it; the mark never lowers. Signature validity and freshness are
+   separate checks — a perfectly signed, perfectly stale descriptor is
+   refused (`rollback-blocked`). A malformed state file is a refusal
+   (`state-malformed`), never a silent reset to zero.
+3. ~~**Emergency rollback did not exist (the assumption said it must).**~~
+   It exists as a signed, single-use grant naming the exact `fromVersion`
+   and the state's monotonic `rollbackGeneration` — one use per generation,
+   so a used grant stays used even if its from-version becomes current again
+   (`grant-mismatch`) — backward-only, and it does not lower the mark — the
+   version rolled back *from* stays burned.
+4. ~~**No staged rollout, canary, or auto-halt.**~~ Descriptors declare
+   ascending stages ending in 100; `apply` lands canary; `promote` advances
+   one stage per explicit health pass; a failing signal halts and the halt is
+   sticky (only a new descriptor or a rollback grant resolves it). There is
+   no default-healthy path to `promoted`.
+
+Tests: `tests/h12-secure-updates.test.ts` (20, red-confirmed before the
+module existed — `ERR_MODULE_NOT_FOUND` recorded as the red signal). The
+trust-boundary invariant test asserts no key material or PEM headers in the
+state file, descriptor, grant, signatures, or any refusal message. Audit 01
+(same day) closed the grant replay window it found: single-use is enforced
+by a monotonic `rollbackGeneration`, with the regression test added to the
+same suite (the red run for it failed with "a used grant must not revive").
+Residuals
+(Claim 34): the health signal is caller-supplied (garbage-in can promote a
+canary), one release key under the ADR-008 env posture, no transport (this
+repo verifies updates; hosting them is a release endpoint away), and the
+signed-but-maintainer-rogue release residual from H10 is unchanged.
 
 ## Watch-items from the M9 audit
 

@@ -18,6 +18,8 @@
     "build:keygen": "node src/cli.ts build keygen",
     "build:sign": "node src/cli.ts build sign",
     "build:verify": "node src/cli.ts build verify",
+    "update:verify": "node src/cli.ts update verify",
+    "update:status": "node src/cli.ts update status",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

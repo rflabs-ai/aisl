@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -42,3 +42,14 @@ so a fixture reconstruction cannot be mistaken for incident evidence.
 - `node probe-p2-bootstrap.mts` → `P2 bootstrap events on plain buildWorld: 2 {"capability.issue":2}`
 - `node src/cli.ts incident report acme 0 5` → `OK reconstruction 5 events, allow=5 deny=0, revocations=0, freezes=0, lifts=0`
 - ledger rows 20–21 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`WorldOptions` gains `bootstrap?: boolean`; `assembleWorld` skips the two
+fixture issuances when false; `incidentCommand` builds
+`buildWorldAsync({ bootstrap: false })` and `preserve`/`report` print the
+in-memory-mode note in non-Postgres mode. Probe P2 (2 bootstrap events) is now
+a test: `bootstrap: false` builds a world that issues/appends nothing.
+
+**Evidence (this session):** `node src/cli.ts incident report acme 0 5` →
+bootstrap-free 3 events + mode note; h13 suite green.

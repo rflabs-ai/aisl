@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -36,3 +36,13 @@ unread. Prefer deletion (the service counter is the one status shows).
 
 - `Select-String src\*.ts,tests\*.ts,security-tests\*.ts -Pattern "broadcastSyncFailures|syncFailures"` → `pdp.ts:303`, `pdp.ts:304`, `pdp.ts:316` (no reader), `incident.ts:489` (separate counter)
 - ledger row 24 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+Deleted `AuthorizationService.broadcastSyncFailures()` and the
+`syncFailures` field/increment; the catch comment now says the service's own
+sync counters are the operator-visible health. No test referenced the removed
+API.
+
+**Evidence (this session):** `Select-String src\pdp.ts -Pattern
+"syncFailures"` → no hits; typecheck + full suite green.

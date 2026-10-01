@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -41,3 +41,17 @@ still only the global-incident events, still gated by `audit.export`.
 
 - `node probe-p5-global.mts` → `P5 global incident event tenantIds: ["incident.freeze=\"\"","incident.engage=\""]` / `P5 reconstruct with tenantId "": THREW AuditFilterError - tenantId is required`
 - ledger rows 17–18 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`tenantId: '*'` is the global-incident view: `exportWindow` authorizes the
+caller through their own tenant's `audit.export` capability and reads the
+events recorded with `tenantId: ''`; `preserve` records its event under the
+preserving tenant. Same fix surfaced the verifier property: bundles now carry
+`contiguous` and `verifyIncidentBundle` verifies non-contiguous slices
+per-event (hash + signature + recorded live-chain state + anchor head).
+CLI runbook supports `incident report|preserve '*' ...`; tests cover the view,
+the refusal without authority, and a verified global bundle.
+
+**Evidence (this session):** h13 suite green; CLI smoke `incident report
+globex 0 5` refusal path clean; `incident engage` unaffected.

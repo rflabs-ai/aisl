@@ -24,6 +24,63 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 32 — 2026-10-01 — opencode/h13-audit-follow-up
+
+**Did:**
+- Session audit of the uncommitted H13 work (tee `.scratch/session-audit/
+  2026-10-01-h13-incident-response/`: `report.md`, `evidence.md` ledger, 9
+  tickets). Verdict needs-work: 4 probe-proven must-fix + 5 should-fix
+  defects; every finding probe-verified (throwaway probes P1–P6, deleted
+  after capture) and every citation re-checked against the tree in-run.
+- **Fixed all 9 tickets** (commit `06a8a89`), each with a regression check
+  where the defect was probe-proven:
+  - 01 channel stall: `PostgresRevocationChannel.load` skips a rejected row,
+    records it via `health()`, and advances the cursor (live PG test added,
+    skip-clean). One malformed/unknown row can no longer halt propagation.
+  - 02 preserve precondition: cross-process `preserve` fails closed on the
+    default ephemeral event key; the refusal now names `EVENT_SIGNING_*_PEM`
+    and DEPLOYMENT + Claim 35 state the precondition.
+  - 03 import cycle: `import type` removes the runtime edge;
+    `tests/h13-import-order.test.ts` locks the entry order.
+  - 04 global evidence: `tenantId: '*'` view over `tenantId: ''` events,
+    authorized by the caller's own tenant `audit.export`. Surfaced and fixed
+    a related verifier property: bundles record `contiguous`; filtered
+    (global/interleaved) slices verify per-event instead of requiring
+    linkage.
+  - 05 `revokeSession` appends an `incident.revoke` signed-log event.
+  - 06 CLI builds a bootstrap-free world (`WorldOptions.bootstrap`) and
+    evidence commands print the in-memory-mode note; no fixture events in a
+    shared PG chain.
+  - 07 CLI refusals print a diagnosable line, not a stack trace.
+  - 08 DEPLOYMENT no longer claims the unwired per-request REST sync.
+  - 09 dead `broadcastSyncFailures` counter removed.
+- **Ticketed the audit nits** as issues 10–19 (test gaps for cross-node
+  unfreeze + the issuance fence, prompt drift, `revoke-cap` tenant-scope gap,
+  REST owner-DELETE not broadcast, CLI narrow-revoke broadcast check,
+  report-shape nits, `grant()` freeze gap, results.json churn, unbounded
+  mirror, live PG run follow-up) — all `Status: open`.
+- Docs swept for the fixes: ADR-026 addendum, Claim 35 (claim/mechanism/
+  evidence/limitations), CURRENT_STATE counts (592/573/19) + H13 entries,
+  DEPLOYMENT preserve/report runbook, H13 prompt audit-follow-up section.
+
+**Left:**
+- Tickets 10–19 open (nits/follow-ups). Live Postgres half still unverified
+  in this environment (Docker refused to start) — ticket 19.
+- H15 remains the Stage 2 frontier.
+
+**Next session should:**
+- H15 (fail-closed availability; `src/rest-api.ts` / health / degraded mode),
+  or ticket 19 with a disposable Postgres container. Consider ticket 12
+  (revoke-cap tenant scope) if H13 surfaces again.
+
+**Evidence:**
+- Gate on `06a8a89`: `npm run typecheck` clean; 592 tests (573 pass, 19
+  PG-mode skips, 0 fail); `npm run demo` exit 0 (section 22);
+  `npm run attack` exit 0; `npm run benchmark` exit 0 (SLO pass, 0 hard
+  failures); supply-chain gate green. Merged to `main` this session.
+
+---
+
 ### SESSION 31 — 2026-10-01 — opencode/h13-incident-response
 
 **Did:**

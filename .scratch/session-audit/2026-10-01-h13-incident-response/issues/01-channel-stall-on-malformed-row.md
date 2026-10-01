@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -43,3 +43,13 @@ shows `DEGRADED`.
   → `P3 after attempt 3: mirror=[] cursor=-1 errors=1`
   → `P3 verdict: good row seq=2 applied? NO - cursor stuck behind the bad row`
 - ledger rows 13–14 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`PostgresRevocationChannel.load` now wraps `parseChannelRow` per row, records
+the rejection through `recordError(error, 'row rejected')`, advances `maxSeq`
+past the rejected seq, and continues. Regression: the live PG test "a
+malformed row does not stall later rows (audit 01: skip-and-count)" asserts
+the good row applies and `cursor() === 2` (skip-clean without `DATABASE_URL`).
+
+**Evidence (this session):** `npm test` 592/573/0; typecheck clean.

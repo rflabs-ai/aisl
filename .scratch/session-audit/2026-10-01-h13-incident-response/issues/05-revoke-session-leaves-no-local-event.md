@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -38,3 +38,13 @@ matches the channel record.
 - `Select-String src\incident.ts -Pattern "revokeSession|sessions.revoke\("` → lines 431-434 quoted above, no `eventLog.append` in the function body
 - `Select-String src\pdp.ts -Pattern "action: 'capability.revoke'"` → `pdp.ts:271`
 - ledger row 19 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`IncidentService.revokeSession` now appends an `incident.revoke` event
+(`metadata.phase = 'incident-revoke-session'`, sessionId/tenantId/reason,
+`revoked` flag) before publishing the channel record — mirroring
+`revokeCapability`'s audited path. The existing cross-node test asserts the
+event exists and carries the session id.
+
+**Evidence (this session):** h13 suite green.

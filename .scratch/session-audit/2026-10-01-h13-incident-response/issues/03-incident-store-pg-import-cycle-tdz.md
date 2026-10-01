@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -41,3 +41,13 @@ form → `entry via mig-b: OK, no crash`.
 - replica: `node -e "import('./.../cycle-replica/b.ts')..."` → `THREW: ReferenceError - Cannot access 'B' before initialization`
   vs `node -e "import('./.../cycle-replica/mig-b.ts')..."` → `entry via mig-b: OK, no crash`
 - ledger rows 10–12 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`src/incident-store-pg.ts` now uses a full `import type { StoreMigration }
+from './event-store-pg.ts';` (comment explains why an inline `{ type X }`
+specifier keeps the load edge). Regression: `tests/h13-import-order.test.ts`
+imports the channel module first and asserts it loads.
+
+**Evidence (this session):** targeted run 32 tests / 28 pass / 4 skip / 0
+fail; typecheck clean.

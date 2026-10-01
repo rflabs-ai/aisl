@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -50,3 +50,15 @@ EVENT_SIGNING_*_PEM on both sides, or verify in-process)`).
 - `node probe-p4b-preserve.mts` → `P4 mixed-signature chain verify (B key): valid = false | detail = signature mismatch`
   → `P4 cross-process preserve: THREW IncidentEvidenceError - incident bundle failed verification: ...`
 - ledger rows 15–16 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+Fail-closed behavior kept; the promise now names the precondition.
+`preserve`'s refusal appends an actionable hint when `chain.detail ===
+'signature mismatch'` and `EVENT_SIGNING_PUBLIC_KEY_PEM` is unset. DEPLOYMENT
+runbook step 5 and Claim 35's known limitations state the
+`EVENT_SIGNING_PRIVATE_KEY_PEM` + `EVENT_SIGNING_PUBLIC_KEY_PEM` requirement
+for cross-process preserve/report.
+
+**Evidence (this session):** typecheck clean; full gate green; probes
+P4a/P4b recorded the failure mode in evidence.md rows 15-16.

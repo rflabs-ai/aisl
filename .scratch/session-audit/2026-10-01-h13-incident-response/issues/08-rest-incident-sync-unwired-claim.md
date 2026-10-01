@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -34,3 +34,12 @@ server assembly exists; otherwise the doc fix plus a one-line example.
 - `Select-String src\*.ts,tests\*.ts -Pattern "incidentSync"` → only `rest-api.ts:165/197/209/316` + `h13-incident-response.test.ts:377`
 - `Select-String ... -Pattern "createRestApi\("` → `rest-api.ts:182` (def), `m15-ui.test.ts:39` (only caller)
 - ledger row 23 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+DEPLOYMENT.md softened to the truth: "A server whose embedder wires
+`RestApiDeps.incidentSync` also pulls once per authorized request; otherwise
+convergence rides the PDP `authorize`/`issue` paths." No route or assembly was
+invented (YAGNI — no client calls it).
+
+**Evidence (this session):** DEPLOYMENT.md:370-375 read back post-edit.

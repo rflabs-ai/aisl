@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (06a8a89)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (uncommitted working tree; no commits this session)
 
@@ -36,3 +36,12 @@ exists (the ADR-026 named upgrade).
 
 - `node src/cli.ts incident report globex 0 5` → stack quoted above, `exit=1`
 - ledger row 22 in `.scratch/session-audit/2026-10-01-h13-incident-response/evidence.md`
+
+## Resolution (06a8a89)
+
+`incidentCommand` wraps the command body in a catch that prints
+`incident command refused: <message>` and sets exit code 1 (mirroring
+`updateCommand`'s fail-closed style) instead of an uncaught stack trace.
+
+**Evidence (this session):** `node src/cli.ts incident report globex 0 5` →
+`  incident command refused: issuer may not mint capabilities in another tenant`, exit=1.

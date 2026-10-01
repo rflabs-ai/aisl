@@ -1,12 +1,11 @@
 /** Shared test wiring. Test-only: pins a signing key so results are reproducible. */
 
-import { buildWorld, type World } from './scenario.ts';
-import type { PolicyRule } from './policy.ts';
+import { buildWorld, type World, type WorldOptions } from './scenario.ts';
 import { type AuthContext, type Principal } from './domain.ts';
 import { hasMfa, IdentityProvider, type IdPConfig } from './identity.ts';
 import { exportJWK, SignJWT, generateKeyPair, type JWK } from 'jose';
 
-export function testWorld(options: { policies?: readonly PolicyRule[]; sqlitePath?: string } = {}): World {
+export function testWorld(options: WorldOptions = {}): World {
   process.env.CAPABILITY_SIGNING_KEY ??= 'test-signing-key-not-for-production';
   return buildWorld(options);
 }

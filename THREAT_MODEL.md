@@ -53,6 +53,7 @@ at this stage.
 | Update channel | signed update descriptor chained to the build manifest against the live tree, high-water mark anti-rollback, signed single-use backward-only rollback grant, staged rollout with sticky canary halt (H12) | **limited** | a signed-but-malicious release; caller-supplied health signal; one release key (env); the per-instance state file must sit outside untrusted write reach |
 | Model provider compromise | no provider is wired in | **not applicable yet** | becomes critical at provider integration |
 | Replay | single-use consumption, expiry; update replay refused by the high-water mark — stale signed descriptors are `rollback-blocked` (H12) | **mitigated** | multi-node consistency not solved |
+| Active incident (cannot revoke/freeze/reconstruct/preserve fast enough) | tenant/global kill switch: freeze issuance + `incident-frozen` deny at both chokepoints, bulk capability + session revocation, multi-writer revocation channel (pull <= 1 s default, forced on issuance), paged `asl-incident-bundle` preservation + reconstruction (H13) | **mitigated** | poll-based propagation; a channel writer can freeze (DoS is the H15 accepted trade); in-memory freeze state lost on restart without the Postgres channel; response can still be slower than the attack |
 
 ## 5. Out of scope at this stage
 

@@ -56,6 +56,7 @@ import {
   type RollbackGrant,
   type UpdateDescriptor,
 } from './updates.ts';
+import { InMemoryRevocationChannel, verifyIncidentBundle, type IncidentBundle } from './incident.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -650,6 +651,102 @@ async function demo(): Promise<void> {
     if (demoFailed) process.exitCode = 1;
   } finally {
     rmSync(demoDir, { recursive: true, force: true });
+  }
+
+  // H13: incident response (ADR-026). Two nodes share one revocation channel;
+  // one operator action freezes issuance, revokes authority, and propagates to
+  // the second node inside the poll interval; the incident window is then
+  // preserved as a verifiable artifact. The kill-switch latency is measured
+  // wall clock. Self-contained on fresh worlds, like the H12 section.
+  heading('22. H13: incident response — kill switch, broadcast, preservation');
+  {
+    const h13Channel = new InMemoryRevocationChannel();
+    const h13NodeA = buildWorld({ channel: h13Channel });
+    const h13NodeB = buildWorld({ channel: h13Channel });
+    h13NodeA.authorization.issue(h13NodeA.root, {
+      subject: h13NodeA.user.id,
+      tenantId: TENANT_A,
+      resourceIds: [`audit-log:${TENANT_A}`],
+      actions: ['query.audit', 'audit.export'],
+      maxClassification: 'internal',
+      expiresAt: h13NodeA.clock.now() + 3_600_000,
+      provenance: { source: 'policy-grant', note: 'operator evidence access' },
+    });
+    const h13BootstrapCap = h13NodeA.authorization.capabilitiesFor(h13NodeA.agent.id)[0]!.id;
+
+    // Prime node B's sync throttle: one decision before the incident means its
+    // next pull is due exactly one interval later.
+    h13NodeB.authorization.authorize({ principal: h13NodeB.agent, action: 'read', resourceId: h13NodeB.resources.repoA! });
+    const h13T0 = performance.now();
+    const h13Engaged = h13NodeA.incident.engage({ scope: 'tenant', tenantId: TENANT_A, reason: 'demo drill', actor: 'user:oncall' });
+    const h13Denied = h13NodeA.authorization.authorize({ principal: h13NodeA.agent, action: 'read', resourceId: h13NodeA.resources.repoA! });
+    const h13KillLatencyMs = Math.round((performance.now() - h13T0) * 1000) / 1000;
+    line(
+      'kill switch (tenant freeze + revoke-all)',
+      h13Engaged.frozen ? 'ENGAGED' : 'FAIL',
+      `caps=${h13Engaged.capabilitiesRevoked} sessions=${h13Engaged.sessionsRevoked} broadcast=${h13Engaged.broadcastOk ? 'ok' : 'FAILED'}`,
+    );
+    line(
+      'next decision after engage',
+      h13Denied.denyReason === 'incident-frozen' ? 'DENIED' : 'FAIL',
+      `${h13Denied.denyReason} in ${h13KillLatencyMs} ms (in-process, immediate)`,
+    );
+
+    h13NodeB.clock.advance(999);
+    const h13BeforeInterval = h13NodeB.authorization.authorize({ principal: h13NodeB.agent, action: 'read', resourceId: h13NodeB.resources.repoA! });
+    h13NodeB.clock.advance(1);
+    const h13AfterInterval = h13NodeB.authorization.authorize({ principal: h13NodeB.agent, action: 'read', resourceId: h13NodeB.resources.repoA! });
+    line('node B (throttled, 999 ms)', h13BeforeInterval.decision === 'allow' ? 'ALLOW' : 'FAIL', 'the shared channel is not pulled before the poll interval');
+    line(
+      'node B at one interval (≤ 5 s target)',
+      h13AfterInterval.denyReason === 'incident-frozen' ? 'DENIED' : 'FAIL',
+      `propagated through the shared channel after 1000 ms (${h13AfterInterval.denyReason})`,
+    );
+
+    const h13Dir = mkdtempSync(join(tmpdir(), 'asl-h13-'));
+    try {
+      const h13BundlePath = join(h13Dir, 'incident-bundle.json');
+      const h13Preserved = h13NodeA.incident.preserve({
+        principal: h13NodeA.user,
+        tenantId: TENANT_A,
+        fromSeq: 0,
+        toSeq: h13NodeA.eventLog.all().at(-1)!.seq,
+        outPath: h13BundlePath,
+      });
+      const h13Parsed = JSON.parse(readFileSync(h13BundlePath, 'utf8')) as IncidentBundle;
+      const h13Verified = verifyIncidentBundle(h13Parsed, { publicKey: eventPublicKey() });
+      line(
+        'preserve incident window',
+        h13Verified.valid ? 'VERIFIED' : 'FAIL',
+        h13Verified.valid
+          ? `${h13Preserved.events} events, digest ${h13Preserved.digest.slice(0, 16)}..., chain=${h13Preserved.chainValid}, anchor=${h13Preserved.anchorMatch}`
+          : h13Verified.errors.join('; '),
+      );
+    } finally {
+      rmSync(h13Dir, { recursive: true, force: true });
+    }
+
+    h13NodeA.incident.lift({ scope: 'tenant', tenantId: TENANT_A, reason: 'contained', actor: 'user:oncall' });
+    h13NodeA.authorization.issue(h13NodeA.root, {
+      subject: h13NodeA.agent.id,
+      tenantId: TENANT_A,
+      resourceIds: [h13NodeA.resources.repoA!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: h13NodeA.clock.now() + 600_000,
+      provenance: { source: 'session-bootstrap', note: 'post-incident reissue' },
+    });
+    const h13AfterLift = h13NodeA.authorization.authorize({ principal: h13NodeA.agent, action: 'read', resourceId: h13NodeA.resources.repoA! });
+    line(
+      'lift + reissue (revocation is not undone)',
+      h13AfterLift.decision === 'allow' && h13NodeA.authorization.isRevoked(h13BootstrapCap) ? 'ALLOW' : 'FAIL',
+      `new authority works; the revoked bootstrap capability stays revoked=${h13NodeA.authorization.isRevoked(h13BootstrapCap)}`,
+    );
+
+    h13NodeA.incident.close();
+    h13NodeB.incident.close();
+    h13NodeA.eventLog.close();
+    h13NodeB.eventLog.close();
   }
 
   // Postgres mode: close the store's pool or the process hangs at exit.
@@ -1256,13 +1353,144 @@ async function updateCommand(): Promise<void> {
   process.exitCode = 1;
 }
 
+/**
+ * H13 incident-response commands (ADR-026):
+ * `incident status|engage|lift|revoke-cap|revoke-session|preserve|report`.
+ *
+ * The kill switch applies locally first and broadcasts through the revocation
+ * channel (Postgres mode reaches a running node / other nodes). preserve and
+ * report mint an operator audit capability through the ordinary issuance path
+ * — there is no separate emergency authority.
+ */
+async function incidentCommand(): Promise<void> {
+  const sub = process.argv[3] ?? 'status';
+  // No fixture bootstrap: operator commands must not mint fixture authority or
+  // append fixture events to a shared (Postgres) evidence chain.
+  const world = await buildWorldAsync({ bootstrap: false });
+  const operator = process.env.INCIDENT_OPERATOR ?? 'operator:cli';
+
+  const usage = (): void => {
+    console.error('  usage: incident status');
+    console.error('         incident engage <tenant <id> | global> <reason...>');
+    console.error('         incident lift   <tenant <id> | global> <reason...>');
+    console.error('         incident revoke-cap <capabilityId> <tenantId> <reason...>');
+    console.error('         incident revoke-session <sessionId> <tenantId> <reason...>');
+    console.error('         incident preserve <tenantId | *> <fromSeq> <toSeq> [outPath]');
+    console.error('         incident report <tenantId | *> <fromSeq> <toSeq>');
+    process.exitCode = 1;
+  };
+
+  try {
+    if (sub === 'status') {
+      const status = world.incident.status();
+      heading('INCIDENT STATUS (H13, ADR-026)');
+      line(
+        'freeze',
+        status.frozen ? 'FROZEN' : 'clear',
+        status.freezes.map((f) => `${f.scope}${f.tenantId ? `:${f.tenantId}` : ''} (${f.reason}, by ${f.actor})`).join(', ') || 'none',
+      );
+      line('revoked capabilities', 'INFO', String(status.revokedCapabilities));
+      line(
+        'channel',
+        status.channelErrors > 0 ? 'DEGRADED' : 'ok',
+        `cursor=${status.channelCursor} syncCursor=${status.syncCursor} applied=${status.appliedRecords} syncFailures=${status.syncFailures} channelErrors=${status.channelErrors}`,
+      );
+      if (status.channelLastError) console.log(`         last channel error: ${status.channelLastError}`);
+      return;
+    }
+
+    if (sub === 'engage' || sub === 'lift') {
+      const scope = process.argv[4];
+      if (scope !== 'tenant' && scope !== 'global') return usage();
+      const tenantId = scope === 'tenant' ? process.argv[5] : undefined;
+      const reason = process.argv.slice(scope === 'tenant' ? 6 : 5).join(' ').trim();
+      if (!reason || (scope === 'tenant' && !tenantId)) return usage();
+      const input = { scope, ...(tenantId ? { tenantId } : {}), reason, actor: operator } as const;
+      const result = sub === 'engage' ? world.incident.engage(input) : world.incident.lift(input);
+      await world.incident.flush();
+      const status = world.incident.status();
+      const broadcastOk = result.broadcastOk && status.channelErrors === 0;
+      line(sub === 'engage' ? 'kill switch' : 'freeze lifted', result.frozen ? 'FROZEN' : 'CLEAR', `${scope}${tenantId ? `:${tenantId}` : ''} — ${reason}`);
+      if (sub === 'engage') {
+        line('authority revoked', 'INFO', `capabilities=${result.capabilitiesRevoked} sessions=${result.sessionsRevoked}`);
+      }
+      line('broadcast', broadcastOk ? 'OK' : 'FAILED', broadcastOk ? 'published to the revocation channel' : `channel errors=${status.channelErrors}${status.channelLastError ? ` (${status.channelLastError})` : ''}`);
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log('  note: the in-memory channel is local to this process — set EVENT_STORE=postgres + DATABASE_URL to reach a running node.');
+      }
+      if (!broadcastOk) process.exitCode = 1;
+      return;
+    }
+
+    if (sub === 'revoke-cap' || sub === 'revoke-session') {
+      const targetId = process.argv[4] ?? '';
+      const tenantId = process.argv[5] ?? '';
+      const reason = process.argv.slice(6).join(' ').trim();
+      if (!targetId || !tenantId || !reason) return usage();
+      if (sub === 'revoke-cap') world.incident.revokeCapability(targetId, tenantId, reason);
+      else world.incident.revokeSession(targetId, tenantId, reason);
+      await world.incident.flush();
+      line(sub, 'REVOKED', `${targetId} (tenant ${tenantId}) — ${reason}`);
+      return;
+    }
+
+    if (sub === 'preserve' || sub === 'report') {
+      const tenantId = process.argv[4] ?? '';
+      const fromSeq = Number(process.argv[5]);
+      const toSeq = Number(process.argv[6]);
+      if (!tenantId || !Number.isInteger(fromSeq) || !Number.isInteger(toSeq)) return usage();
+      // Operator evidence authority, minted and audited through the ordinary
+      // issuance path (no emergency authority exists). The global view ('*')
+      // is authorized by the operator's own tenant's audit authority.
+      const authorityTenant = tenantId === '*' ? world.user.tenantId : tenantId;
+      world.authorization.issue(world.root, {
+        subject: world.user.id,
+        tenantId: authorityTenant,
+        resourceIds: [`audit-log:${authorityTenant}`],
+        actions: ['query.audit', 'audit.export'],
+        maxClassification: 'restricted',
+        expiresAt: world.clock.now() + 3_600_000,
+        provenance: { source: 'policy-grant', note: 'operator CLI incident evidence access' },
+      });
+      if (sub === 'preserve') {
+        const outPath = process.argv[7] ?? join(ROOT, 'artifacts', `incident-${tenantId.replace('*', 'global')}-${fromSeq}-${toSeq}.json`);
+        const result = world.incident.preserve({ principal: world.user, tenantId, fromSeq, toSeq, outPath });
+        line('incident bundle preserved', 'OK', `${result.events} events, digest ${result.digest.slice(0, 19)}..., chain=${result.chainValid}`);
+        console.log(`  artifact: ${result.path}`);
+      } else {
+        const report = world.incident.reconstruct({ principal: world.user, tenantId, fromSeq, toSeq });
+        line('reconstruction', 'OK', `${report.events} events, allow=${report.decisions.allow} deny=${report.decisions.deny}, revocations=${report.revocations}, freezes=${report.freezes}, lifts=${report.lifts}`);
+        for (const [reason, count] of Object.entries(report.denyReasons)) console.log(`         deny ${reason}: ${count}`);
+        console.log(`         actors: ${report.actors.join(', ')}`);
+      }
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log('  note: this process has an in-memory world — set EVENT_STORE=postgres + DATABASE_URL to read the running node\'s evidence.');
+      }
+      return;
+    }
+
+    usage();
+  } catch (error) {
+    // Refusals (frozen issuance, missing authority, empty windows) print a
+    // diagnosable line instead of a raw stack trace.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`  incident command refused: ${message}`);
+    process.exitCode = 1;
+  } finally {
+    await world.incident.flush().catch(() => {});
+    world.incident.close();
+    world.eventLog.close();
+  }
+}
+
 const command = process.argv[2] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
 else if (command === 'benchmark') await benchmark();
 else if (command === 'build') await buildCommand();
 else if (command === 'update') await updateCommand();
+else if (command === 'incident') await incidentCommand();
 else {
-  console.error(`unknown command: ${command} (try demo | attack | benchmark | build | update)`);
+  console.error(`unknown command: ${command} (try demo | attack | benchmark | build | update | incident)`);
   process.exitCode = 1;
 }

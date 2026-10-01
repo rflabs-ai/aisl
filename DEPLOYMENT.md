@@ -55,8 +55,10 @@ The default stays SQLite (ADR-010's single-process mode). Postgres mode is
      (superuser or owner) connection: the runner bootstraps the `migrations`
      bookkeeping table, the cluster-level `app_rw`/`app_reader` roles
      (NOLOGIN, no passwords in DDL), then applies forward-only migrations
-     ids 1–3, each sha256-recorded. A recorded id with a changed hash is a
-     tamper signal and refuses to open.
+     ids 1–4 (id 4 = the H13 revocation channel), each sha256-recorded. A
+     recorded id with a changed hash is a tamper signal and refuses to open;
+     an already-deployed instance that has only ids 1–3 must run once with
+     `MIGRATION_DATABASE_URL` set, or the open refuses (fail closed).
   4. Operator out-of-band (migration framework never does this): grant
      `LOGIN` + passwords to `app_rw` (runtime) and `app_reader` (audit path)
      with the documented privileges, set `pg_hba` to TLS-only from the
@@ -362,6 +364,62 @@ high-water mark decides freshness. Release-side and instance-side steps:
 Key material: same `BUILD_SIGNING_*` env vars as build-and-release (one
 release key). Residuals: caller-supplied health signal, no descriptor
 transparency log (H11/Stage-3), signed-but-malicious release (Claim 34).
+
+### Incident response (H13, ADR-026)
+
+Runbooks for a live incident. In Postgres mode the revocation channel is the
+shared table (`revocation_channel`, migration 4) — an operator CLI process
+reaches the running node(s) within the poll interval (default 1 s). A server
+whose embedder wires `RestApiDeps.incidentSync` also pulls once per authorized
+request; otherwise convergence rides the PDP `authorize`/`issue` paths. In
+SQLite mode the channel is in-memory: the CLI's kill switch is local to that
+process, and the CLI says so.
+
+1. **Assess:** `npm run incident:status` — freeze state (scope, tenant,
+   reason, actor), revoked-capability count, channel cursor / applied records
+   / sync + channel error counters. A non-zero channel error means the
+   broadcast did not propagate; the local effect still applies.
+2. **Kill switch (freeze + revoke-all):**
+   `node src/cli.ts incident engage tenant <tenantId> "<reason>"` or
+   `... engage global "<reason>"`. Freezes issuance + authorization
+   (`incident-frozen`), revokes every registered capability and session in
+   scope, and broadcasts. Evidence-read capabilities (`query.audit`,
+   `audit.export`, `evidence.decrypt`) survive so you can still reconstruct.
+   A non-zero exit means the local action landed but the broadcast did not —
+   check `incident status` and the channel before trusting other nodes.
+3. **Contained (lift):** `node src/cli.ts incident lift tenant <tenantId>
+   "<reason>"`. Clears the freeze only. Revoked capabilities stay revoked;
+   re-issue authority through the ordinary issuance/approval paths.
+4. **Narrow revocation:** `incident revoke-cap <capabilityId> <tenantId>
+   "<reason>"`, `incident revoke-session <sessionId> <tenantId> "<reason>"` —
+   local + broadcast, single-target.
+5. **Preserve evidence:**
+   `node src/cli.ts incident preserve <tenantId | *> <fromSeq> <toSeq> [outPath]`
+   — pages the authorized audit export past the 1000-event cap, verifies the
+   bundle offline, writes `asl-incident-bundle` JSON (digest + head inside),
+   and records an `incident.preserve` event with digest + head + counts only.
+   Archive the artifact; it verifies offline with `verifyIncidentBundle` +
+   the event public key (and against the anchor when the window reaches the
+   head). `*` is the global-incident view (`engage global` evidence).
+   **Precondition:** the operator process must share the event-signing key
+   with the signing node — set `EVENT_SIGNING_PRIVATE_KEY_PEM` +
+   `EVENT_SIGNING_PUBLIC_KEY_PEM` on both. Without them each process signs
+   with an ephemeral key and preserve refuses fail-closed with a
+   `signature mismatch` (and now says so in the error).
+6. **Reconstruct:** `node src/cli.ts incident report <tenantId | *> <fromSeq>
+   <toSeq>` — decision counts by deny reason, revocation/freeze counts,
+   actors, time bounds; `*` for global-incident evidence.
+7. **Channel custody:** `revocation_channel` is append-only by privilege
+   (`app_rw` SELECT/INSERT; no UPDATE/DELETE), deliberately not RLS-scoped
+   (it coordinates tenants and nodes), and must carry no secrets in `reason`
+   text. Treat write access as incident authority — a channel writer can
+   freeze legitimate work (the accepted H15 DoS trade).
+8. **Restart behaviour:** a fresh node replays the channel from cursor 0 and
+   reconstructs freeze + revocation state; a SQLite-mode process loses its
+   in-memory freeze on restart (the channel is the durable story).
+
+Residuals: poll-based propagation, a channel writer can freeze, response can
+be slower than the attack (Claim 35, ADR-026).
 
 ## 2. Hardware tiers
 

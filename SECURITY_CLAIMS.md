@@ -1630,4 +1630,119 @@ compromised release key or coerced maintainer signs anything. H12 raises the
 cost of rollback-and-unsigned attacks to "forge a signature AND beat a mark
 that never goes down"; it does not raise the cost of signing a bad release.
 
+---
+
+## Claim 35 — The kill switch freezes authority immediately in-process and propagates within the poll interval; preserved evidence verifies offline (H13)
+
+**Claim:** One operator action (`IncidentService.engage`) freezes issuance and
+authorization for a tenant or globally, revokes every registered capability
+and session in scope, and broadcasts the decision through the revocation
+channel. A frozen tenant's next decision denies with the distinct
+`denyReason: 'incident-frozen'` and its `issue` refuses with an audited
+`capability.issue` denial — not a generic failure. Cross-node propagation is
+bounded by the channel poll interval (default 1 s, inside the ROADMAP ≤ 5 s
+target); issuance force-syncs so a post-freeze mint cannot slip through a
+throttle window. `lift` clears the freeze only — revoked authority is never
+restored. Evidence-read capabilities survive the bulk revoke and remain
+authorized while frozen, so an incident can be reconstructed and preserved
+during the response. `preserve` pages the ordinary authorized audit export
+past the M6 1000-event cap and writes an `asl-incident-bundle` whose content
+digest, event chain, and Ed25519 signatures verify offline; the event log
+records digest + head + counts, never event content. A filtered view (global
+incident via `tenantId: '*'`, or a tenant interleaved with other tenants) is
+recorded as non-contiguous and verified per-event (hash + signature + the
+recorded live-chain state + anchor head) instead of requiring slice linkage.
+
+**Mechanism:** `src/incident.ts` (ADR-026) + `src/incident-store-pg.ts`
+(migration id 4, `revocation_channel`) + chokepoint edits in `src/pdp.ts`
+(freeze check first in `evaluate`, refusal at the top of `issue`) and bulk
+methods on `src/session-manager.ts`. The channel is the one deliberate
+multi-writer table (append-only by privilege: `app_rw` SELECT/INSERT, no
+UPDATE/DELETE grant, no RLS — control-plane coordination data with no claim
+content); the event chain stays single-writer. Records are scope-level
+(`freeze`/`unfreeze`/`revoke-caps`/`revoke-sessions`) and single-target
+(`revoke-cap`/`revoke-session`); `revoke-caps` is fenced by local issuance
+time so replay cannot kill authority issued after the incident. A fresh node
+replays from cursor 0. A malformed/unknown channel row is rejected and
+skipped with the cursor advancing past it (audit 01) — one hostile or
+future-version row can never stall propagation on a node, and the rejection is
+loud through `health()`. A channel outage still engages locally and reports
+`broadcastOk: false`; async backends surface failures through `health()`.
+CLI: `node src/cli.ts incident status|engage|lift|revoke-cap|
+revoke-session|preserve|report`; operator commands build a bootstrap-free
+world (no fixture issuance/appends) and print a diagnosable refusal instead of
+a stack trace.
+
+**Threat model:** TM-004 (operators and evidence integrity); ROADMAP H13
+failure modes — cannot revoke quickly, cannot freeze issuance, cannot
+reconstruct, cannot preserve evidence; ADR-022 (federation: an operator kill
+switch that reaches a running node; M18's unattended agent).
+
+**Assumptions:** an on-call human exists and can act; clocks across nodes are
+roughly synchronised (the issuance-time fence and record timestamps compare
+wall clocks); the channel is control-plane data and its reason text contains
+no secrets; a channel writer is an operator (write access is the incident
+authority).
+
+**Evidence:** `tests/h13-incident-response.test.ts` — 24 cases (written
+red-first): engage denies the next decision with `incident-frozen` + records
+it; issuance blocked with an audited refusal; `lift` restores authorization
+but not revoked capabilities; tenant vs global scope; `revokeAll`
+tenant-scoped and audited per capability; kill-switch latency immediate with
+no clock advance; input validation; session bulk revocation + engage session
+sweep; two-node shared-channel propagation denied after exactly one 1 s
+interval; forced issuance sync inside a 60 s throttle window; fresh-node
+replay from cursor 0; single-target revoke-cap/revoke-session cross-node (the
+session revocation is also a signed-log event — audit 05); monotonic channel
+cursor; channel outage engages locally with `broadcastOk=false`; the REST
+server pulls the channel once per authorized request; preserve round trip
+(file written, digest recomputable, offline verification valid, digest + head
++ counts only in the event); paging past 1000 events; denied principal
+refused with no file; tampered bundle fails offline verification;
+reconstruction counts; the global-incident view (`tenantId: '*'`) reads
+`tenantId: ''` events, refuses without authority, and preserves a verified
+bundle; `bootstrap: false` builds a world that issues/appends nothing; all
+under the structural invariant — no key material or secret canaries in
+channel records, incident events, or the bundle.
+`tests/h13-revocation-pg.test.ts` — migration DDL static invariants
+(append-only privilege, no RLS, constrained scope, no secrets) and the live
+scratch-DB suite (two-instance broadcast, `app_rw` UPDATE/DELETE refusal,
+hostile-row refusal, and the audit-01 skip-and-count regression: a bad row
+does not stall later rows and the cursor advances), skip-clean without
+`DATABASE_URL`. `tests/h13-import-order.test.ts` — the channel module imports
+cleanly when loaded first (audit 03 import-cycle regression).
+
+**Test:** the two suites above; demo section 22 exercises a measured
+engage-to-deny latency, a two-node interval-bounded broadcast, and a verified
+preservation round trip (`npm run demo`, exits 0).
+
+**Known limitations:** propagation is pull-based — a node that never issues a
+decision or receives a REST request does not sync (default deployments route
+everything through the PDP/REST, named honestly); a channel outage widens the
+propagation window and is reported through `broadcastOk`/status counters
+rather than hidden; in-memory freeze state is lost on restart unless the
+Postgres channel replays it (cursor 0); the live multi-node Postgres proof is
+the skip-clean suite until a `DATABASE_URL` run; single-target session
+revocation reaches a node only when its sync runs; cross-process
+`preserve`/`report` require the event-signing key to be shared
+(`EVENT_SIGNING_PRIVATE_KEY_PEM` + `EVENT_SIGNING_PUBLIC_KEY_PEM` on the
+signing node and the operator process) — with the default ephemeral key the
+command fails closed with a `signature mismatch` and now says so; the global
+view (`tenantId: '*'`) is authorized by the caller's own tenant's
+`audit.export` capability and exposes only the events recorded with no tenant;
+non-contiguous (filtered) bundles verify per-event authenticity rather than
+chain linkage, so they prove each event is authentic and the live chain was
+valid at preservation time, not that the event sequence is unbroken;
+retention/legal hold is
+out of scope (evidence is append-only and never deleted today; preservation
+is an artifact, not a retention engine); the operator CLI mints audit
+authority through the existing root issuance path (split operator identity is
+the named upgrade).
+
+**Residual risk:** a compromised operator with channel write access can freeze
+legitimate work — denial of service is the accepted H15 trade, made loud and
+recoverable (`lift`, counters, events). Incident response can still be slower
+than the attack (the ROADMAP residual): the mechanisms shrink the window; they
+cannot shrink the attacker's head start.
+
 

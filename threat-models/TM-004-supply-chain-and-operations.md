@@ -32,6 +32,7 @@ has already gained write access to infrastructure.
 | Direct code change | **detected/limited** since H10 (ADR-024): the signed build manifest binds `treeDigest` (git blob SHAs over all tracked files, outputs excluded), `sbomDigest`, and the gate result under an Ed25519 signature; `build verify` recomputes and refuses stale-source/stale-dependencies/bad-signature/gate-not-passed at deploy. Before a manifest exists, or with the signing key compromised, this path **succeeds** — that is the residual. |
 | Replay an old signed update (roll back to a vulnerable version) | **detected/limited** since H12 (ADR-025): the signed update descriptor must chain to the build manifest against the live tree AND beat the persisted high-water mark; a perfectly signed, stale descriptor is refused (`rollback-blocked`) and the mark never lowers, including under emergency rollback (the signed, single-use grant cannot re-open a burned version). Residual: an attacker who can delete the per-instance state file resets the mark — protect it like the manifest. |
 | Serve an unsigned update | **detected** since H12 (ADR-025): `update verify`/`update apply` refuse missing descriptor, missing signature, missing key env, and bad signature with distinct reasons — no path prints applied without the full chain. |
+| Contain a live incident (revoke a capability/session, freeze issuance, preserve evidence) | **mitigated/limited** since H13 (ADR-026): one `incident engage` freezes issuance + authorization (`incident-frozen`), revokes every registered capability + session in scope, and broadcasts through the multi-writer revocation channel (pull ≤ 1 s default, forced on issuance); `preserve` pages past the M6 cap into an offline-verifiable `asl-incident-bundle`. Residual: poll-based propagation, a channel writer can freeze (DoS is the H15 accepted trade), in-memory freeze state lost on restart without the Postgres channel, and the ROADMAP residual that the response can be slower than the attack. |
 | Administrator mints a broad capability | succeeds and is logged |
 
 ## Controls
@@ -58,6 +59,12 @@ has already gained write access to infrastructure.
   needs an explicit health pass and a failed pass halts stickily. Residual: a
   signed-but-malicious release, a caller-supplied health signal, and state
   file custody (code-written, atomic, gitignored per instance).
+- The incident-response plane (`src/incident.ts` + migration 4, H13/ADR-026):
+  freeze + bulk revoke at the two chokepoints, a multi-writer append-only
+  revocation channel beside the single-writer event chain, and paged
+  preservation bundles that verify offline (digest + chain + signatures +
+  anchor). The channel carries control-plane records only — no secrets, no
+  claim content; each node's signed event log remains the evidence of record.
 - The third-party attack surface in production is small but not nil; the
   residual is what `jose` and `postgres` themselves do.
 
@@ -88,7 +95,15 @@ benchmark reports `hashChainValid` and `auditCompleteness` on every run;
 refusals, tree-digest staleness, manifest sign/verify fail-closed);
 `tests/h12-secure-updates.test.ts` (descriptor signature fail-closed, chain
 vs live tree, anti-rollback mark holds under replay, signed single-use
-rollback, sticky canary halt, no key material in state/refusals).
+rollback, sticky canary halt, no key material in state/refusals);
+`tests/h13-incident-response.test.ts` (kill switch immediate + audited,
+tenant/global scope, lift does not restore revoked authority, two-node
+interval-bounded propagation, forced issuance sync, cursor-0 replay,
+single-target records, channel-outage `broadcastOk=false`, REST sync hook,
+paged preservation past 1000 events, tampered-bundle refusal, no secrets on
+incident surfaces) and `tests/h13-revocation-pg.test.ts` (migration DDL
+invariants + live two-instance broadcast, append-only privilege, hostile-row
+refusal; skip-clean without `DATABASE_URL`).
 
 ## Residual risk
 

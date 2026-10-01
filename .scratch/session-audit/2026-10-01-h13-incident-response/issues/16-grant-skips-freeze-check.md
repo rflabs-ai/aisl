@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -30,3 +30,7 @@ issuance freeze (authorize still gates), or add the same
 - `Select-String src\*.ts,tests\*.ts -Pattern "\.grant\("` → `invariants.test.ts:480` only
 - `Select-String src\pdp.ts -Pattern "grant\(cap: Capability\)"` → `pdp.ts:237`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+Documented option chosen (an embedder restarting during an incident must be able to rebuild its map): `grant()` carries a doc comment naming it the H1 embedder rehydration seam that bypasses channel force-sync and the issuance freeze; `evaluate()` still denies use while frozen and `lift` restores nothing revoked. Regression test: the `ticket 16` case in `tests/h13-incident-response.test.ts` registers authority while frozen, asserts `incident-frozen`, then asserts it works after `lift`.

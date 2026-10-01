@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -26,3 +26,7 @@ exists), or cap the mirror size in `load()` when that deployment appears.
 
 - `Select-String src\incident-store-pg.ts -Pattern "private readonly mirror"` → `incident-store-pg.ts:121`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+`ponytail:` marker added above `PostgresRevocationChannel.mirror`: ceiling is process-lifetime growth bounded by incident volume (channel records are rare), upgrade path is trimming entries at/below the minimum consumer cursor once a long-running multi-node deployment tracks cursors.

@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -29,3 +29,7 @@ and the owner DELETE is node-local.
 
 - `Select-String src\rest-sessions.ts -Pattern "deps.sessions.revoke"` → `rest-sessions.ts:99: deps.sessions.revoke(id);`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+Documented rather than wired (YAGNI — no in-repo assembly passes a REST incident hook): DEPLOYMENT.md step 4 states the owner `DELETE /v1/sessions/:id` is node-local and cross-node session revocation is `incident revoke-session`; the route's `ponytail:` ceiling in `src/rest-sessions.ts` names the same.

@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -29,3 +29,7 @@ Either print the action breakdown in the CLI's `incident report`, or drop
 
 - `Select-String src\incident.ts -Pattern "readonly actions:|readonly freezes:"` → `incident.ts:225`, `incident.ts:141`
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+`incident report` now prints `actions: <action>=<count>, ...` (the field is consumed); `IncidentStatus.freezes` is typed `readonly FreezeEntry[]` imported from `./pdp.ts`, removing the hand-synced duplicate declaration.

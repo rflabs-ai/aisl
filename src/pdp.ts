@@ -234,6 +234,16 @@ export class AuthorizationService {
     return this.issue(issuer, request, parent);
   }
 
+  /**
+   * H1 embedder seam: register a caller-supplied capability (rehydrated from
+   * persistence or delegated) without the `issue()` pipeline. Deliberately
+   * bypasses the revocation-channel force-sync and the issuance freeze (audit
+   * ticket 16) — an embedder restarting during an incident must be able to
+   * rebuild its map. Adding authority this way is not a bypass of the kill
+   * switch: `evaluate()` still refuses to use it while its tenant is frozen,
+   * and `lift` restores no revoked authority. New authority goes through
+   * `issue()`.
+   */
   grant(cap: Capability): void {
     this.capabilities.set(cap.id, cap);
     this.registeredAt.set(cap.id, this.now());
@@ -418,6 +428,12 @@ export class AuthorizationService {
         break;
       case 'revoke-cap':
         if (record.targetId) {
+          // Tenant isolation (audit ticket 12): a tenant-scoped record may only
+          // revoke a target registered to that tenant. A target that is not
+          // registered here is still recorded revoked — revocation ahead of
+          // registration is the safe direction.
+          const target = this.capabilities.get(record.targetId);
+          if (target && !inScope(target.tenantId)) break;
           this.revoked.set(record.targetId, { capabilityId: record.targetId, revokedAt: record.at, reason: record.reason });
         }
         break;

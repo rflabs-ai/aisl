@@ -56,7 +56,8 @@ export const INCIDENT_MIGRATION: StoreMigration = {
     REVOKE UPDATE, DELETE ON revocation_channel FROM PUBLIC;
     GRANT USAGE ON SCHEMA public TO app_rw;
     GRANT SELECT, INSERT ON revocation_channel TO app_rw;
-    GRANT USAGE, SELECT ON SEQUENCE revocation_channel_seq TO app_rw;
+    -- BIGSERIAL on revocation_channel.seq names the sequence <table>_<column>_seq.
+    GRANT USAGE, SELECT ON SEQUENCE revocation_channel_seq_seq TO app_rw;
   `,
 };
 
@@ -118,7 +119,10 @@ export interface PostgresRevocationChannelConfig {
 
 export class PostgresRevocationChannel implements RevocationChannel {
   private readonly sql: Sql;
+  // ponytail: the mirror grows for the process lifetime; bounded by incident volume (channel records are rare), not traffic. upgrade: trim entries at or below the minimum consumer cursor once a long-running multi-node deployment tracks cursors.
   private readonly mirror: RevocationRecord[] = [];
+  /** In-flight queries (inserts + refresh loads) awaited by flush(). */
+  private readonly pending = new Set<Promise<unknown>>();
   private readonly endpoint: string;
   private maxSeq = -1;
   private refreshInFlight = false;
@@ -137,16 +141,32 @@ export class PostgresRevocationChannel implements RevocationChannel {
    * engaging node) rather than silently treated as propagated.
    */
   publish(input: RevocationInput): void {
-    void this.sql`
-      INSERT INTO revocation_channel (action, scope, tenant_id, target_id, reason, at)
-      VALUES (${input.action}, ${input.scope}, ${input.tenantId ?? null}, ${input.targetId ?? null}, ${input.reason}, ${input.at})
-    `.catch((error: unknown) => this.recordError(error));
+    void this.track(
+      this.sql`
+        INSERT INTO revocation_channel (action, scope, tenant_id, target_id, reason, at)
+        VALUES (${input.action}, ${input.scope}, ${input.tenantId ?? null}, ${input.targetId ?? null}, ${input.reason}, ${input.at})
+      `.catch((error: unknown) => this.recordError(error)),
+    );
+  }
+
+  /**
+   * Track an in-flight query. The pool runs queries on separate connections,
+   * so a bare `SELECT 1` does not order behind an unawaited insert — without
+   * this set, `flush()` could report success before a write landed or failed.
+   */
+  private track<T>(promise: Promise<T>): Promise<T> {
+    this.pending.add(promise);
+    void promise.then(
+      () => this.pending.delete(promise),
+      () => this.pending.delete(promise),
+    );
+    return promise;
   }
 
   refresh(): void {
     if (this.refreshInFlight) return;
     this.refreshInFlight = true;
-    void this.load()
+    void this.track(this.load())
       .catch((error: unknown) => this.recordError(error))
       .finally(() => {
         this.refreshInFlight = false;
@@ -193,8 +213,9 @@ export class PostgresRevocationChannel implements RevocationChannel {
     return this.maxSeq;
   }
 
-  /** Await every queued query (inserts included) — used before process exit. */
+  /** Await every queued query (inserts and in-flight refresh) — used before process exit. */
   async flush(): Promise<void> {
+    await Promise.allSettled([...this.pending]);
     await this.sql`SELECT 1`.catch((error: unknown) => this.recordError(error));
   }
 

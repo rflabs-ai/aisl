@@ -54,10 +54,14 @@ describe('capability_requests persistence API (ADR-020)', () => {
       assert.equal(created.decidedAt, undefined);
       assert.equal(created.decidedBy, undefined);
 
-      await store.createCapabilityRequest('t2', 'req-1', 'agent:globex-1', {}, new Date(Date.now() + 300_000));
+      await store.createCapabilityRequest('t2', 'req-2', 'agent:globex-1', {}, new Date(Date.now() + 300_000));
 
       assert.deepEqual((await store.listCapabilityRequestsForTenant('t1', 'pending')).map((r) => r.id), ['req-1']);
-      assert.equal((await store.getCapabilityRequest('t2', 'req-1'))?.principal, 'agent:globex-1', 'cross-tenant read is tenant-scoped');
+      assert.equal((await store.getCapabilityRequest('t2', 'req-2'))?.principal, 'agent:globex-1', 'cross-tenant read is tenant-scoped');
+      // Request ids are service-generated UUIDs (globally unique, id is the
+      // primary key); isolation is proven by the other tenant's row being
+      // invisible, not by reusing an id across tenants.
+      assert.equal(await store.getCapabilityRequest('t2', 'req-1'), undefined, 'tenant isolation: t1 rows are invisible to t2');
       assert.equal(await store.getCapabilityRequest('t1', 'req-unknown'), undefined);
 
       const approved = await store.updateCapabilityRequestStatus('t1', 'req-1', 'approved', 'user:alice');

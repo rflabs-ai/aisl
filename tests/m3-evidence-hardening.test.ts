@@ -53,6 +53,28 @@ describe('M3: per-event Ed25519 signatures', () => {
     assert.match(result.detail ?? '', /signature|hash/);
   });
 
+  test('metadata with an explicit undefined value survives a persist/reload round trip', () => {
+    const path = tmp('undefined-metadata');
+    const log = new EventLog(path);
+    log.append({
+      tenantId: 't',
+      principal: 'p',
+      actor: 'p',
+      actorKind: 'agent',
+      action: 'secret.use',
+      result: 'denied',
+      metadata: { phase: 'secret-broker', label: 'model provider key', encrypted: true, value: undefined },
+    });
+    log.close();
+
+    // The stored JSON drops `value`; the hash must be recomputable from it
+    // (H13 live-Postgres finding: hashing the raw object broke chain reload).
+    const reopened = new EventLog(path);
+    assert.equal(reopened.verify({ publicKey: eventPublicKey() }).valid, true);
+    reopened.close();
+    rmSync(path, { force: true });
+  });
+
   test('a signature produced by the wrong key is rejected by verify', () => {
     const path = tmp('wrong-key');
     const log = new EventLog(path);

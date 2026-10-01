@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (fix/h13-audit-tickets-10-19)
 
 Source: session-audit 2026-10-01, `feat/h13-incident-response` (audit notes → ticketed on request)
 
@@ -33,3 +33,7 @@ print `broadcast FAILED` and set `process.exitCode = 1` when
 
 - `Select-String src\cli.ts -Pattern "broadcastOk = result.broadcastOk|if \(!broadcastOk\)"` → `cli.ts:1412`, `cli.ts:1421` (engage path only)
 - audit report Notes
+
+## Resolution (fix/h13-audit-tickets-10-19)
+
+The narrow-revocation branch mirrors engage: after `flush()` it reads `status().channelErrors`, prints `broadcast OK|FAILED` (plus the in-memory-mode note), and sets exit 1 when the channel errored.

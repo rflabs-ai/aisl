@@ -661,8 +661,8 @@ async function demo(): Promise<void> {
   heading('22. H13: incident response — kill switch, broadcast, preservation');
   {
     const h13Channel = new InMemoryRevocationChannel();
-    const h13NodeA = buildWorld({ channel: h13Channel });
-    const h13NodeB = buildWorld({ channel: h13Channel });
+    const h13NodeA = buildWorld({ channel: h13Channel, memory: true });
+    const h13NodeB = buildWorld({ channel: h13Channel, memory: true });
     h13NodeA.authorization.issue(h13NodeA.root, {
       subject: h13NodeA.user.id,
       tenantId: TENANT_A,
@@ -749,7 +749,8 @@ async function demo(): Promise<void> {
     h13NodeB.eventLog.close();
   }
 
-  // Postgres mode: close the store's pool or the process hangs at exit.
+  // Postgres mode: close the pools or the process hangs at exit.
+  world.incident.close();
   world.eventLog.close();
 }
 
@@ -780,7 +781,8 @@ async function attack(): Promise<void> {
   }
   console.log(`\n  ${results.length - failed}/${results.length} attack cases behaved as required.`);
   if (failed > 0) process.exitCode = 1;
-  // Postgres mode: close the store's pool or the process hangs at exit.
+  // Postgres mode: close the pools or the process hangs at exit.
+  world.incident.close();
   world.eventLog.close();
 }
 
@@ -958,7 +960,8 @@ async function benchmark(): Promise<void> {
 
   heading('BENCHMARK (measured this run — not a claim about the product)');
   console.log(JSON.stringify(output, null, 2));
-  // Postgres mode: close the store's pool or the process hangs at exit.
+  // Postgres mode: close the pools or the process hangs at exit.
+  world.incident.close();
   world.eventLog.close();
 }
 
@@ -1430,7 +1433,16 @@ async function incidentCommand(): Promise<void> {
       if (sub === 'revoke-cap') world.incident.revokeCapability(targetId, tenantId, reason);
       else world.incident.revokeSession(targetId, tenantId, reason);
       await world.incident.flush();
+      // Mirror the engage branch: never print REVOKED as if it propagated
+      // when the channel write failed (ADR-026 fail-loud).
+      const status = world.incident.status();
+      const broadcastOk = status.channelErrors === 0;
       line(sub, 'REVOKED', `${targetId} (tenant ${tenantId}) — ${reason}`);
+      line('broadcast', broadcastOk ? 'OK' : 'FAILED', broadcastOk ? 'published to the revocation channel' : `channel errors=${status.channelErrors}${status.channelLastError ? ` (${status.channelLastError})` : ''}`);
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log('  note: the in-memory channel is local to this process — set EVENT_STORE=postgres + DATABASE_URL to reach a running node.');
+      }
+      if (!broadcastOk) process.exitCode = 1;
       return;
     }
 
@@ -1460,6 +1472,7 @@ async function incidentCommand(): Promise<void> {
       } else {
         const report = world.incident.reconstruct({ principal: world.user, tenantId, fromSeq, toSeq });
         line('reconstruction', 'OK', `${report.events} events, allow=${report.decisions.allow} deny=${report.decisions.deny}, revocations=${report.revocations}, freezes=${report.freezes}, lifts=${report.lifts}`);
+        console.log(`         actions: ${Object.entries(report.actions).map(([action, count]) => `${action}=${count}`).join(', ')}`);
         for (const [reason, count] of Object.entries(report.denyReasons)) console.log(`         deny ${reason}: ${count}`);
         console.log(`         actors: ${report.actors.join(', ')}`);
       }

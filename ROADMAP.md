@@ -543,8 +543,9 @@ harness:
 - Model independence of the security core: structural, by construction (model swap test).
 - Capability revocation propagation: ≤ 5 s — immediate in-process (M4 tests);
   cross-node via the revocation channel (H13: throttled pull, default 1 s;
-  forced on issuance). The live Postgres multi-node proof is the skipped
-  PG-channel suite, run when `DATABASE_URL` exists.
+  forced on issuance). Verified live 2026-10-01 against a disposable
+  `postgres:16` container (two-instance broadcast, append-only privilege,
+  hostile-row skip, cursor replay; audit tickets 10–19).
 - Session revocation propagation: ≤ 5 s — immediate in-memory (SessionManager
   tests); bulk tenant/global revocation is on the kill switch and the same
   channel (H13).

@@ -24,6 +24,41 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 30 — 2026-10-01 — opencode/h12-nits-and-m18-kickoff
+
+**Did:**
+- Closed H12 audit nits 02-06 (tickets updated to resolved): promote stage
+  guard (`stage=0/-`), `update sign` refuses an empty/whitespace channel,
+  dropped unused `UpdateStateError`/`initialState` exports, moved the
+  node:crypto import into the builtin block, removed the filler assertion.
+  Commits `7c30aad` (fix) + `de018c9` (tickets).
+- M18 kickoff written after read-only discovery of
+  `C:\Users\<user>\projects\project-raven`:
+  `PROMPTS/M-Track/M18-federation-project-raven.md`. Findings: self-build is
+  headless OpenCode via `raven-builder.path` + `bin/run-builder.sh` with
+  `RAVEN_BUILDER_TASK`; self-update has no git remote — hosts are copy-synced
+  with no verification (the RCE path ADR-022 names); raven has zero ASL
+  contact points today. The prompt lists Phase 0 decisions (where the tree
+  check runs; M16-over-REST vs local constraints; raven's principal/H2;
+  offline fail-closed) and a Phase 1 verified-update path.
+- ROADMAP M18 gate cell notes the kickoff.
+
+**Left:**
+- M18 is not implemented: it is ~90% raven-side and needs ADR-026 + raven
+  tickets. No REST route was built speculatively (YAGNI; M17 closed gaps the
+  client surfaced).
+- H13/H15 remain the Stage 2 queue.
+
+**Next session should:**
+- M18 Phase 0 (ADR-026) with the raven repo open, or H13/H15.
+
+**Evidence:**
+- `npm run typecheck` clean; `npm test` 560 (545 pass, 15 PG skips, 0 fail).
+  Nits verified: `node src/cli.ts update promote ok` → `stage=0/-`;
+  `node src/cli.ts update sign 1 ""` → refused, exit 1.
+
+---
+
 ### SESSION 29 — 2026-10-01 — opencode/h12-audit-01-fix
 
 **Did:**

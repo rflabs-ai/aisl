@@ -115,14 +115,14 @@ export interface UpdateResult {
 }
 
 /** Thrown only by `loadState` on a corrupt file — callers surface it as `state-malformed`. */
-export class UpdateStateError extends Error {
+class UpdateStateError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'UpdateStateError';
   }
 }
 
-export function initialState(): UpdateState {
+function initialState(): UpdateState {
   return {
     type: 'asl-update-state',
     version: 1,

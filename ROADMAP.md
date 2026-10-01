@@ -416,7 +416,7 @@ rationale (why the client's own core promise requires it).
 | Milestone | Client | Why structurally necessary | Gate | Status |
 | --- | --- | --- | --- | --- |
 | M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[DONE]** |
-| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 [DONE] (ADR-025) — the gate is cleared; raven's updater consumes `verifyUpdate`/`applyUpdate` | **[ ]** |
+| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 [DONE] (ADR-025) — the gate is cleared; raven's updater consumes `verifyUpdate`/`applyUpdate`; kickoff 2026-10-01 — prompt at `PROMPTS/M-Track/M18-federation-project-raven.md` (discovery: raven's upgrade is copy-sync with no verification, builder is headless OpenCode via a systemd path unit) | **[ ]** |
 | M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
 | M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
 

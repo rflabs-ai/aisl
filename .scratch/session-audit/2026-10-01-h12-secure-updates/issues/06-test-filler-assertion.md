@@ -1,4 +1,11 @@
-Status: open
+Status: resolved (7c30aad)
+
+## Resolution (2026-10-01)
+
+Fixed in `7c30aad` (verify: `npm run typecheck` clean, `npm test` 560 pass /
+545 / 15 skips / 0 fail). The assertion and the unused `v1`/`v1sig`
+destructuring are removed; the test still asserts the burned-version refusal
+and the next-version apply.
 Source: session-audit 2026-10-01, `feat/h12-secure-updates` (uncommitted working tree) — audit nit
 
 ## What's wrong

@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (7c30aad)
 Source: session-audit 2026-10-01, `feat/h12-secure-updates` (uncommitted working tree) — audit nit F-04
 
 ## What's wrong

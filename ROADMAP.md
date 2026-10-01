@@ -135,8 +135,7 @@ at kickoff.
 ## Stage 2 — HARD (substantial security engineering)
 
 Each item lists attack surface, failure modes, assumptions, test methodology, and
-residual risk, as required. All fifteen items are open **[ ]** (none started).
-Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
+residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
 
 - **Working order** (pick list, AGENT-SESSION SESSION 19): ~~H1 [NEXT]~~
   **H1 [DONE]** (ADR-023) — it was the root of trust for everything above it.
@@ -144,8 +143,10 @@ Status markers apply: **[DONE]** / **[NEXT]** / **[ ]**.
   the supply-chain gate. **M17 federation [DONE]** — control-plane is the
   first federation client (anchoring + capability-gated dispatch); its two
   ASL-side REST gaps (anchor registration, capability-request status) closed.
-  Next: H12, H13, H15. The remaining ten (H2–H9, H11, H14) stay open [ ]
-  until prioritized after those three clear.
+  ~~Next: H12, H13, H15~~ **H12 [DONE]** (ADR-025) — signed update channel:
+  descriptor chain, high-water mark, signed single-use rollback, sticky
+  canary halt. Next: H13, H15. The remaining ten (H2–H9, H11, H14) stay
+  open [ ] until prioritized after those two clear.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
@@ -297,7 +298,7 @@ publication, and hardware key custody are the documented upgrade paths.
 - **Residual risk:** an attacker who controls both the log and the anchor.
 - **Class:** HA.
 
-### H12 — Secure updates
+### H12 — Secure updates **[DONE]** (ADR-025)
 
 - **Attack surface:** update channel, signing keys, rollback behaviour.
 - **Failure modes:** rollback to a vulnerable version; unsigned update; update
@@ -307,6 +308,31 @@ publication, and hardware key custody are the documented upgrade paths.
   staged rollout with automated canary and auto-halt.
 - **Residual risk:** a signed but malicious release.
 - **Class:** E/HA.
+
+**Closed (ADR-025):** the update channel is a signed descriptor chained onto
+the H10 build manifest — `src/updates.ts` + `node src/cli.ts update
+sign|verify|apply|promote|status|grant|rollback`. The chain: descriptor
+structure → Ed25519 descriptor signature → embedded build manifest verified
+against the **live tree** (H10 `verifyManifest` recomputes tree/SBOM digests)
+→ persisted high-water mark → canary state. `apply` requires
+`releaseVersion > highWaterMark` and raises it; the mark never lowers, so a
+perfectly signed, perfectly stale descriptor is refused
+(`rollback-blocked`) — signature validity and freshness are separate checks.
+Emergency rollback is a **signed, single-use grant** naming the exact
+from-version and the state's `rollbackGeneration` — one use per generation,
+so a used grant never revives even if its from-version becomes current again
+(replay → `grant-mismatch`), backward-only, and it never lowers
+the mark — the version rolled back *from* stays burned. Staged rollout:
+`stages` ascend to 100 (a rollout ending short is `bad-stages`), `apply`
+lands canary, `promote` advances one stage per explicit health pass, a
+failing signal halts and the halt is **sticky** (only a new descriptor or a
+rollback grant resolves it). State is code-written only, atomic
+(temp+rename), gitignored per instance. Tests-first suite:
+`tests/h12-secure-updates.test.ts` (20), including the trust-boundary
+invariant (no key material in state/descriptor/grant/refusal text). Residuals
+per ADR-025: caller-supplied health signal, one release key (ADR-008
+custody), no transport (this repo verifies updates, it does not host them),
+signed-but-maintainer-rogue release unchanged.
 
 ### H13 — Incident response mechanisms — *structurally necessary at federation (ADR-022)*
 
@@ -390,7 +416,7 @@ rationale (why the client's own core promise requires it).
 | Milestone | Client | Why structurally necessary | Gate | Status |
 | --- | --- | --- | --- | --- |
 | M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[DONE]** |
-| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 | **[ ]** |
+| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 [DONE] (ADR-025) — the gate is cleared; raven's updater consumes `verifyUpdate`/`applyUpdate` | **[ ]** |
 | M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
 | M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
 
@@ -556,8 +582,8 @@ results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
 Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
-(HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], next
-H12 → H13 → H15).
+(HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12
+[DONE], next H13 → H15).
 
 ### M0 — Architectural foundation (done)
 

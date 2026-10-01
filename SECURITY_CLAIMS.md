@@ -1548,3 +1548,86 @@ prompt's skip list).
 gate is unconstrained by ASL — the federation makes authorization and evidence
 available and durable, it cannot make a non-cooperating client ask.
 
+---
+
+## Claim 34 — The update channel refuses unsigned, stale, and rolled-back updates fail-closed (H12)
+
+**Claim:** An update is applied only when its signed descriptor verifies,
+its embedded build manifest verifies against the **live tree** (H10
+recomputation), and its release version is strictly above the persisted
+high-water mark. Signature validity and freshness are separate checks and
+only the conjunction applies: a perfectly signed, perfectly stale descriptor
+is refused (`rollback-blocked`). The high-water mark never lowers — including
+under emergency rollback, which exists only as a signed, single-use,
+backward-only grant naming the exact version being rolled back from (replay
+→ `grant-mismatch`). Promotion through the canary stages requires an explicit
+passing health signal; a failing signal halts the rollout and the halt is
+sticky — no path reaches `promoted` without an explicit pass. No serialized
+state, descriptor, grant, or refusal message carries key material.
+
+**Mechanism:** `src/updates.ts` (ADR-025), CLI `node src/cli.ts update
+sign|verify|apply|promote|status|grant|rollback`. The chain: descriptor
+structure (`not-an-update`/`bad-stages`/`bad-version`) → Ed25519 descriptor
+signature (`bad-signature`, `no-verification-key`) → embedded manifest via
+H10 `verifyManifest` (`manifest-rejected:<inner reason>` — stale-source,
+stale-dependencies, gate-not-passed, bad-signature all surface) →
+high-water mark (`rollback-blocked`) → atomic state write (temp + rename;
+corrupt state → `state-malformed`, never a reset to zero). Rollback grants
+are signed with the same release key, single-use (from-version must equal
+current AND the grant's `generation` must equal the state's
+`rollbackGeneration`, which increments on use — a used grant stays used even
+if its from-version becomes current again), and leave the mark untouched.
+Stages must ascend and end at 100
+(`bad-stages`); `apply` lands canary; `promote` advances one stage per pass;
+failed health → `halted` (sticky).
+
+**Threat model:** TM-004 (malicious/rolled-back software update); ROADMAP H12
+failure modes — rollback to a vulnerable version, unsigned update, update as
+RCE with high privilege; M18 (project-raven's unsigned self-update is RCE by
+design — this seam is its gate).
+
+**Assumptions:** the release-signing key is held by an honest custodian (the
+ADR-008 env posture; one key signs builds and updates); the caller-supplied
+health signal is truthful; the per-instance state file lives on storage the
+update process does not share with an untrusted writer.
+
+**Evidence:** `tests/h12-secure-updates.test.ts` — 20 cases (written
+red-first): descriptor round trip + tamper/wrong-key/garbage-sig refusals;
+structure/stages/version refusals before any signature claim; missing-key
+refusal; full chain vs live fixture repo with inner-manifest refusals
+(forged sig, stale source, gate-not-passed) surfaced as
+`manifest-rejected`; apply advances the mark and persists across loads;
+stale signed descriptor refused with the mark holding; corrupt state file
+refused, not overwritten; sticky halt (a passing signal does not clear it);
+one-stage-per-pass promotion to `promoted` with `no-pending-rollout`
+afterward; no default-healthy promote; signed grant moves `current` back
+without lowering the mark and cannot be replayed; burned version stays
+burned (re-apply refused, next version applies); a used grant stays used
+even when its from-version becomes current again (audit 01 regression,
+generation mismatch refuses, a fresh grant at the current generation still
+works); distinct grant refusals
+(structure, signature, key, direction) with no state mutation; structural
+invariant — no key material in state/descriptor/grant/signatures/refusal
+text, state shape exactly the declared contract.
+
+**Test:** `tests/h12-secure-updates.test.ts`; demo section 21 exercises the
+chain end-to-end on ephemeral demo keys (`npm run demo`, exits 0).
+
+**Known limitations:** the health signal is a caller-supplied boolean — a
+lying caller can promote a canary (upgrade: per-instance attested health,
+when a second instance exists); canary cohort selection is the deployer's
+(the module gates promotion, not scheduling); there is no transport — this
+repo verifies updates, it does not host them (upgrade: a release endpoint
+when one exists); no descriptor transparency log (H11/Stage-3); one release
+key, no separate update key until a ceremony decides otherwise (ADR-008);
+the state file must outlive the update process and be protected from
+untrusted writers — an attacker who can delete it resets the mark (this is
+why it is code-written only, atomic, and gitignored per instance).
+
+**Residual risk:** a *signed but malicious* release — the ROADMAP-stated
+residual and H10's trusted-maintainer residual, unchanged by this control: a
+compromised release key or coerced maintainer signs anything. H12 raises the
+cost of rollback-and-unsigned attacks to "forge a signature AND beat a mark
+that never goes down"; it does not raise the cost of signing a bad release.
+
+

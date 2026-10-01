@@ -24,7 +24,7 @@ implementation needed / external validation needed.
 | DE-AE-03 event correlation | EventLog | partial | no shipping, no alerting | queryable evidence | OTel + SIEM export | no |
 | DE-AE-06 deletion/destruction alerts | none | absent | no detection for destructive actions | alert records | verification plane + alerting | no |
 | DE-CM-06 incident drill | none | absent | no IR plan | game-day report | H13 | yes |
-| RS-MA-02 remediation | supply-chain gate (H10) | partial | no patch process as operations; dependency freshness is gated (SBOM diff, exact pins, integrity verification) | `npm run supply-chain` output + `artifacts/sbom.json` history | patch cadence + review records (process) | yes |
+| RS-MA-02 remediation | supply-chain gate (H10) + signed update channel (H12) | partial | no patch process as operations; dependency freshness is gated (SBOM diff, exact pins, integrity verification); applying/rolling back a release is signed and anti-replay but has no cadence | `npm run supply-chain` output + `artifacts/sbom.json` history + `update status`/descriptor signatures | patch cadence + review records (process) | yes |
 | RC-CO communication | none | absent | no notification process | notification records | operating model | yes |
 
 ## NIST SP 800-53 (selected, representative)
@@ -37,14 +37,14 @@ implementation needed / external validation needed.
 | AC-17 remote access | none | absent | no product surface yet | — | future | yes |
 | AU-2/3/12 audit events | EventLog | implemented | signed (M3), anchored when configured | chain verification + signature verification | M3 | yes |
 | AU-9 protection of audit info | EventLog + append-only triggers | partial | anchor lives on attacker-accessible storage by default; SQLite is not WORM | — | anchor on WORM/witness storage is HARD stage | yes |
-| CM-3 configuration change | none | absent | no change control | — | change management | yes |
+| CM-3 configuration change | signed update channel (H12) | partial | software updates are signed, anti-rollback, and canary-gated in code; no organizational change-approval process | update descriptor + signature + `update status` state | change management process | yes |
 | IA-2/IA-5 authentication | none | absent | no authn | — | M2 | yes |
 | SC-7 boundary protection | NetworkGateway | design only | no enforcement | — | M1 | yes |
 | SC-8 transmission confidentiality | none | absent | no transport | — | TLS everywhere | yes |
 | SC-12 key management | capability key (env) | weak | env var, no rotation, no HSM | — | ADR-008 | yes |
 | SC-28 protection at rest | none | absent | — | — | encryption | yes |
 | SI-10 information input validation | `parseModelOutput` | implemented | model output only | parser tests | extend to all inputs | no |
-| SI-7 software integrity | build manifest signing (H10) | partial | dev-key custody (encrypted SSD + offline bank HDD); first manifest signed 2026-09-29; gate verifies pins/integrity/SBOM | `build verify` output + manifest + signature | CI signing + HSM custody (ADR-008) | yes |
+| SI-7 software integrity | build manifest signing (H10) + signed update channel (H12) | partial | dev-key custody (encrypted SSD + offline bank HDD); first manifest signed 2026-09-29; gate verifies pins/integrity/SBOM; updates verify descriptor + manifest vs live tree and refuse rollback | `build verify` / `update verify` output + manifest + descriptor + signatures | CI signing + HSM custody (ADR-008) | yes |
 
 ## NIST SP 800-207 (Zero Trust)
 

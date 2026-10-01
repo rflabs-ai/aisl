@@ -10,3 +10,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+# H12: per-instance update runtime state (ADR-025) — the high-water mark is
+# written by code only and must never be committed or shared between instances.
+artifacts/update-state.json
+artifacts/update-state.json.tmp

@@ -1473,3 +1473,116 @@ the update-verification primitive (signed updates verify the manifest
 signature, not a hash somebody pasted in a chat).
 
 ---
+
+## ADR-025: Secure updates — signed channel, anti-rollback mark, sticky canary (H12)
+
+**Context:** H12. H10 (ADR-024) signs a build manifest, but nothing consumes
+it as an *update* decision: there is no release channel, no persisted
+high-water mark, and no rollout state. Any signed artifact from the past
+verifies forever — an attacker who replayed an old, legitimately signed
+release (or an old, hash-valid M11 policy bundle) would be refused by nothing.
+ROADMAP records the failure modes outright: rollback to a vulnerable version,
+unsigned update, update as remote code execution with high privilege. M18
+(project-raven — a self-building agent that rewrites its own repo) has
+"unsigned self-update is RCE by design" in its gate column pointing at H12.
+
+**Decision:** Five controls, one module (`src/updates.ts`), zero new
+dependencies, chained onto the H10 manifest.
+
+1. **A signed update descriptor is the update artifact of record.**
+   `{ type: 'asl-update', version: 1, releaseVersion, channel, stages,
+   manifest, manifestSignature, issuedAt, issuedBy }`, Ed25519 over
+   `canonicalJson(descriptor)` with the H10 release key. It embeds the build
+   manifest and its H10 signature, so verification chains into
+   `verifyManifest` — the live tree/SBOM digests and gate fields are
+   recomputed, never trusted from the descriptor. `releaseVersion` is a
+   monotonic integer (the M11 bundle pattern): ordering must be decidable
+   offline, without a registry or semver comparator.
+2. **Rollback prevention is a persisted high-water mark.** `UpdateState`
+   (code-written only, atomic temp-file+rename so a crash cannot truncate
+   it) records `highWaterMark`. `apply` requires
+   `releaseVersion > highWaterMark` and raises it. A perfectly signed,
+   perfectly stale descriptor is still refused (`rollback-blocked`) —
+   signature validity and replay validity are separate checks, and only the
+   conjunction applies. The mark never lowers.
+3. **Emergency rollback exists, and is signed and single-use.** A rollback
+   grant `{ type: 'asl-rollback-grant', version: 1, targetVersion,
+   fromVersion, generation, reason, issuedAt, issuedBy }` signed with the
+   release key moves `current` back only when `fromVersion` equals the
+   current version **and** `generation` equals the state's monotonic
+   `rollbackGeneration` — success increments it, so a used grant stays used
+   even if its `fromVersion` becomes current again through another rollback
+   (replay fails `grant-mismatch`). It never lowers `highWaterMark`: the
+   version you rolled back *from* stays burned, so the emergency path cannot
+   itself become the replay path. (Audit 01, 2026-10-01: the version match
+   alone was replayable after re-arrival at `fromVersion`; the generation
+   closes it.)
+4. **Staged rollout with canary and sticky auto-halt.** The descriptor
+   declares `stages` (ascending percentages; the first is the canary). `apply`
+   installs and lands the rollout at canary; `promote` advances exactly one
+   stage per explicit passing health signal; a failing signal marks the
+   rollout `halted` and halted is sticky — only a new signed descriptor or a
+   rollback grant resolves it. Nothing reaches `promoted` without an explicit
+   pass. Cohort selection (which instances are the canary) is the deployer's;
+   this module gates the promotion, not the scheduling.
+5. **One fail-closed chain, distinct reasons.** structure → descriptor
+   signature → inner manifest → anti-rollback → state write, each refusal
+   named: `not-an-update`, `bad-stages`, `bad-version`, `bad-signature`,
+   `no-verification-key`, `manifest-rejected:<inner>`, `rollback-blocked`,
+   `not-a-rollback-grant`, `bad-grant-signature`, `grant-mismatch`,
+   `halted`. Keys are the existing `BUILD_SIGNING_*` env vars — one release
+   key signs builds and updates; key separation is a ceremony decision
+   (ADR-008), not a code decision.
+
+**Alternatives:**
+- **Semver compare with a remote channel** — rejected: ordering needs a
+  registry or a full comparator (a dependency or a bug surface), and there is
+  no transport in this repo to host one. An integer mark is the M11 pattern
+  and decides offline.
+- **Verify signature only, no state** — this is exactly the H10 gap H12
+  closes: signatures prove origin, not freshness. A valid old signature is
+  the rollback attack.
+- **Git-only rollback (`git revert` + re-sign)** — rejected: deployed
+  instances need an *authorization* artifact they can verify, not an
+  instruction to trust whatever is currently in the repo.
+- **Built-in health probes / canary scheduler** — rejected: the repo is a
+  single library-instance; inventing a probe registry and fleet scheduler
+  with no fleet would be speculative machinery. The promotion gate takes an
+  explicit health signal the caller supplies.
+- **Lower the mark on rollback "to allow retry"** — rejected: that converts
+  the emergency path into the replay path, the exact failure mode ROADMAP
+  names. Retries use a new descriptor.
+
+**Reasoning:** H10 proved *what* is running; H12 decides *whether it may
+change*. The two signatures (descriptor, embedded manifest) make the chain
+end in recomputed live digests, so verification never rests on a value
+somebody transported. The high-water mark is the only mutable state, which
+keeps the attack surface of the control itself to "one integer that never
+goes down".
+
+**Security implications:** Closes unsigned-update and rollback replay for
+anything that adopts the seam (M18's raven updater is the first consumer).
+Does NOT close: a *signed but malicious* release (ROADMAP's stated residual —
+a compromised release key signs anything; custody is ADR-008/Stage-3 HSM),
+a compromised machine applying a descriptor before this module sees it, or
+truthfulness of the caller-supplied health signal (garbage-in on canary
+promotion; per-instance attestation is a later seam).
+
+**Tradeoffs:** One more state file per instance to custody and back up (lose
+it and the mark resets — an attacker who can delete state can replay, which
+is why the state path is code-written and the file must live on storage the
+update process does not share write access with an untrusted tenant).
+Sticky halt means a false-negative health signal stops rollout until a new
+descriptor — deliberate: stopping is cheap, shipping is not.
+
+**Residual risk (ponytail):** caller-supplied health signal, no transport,
+one release key, no descriptor log — `ponytail: health is caller-supplied
+bool and canary cohorts are the deployer's; wire per-instance attested
+health and a descriptor transparency log when a second instance or a
+release endpoint exists (H11/Stage-3)`. Residual accepted and named: a
+signed-but-maintainer-rogue release (H10 residual, unchanged here).
+
+**Future migration path:** remote channel transport + descriptor publication
+when a release endpoint exists; separate update key after a key ceremony;
+H11 anchoring of applied-descriptor records; M18 raven consumes
+`verifyUpdate`/`applyUpdate` as its self-update gate.

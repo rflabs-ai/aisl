@@ -1779,3 +1779,133 @@ remaining audit nit tickets and the first live run of migration 4:
    a rerun for a local check leaves it uncommitted (audit 17). In PG mode the
    benchmark expects a fresh chain — on a reused database `auditCompleteness`
    exceeds 1 by construction (live-run observation, ticket 19).
+
+---
+
+## ADR-027: Fail-closed availability — loud degradation, observed health, clock guard (H15)
+
+**Context:** H15. ROADMAP names the failure modes of the safety mechanisms
+themselves: a broken policy engine, a full disk, or a closed evidence store
+denies **everything, silently, per decision** — no health signal, no degraded
+mode, no budget, no alerting, and no operator-visible difference from an
+attack. The pieces that exist are partial: `idp-unavailable` + `IdPHealth`
+(M2), `store-unavailable` + a per-deny warning for typed Postgres failures
+(M12), `GET /healthz` → `{ idp, store }` (M14). Still silent or missing:
+engine faults (`evaluation-error`, no health signal), non-typed store write
+failures (`evidence-write-failure`, no aggregated health), a stalled or
+non-monotonic clock (nothing — and expiry checks silently stop working, which
+**widens authority**), a decision-latency budget, and alerting semantics.
+Two ordering defects surfaced while mapping the seams: `issue()` registers
+authority **before** appending its issuance event (a store outage leaves
+unaudited authority live in the map), and a store outage during `IncidentService.
+engage` aborts the kill switch mid-way (`freeze`'s evidence append throws
+before `revokeAll` runs).
+
+**Decision:** Degraded mode is explicit, per-dependency, deny-only, loud,
+bounded, and recoverable. Zero new runtime dependencies.
+
+1. **The degraded-mode matrix (deny-only — degradation never widens
+   authority):**
+   - **IdP unreachable** (unchanged, M2): unauthenticated principals deny
+     `idp-unavailable`; `authorization`-kind bootstrap principals and
+     principals holding valid auth contexts continue; `idp` status stays
+     probe-based (`IdPHealth`).
+   - **Store unavailable**: every decision that must be recorded denies —
+     `store-unavailable` for a typed `StoreUnavailableError` (store down),
+     `evidence-write-failure` for any other failed write. No decision is ever
+     made unrecorded (invariant 7 is the fail-closed floor).
+   - **Engine broken**: every capability-checked decision denies with the
+     existing distinct `evaluation-error` reason; the health signal names the
+     dependency (below), so no new union member is needed.
+   - **Clock fault**: every decision denies `clock-unavailable` (new
+     `DenyReason` member) — time-based checks (capability expiry, auth
+     expiry, approval expiry) cannot be trusted, and a stalled clock must not
+     silently extend authority past `expiresAt`.
+2. **`HealthState` (`src/health.ts`) — observed, not probed.** The PDP marks
+   `store` / `engine` / `clock` `ok | unavailable` from what it actually
+   observes on the decision path (append succeeded/failed, engine
+   returned/threw, clock read valid/faulted). Recovery is observed the same
+   way — a working call marks the dependency `ok` again. Transitions emit one
+   loud signal (default `process.emitWarning`), **once per transition** — the
+   M12 per-deny warning becomes transition-based so an outage produces an
+   alert, not thousands of lines (alert fatigue is silence). IdP health stays
+   with `IdentityProvider` (probe-based, already operator-visible).
+3. **`ClockGuard` (`src/health.ts`) — the clock is a dependency.** Wraps the
+   decision clock. Lenient (default): a throw or non-finite reading is a
+   clock fault. Trend detection (stall: wall frozen while an injected
+   monotonic reference advances past `stallAfterMs`; backward jump) is
+   enabled only when a monotonic source is supplied — deterministic test
+   clocks legitimately freeze and travel backward, so trend detection is
+   opt-in and cannot break the M10 false-denial budget. Production wiring:
+   `new ClockGuard(Date.now, { monotonic: () => performance.now() })`.
+   The guard is consulted once per decision (`authorize`, `queryAudit`) and
+   per `issue`; a faulted read denies before any authority is examined.
+4. **Evidence before authority.** `issue()` appends the issuance event first
+   and registers the capability only after the append succeeds. A store
+   outage refuses the mint loudly (typed refusal naming the store failure) —
+   unaudited authority cannot exist (closes the ordering defect).
+5. **The kill switch survives its own dependencies.** `engage` completes
+   freeze + `revokeAll` + session revocation even when evidence appends fail
+   (each safety action applies its state before its event; `revokeAll`
+   continues past per-capability evidence failures instead of aborting the
+   loop). Missed evidence is reported honestly (`evidenceRecorded: false` on
+   the engage result), never silently dropped — local enforcement during an
+   outage is the point.
+6. **`GET /healthz` body → `{ idp, store, engine, clock }`** when a
+   `HealthState` is wired (`RestApiDeps.health`); embedders without one keep
+   the M14 `{ idp, store }` shape. Additive, no secrets, no internals.
+7. **The decision-latency budget is measured, not assumed.** The benchmark
+   measures `authorize()` p99 with persistence (SQLite-file `EventLog`) and
+   without (in-memory `EventLog`) — `evidence.decisionLatencyP99WithPersistenceMs`
+   / `evidence.decisionLatencyP99WithoutPersistenceMs`, two **advisory** SLO
+   rows per ADR-014 (latency never fails the build on a noisy machine).
+8. **Rate limiting stays deployment territory** — the named M14 non-goal is
+   resolved as such: the REST seam binds loopback behind a deployment reverse
+   proxy (DEPLOYMENT.md) that owns request rate limits; no in-process limiter
+   is built (no client asks, zero-new-deps discipline). The in-process
+   "budget" is the latency budget above plus the fail-closed deny floor.
+
+**Alternatives:**
+- **A distinct `engine-unavailable` reason.** Rejected: `evaluation-error`
+  is already the distinct deny reason for a failed evaluation; the health
+  signal carries the dependency identity. Split the reason later if
+  operators need to alert on it separately.
+- **Keep the per-deny `process.emitWarning` (M12 behavior).** Rejected: an
+  outage emits one warning per denied decision — thousands of lines is
+  alert fatigue, which is silence by another name. One loud event per
+  transition (down and recovery) is the operator signal.
+- **Always-on clock trend detection.** Rejected: deterministic test clocks
+  (`createClock`) freeze by default and jump backward deliberately (H13
+  replay tests); always-on detection would manufacture `clock-unavailable`
+  denies and burn the M10 false-denial budget. Trend detection is opt-in via
+  the injected monotonic source; the lenient guard (throw/NaN) is always on.
+- **In-process token-bucket rate limiting at the REST seam.** Rejected:
+  deployment territory (reverse proxy), no client has asked for it, and it
+  would be a second enforcement point to keep consistent. Named ceiling.
+- **Rollback of the registered capability when `issue()`'s append fails.**
+  Rejected in favor of append-first ordering: rollback is a second failure
+  path to get right; evidence-before-authority removes the window entirely.
+
+**Reasoning:** Fail-closed is correct and incompressible — the fix is not to
+deny less, it is to make the denial **distinguishable, observable, and
+reversible**. Every fault class gets the same three-part contract: a deny with
+its own reason, a health signal that fires on the transition (not per
+decision), and automatic recovery the moment the dependency works again. The
+two ordering defects are the same lesson as the matrix: safety mechanisms must
+degrade the same way the decision path does — fail closed, complete what they
+can, and report what they could not record.
+
+**Residual risk (ponytail):** an adversary who can induce a dependency fault
+still gets a denial of service (the accepted ROADMAP trade — loud, bounded,
+recoverable); `HealthState` is in-memory (a restart resets to `ok` — the next
+observed fault re-marks it, and `/healthz` + the warning stream are the live
+signals); clock trend detection needs the embedder to wire the monotonic
+source (named in DEPLOYMENT); rate limiting is the deployment's; the engine
+fault reason stays shared with other evaluation errors (`ponytail:
+evaluation-error covers engine faults; split engine-unavailable if operators
+need per-dependency alerting — trigger: a real on-call rotation complaining`).
+
+**Future migration path:** per-dependency alert routing off the transition
+stream; a health event in the signed event log (currently the loud signal is
+process warnings + `/healthz`, deliberately outside the evidence chain to keep
+fault storms from flooding the chain); split `engine-unavailable` if needed.

@@ -31,6 +31,7 @@ import { BASELINE_ROLES, type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
 import { type Sealed, classificationFromKeyId, open } from './seal.ts';
 import { hasMfa, type IdPHealth } from './identity.ts';
+import { ClockGuard, HealthState } from './health.ts';
 
 export interface AuthorizeInput {
   readonly principal: Principal;
@@ -117,6 +118,14 @@ export class AuthorizationService {
   private readonly now: () => number;
   private readonly idpHealth?: () => IdPHealth;
   private readonly roles: readonly Role[];
+  /**
+   * H15 (ADR-027): observed availability of the decision path's dependencies.
+   * Self-owned by default so every construction gets health tracking; an
+   * embedder (or a test) can install its own tracker to observe transitions.
+   */
+  private health = new HealthState();
+  /** H15: lenient by default; install a strict guard (monotonic reference) to detect stall/backward jumps. */
+  private clockGuard: ClockGuard;
 
   constructor(
     registry: ResourceRegistry,
@@ -132,6 +141,77 @@ export class AuthorizationService {
     this.now = now;
     this.idpHealth = idpHealth;
     this.roles = roles;
+    this.clockGuard = new ClockGuard(now);
+  }
+
+  // ---- H15 (ADR-027): fail-closed availability ----------------------------
+
+  /** Install an observed-health tracker (default: one owned by this service). */
+  setHealth(health: HealthState): void {
+    this.health = health;
+  }
+
+  /** The health tracker; `/healthz` and operator surfaces read this. */
+  get healthState(): HealthState {
+    return this.health;
+  }
+
+  /** Install a clock guard (default: lenient over the decision clock). */
+  setClockGuard(guard: ClockGuard): void {
+    this.clockGuard = guard;
+  }
+
+  private readClock(): { ok: true; at: number } | { ok: false; detail: string } {
+    const read = this.clockGuard.read();
+    if (read.ok) this.health.mark('clock', 'ok');
+    else this.health.mark('clock', 'unavailable', 'clock read failed');
+    return read;
+  }
+
+  /**
+   * H15 (ADR-027): a fault-tolerant reading for bookkeeping-only timestamps
+   * (registration, consumption, revocation, freeze entries). These never gate
+   * authority, and a clock fault must not disable the kill switch or leave a
+   * single-use capability unconsumed. Authority decisions use `readClock`.
+   */
+  private bookkeepingNow(): number {
+    const read = this.readClock();
+    return read.ok ? read.at : Date.now();
+  }
+
+  /**
+   * A faulted clock denies before any authority is examined: every time-based
+   * check (capability expiry, auth expiry, approvals) is untrustworthy, and a
+   * stalled clock must not silently extend authority past `expiresAt`.
+   */
+  private clockFaultDeny(input: AuthorizeInput, detail: string): AuthorizationDecision {
+    const { principal, action, resourceId } = input;
+    const decision = deny(
+      principal.id,
+      action,
+      resourceId,
+      'clock-unavailable',
+      `clock unavailable, failing closed: ${detail}`,
+      Date.now(),
+    );
+    try {
+      this.eventLog.append({
+        tenantId: principal.tenantId,
+        principal: principal.id,
+        actor: principal.id,
+        actorKind: principal.kind,
+        action,
+        resourceId,
+        decision: 'deny',
+        denyReason: 'clock-unavailable',
+        result: 'denied',
+        metadata: { phase: 'decision', reason: decision.reason, fault: 'clock' },
+      });
+      this.health.mark('store', 'ok');
+    } catch {
+      this.health.mark('store', 'unavailable', 'evidence append failed');
+    }
+    return decision;
   }
 
   /**
@@ -151,21 +231,48 @@ export class AuthorizationService {
     // but never blocks the decision path here; the local freeze check below
     // and the event store's own failure semantics still apply.
     this.syncBroadcast(true);
+    // H15 (ADR-027): the clock is a checked dependency on the issuance path too.
+    const clock = this.readClock();
+    if (!clock.ok) {
+      const refusal = `clock-unavailable: capability issuance refused (${clock.detail})`;
+      try {
+        this.eventLog.append({
+          tenantId: issuer.tenantId,
+          principal: issuer.id,
+          actor: issuer.id,
+          actorKind: issuer.kind,
+          action: 'capability.issue',
+          resourceId: request.resourceIds.join(','),
+          decision: 'deny',
+          denyReason: 'clock-unavailable',
+          result: 'denied',
+          metadata: { phase: 'capability-issuance-refused', refusal },
+        });
+      } catch {
+        this.health.mark('store', 'unavailable', 'evidence append failed');
+      }
+      throw new CapabilityIssuanceError(`clock unavailable, capability issuance refused: ${clock.detail}`);
+    }
+    const at = clock.at;
     const freeze = this.freezeFor(issuer.tenantId);
     if (freeze) {
       const refusal = `incident-frozen: incident response has frozen issuance for tenant ${issuer.tenantId} (${freeze.reason})`;
-      this.eventLog.append({
-        tenantId: issuer.tenantId,
-        principal: issuer.id,
-        actor: issuer.id,
-        actorKind: issuer.kind,
-        action: 'capability.issue',
-        resourceId: request.resourceIds.join(','),
-        decision: 'deny',
-        denyReason: 'incident-frozen',
-        result: 'denied',
-        metadata: { phase: 'capability-issuance-refused', refusal },
-      });
+      try {
+        this.eventLog.append({
+          tenantId: issuer.tenantId,
+          principal: issuer.id,
+          actor: issuer.id,
+          actorKind: issuer.kind,
+          action: 'capability.issue',
+          resourceId: request.resourceIds.join(','),
+          decision: 'deny',
+          denyReason: 'incident-frozen',
+          result: 'denied',
+          metadata: { phase: 'capability-issuance-refused', refusal },
+        });
+      } catch {
+        this.health.mark('store', 'unavailable', 'evidence append failed');
+      }
       throw new CapabilityIssuanceError(refusal);
     }
     if (parent) {
@@ -177,42 +284,57 @@ export class AuthorizationService {
       if (custodyError) {
         // H1 (audit 04): a refused delegation attempt is a security-relevant
         // refusal — record it before failing closed (invariant 7 spirit).
-        this.eventLog.append({
-          tenantId: issuer.tenantId,
-          principal: issuer.id,
-          actor: issuer.id,
-          actorKind: issuer.kind,
-          action: 'capability.issue',
-          resourceId: request.resourceIds.join(','),
-          decision: 'deny',
-          capabilityId: parent.id,
-          result: 'denied',
-          metadata: { phase: 'capability-issuance-refused', refusal: custodyError },
-        });
+        try {
+          this.eventLog.append({
+            tenantId: issuer.tenantId,
+            principal: issuer.id,
+            actor: issuer.id,
+            actorKind: issuer.kind,
+            action: 'capability.issue',
+            resourceId: request.resourceIds.join(','),
+            decision: 'deny',
+            capabilityId: parent.id,
+            result: 'denied',
+            metadata: { phase: 'capability-issuance-refused', refusal: custodyError },
+          });
+        } catch {
+          this.health.mark('store', 'unavailable', 'evidence append failed');
+        }
         throw new CapabilityIssuanceError(custodyError);
       }
     }
-    const cap = issueCapability(issuer, request, this.now(), parent);
+    const cap = issueCapability(issuer, request, at, parent);
+    // H15 (ADR-027): evidence before authority. The issuance event is recorded
+    // first; a capability is registered only after its evidence lands. A store
+    // outage refuses the mint instead of leaving unaudited authority live.
+    try {
+      this.eventLog.append({
+        tenantId: cap.tenantId,
+        principal: issuer.id,
+        actor: issuer.id,
+        actorKind: issuer.kind,
+        action: 'capability.issue',
+        resourceId: cap.resourceIds.join(','),
+        decision: 'allow',
+        capabilityId: cap.id,
+        result: 'success',
+        metadata: {
+          phase: 'capability-issuance',
+          subject: cap.subject,
+          provenance: cap.provenance,
+          expiresAt: cap.expiresAt,
+          maxClassification: cap.maxClassification,
+        },
+      });
+      this.health.mark('store', 'ok');
+    } catch (error) {
+      this.health.mark('store', 'unavailable', 'evidence append failed');
+      throw new CapabilityIssuanceError(
+        `evidence store unavailable, capability issuance refused: ${(error as Error).message}`,
+      );
+    }
     this.capabilities.set(cap.id, cap);
-    this.registeredAt.set(cap.id, this.now());
-    this.eventLog.append({
-      tenantId: cap.tenantId,
-      principal: issuer.id,
-      actor: issuer.id,
-      actorKind: issuer.kind,
-      action: 'capability.issue',
-      resourceId: cap.resourceIds.join(','),
-      decision: 'allow',
-      capabilityId: cap.id,
-      result: 'success',
-      metadata: {
-        phase: 'capability-issuance',
-        subject: cap.subject,
-        provenance: cap.provenance,
-        expiresAt: cap.expiresAt,
-        maxClassification: cap.maxClassification,
-      },
-    });
+    this.registeredAt.set(cap.id, at);
     return cap;
   }
 
@@ -246,7 +368,7 @@ export class AuthorizationService {
    */
   grant(cap: Capability): void {
     this.capabilities.set(cap.id, cap);
-    this.registeredAt.set(cap.id, this.now());
+    this.registeredAt.set(cap.id, this.bookkeepingNow());
   }
 
   capabilitiesFor(subject: string): readonly Capability[] {
@@ -261,14 +383,14 @@ export class AuthorizationService {
   consume(capabilityId: string): void {
     const cap = this.capabilities.get(capabilityId);
     if (!cap || !cap.singleUse) return;
-    this.capabilities.set(capabilityId, markUsed(cap, this.now()));
+    this.capabilities.set(capabilityId, markUsed(cap, this.bookkeepingNow()));
   }
 
   /** Revoke a capability. Immediate propagation — next authorize() call sees it. */
   revoke(capabilityId: string, reason: string): void {
     const revoked: RevokedCapability = {
       capabilityId,
-      revokedAt: this.now(),
+      revokedAt: this.bookkeepingNow(),
       reason,
     };
     this.revoked.set(capabilityId, revoked);
@@ -310,13 +432,14 @@ export class AuthorizationService {
 
   private syncBroadcast(force: boolean): void {
     if (!this.broadcastSync) return;
-    if (!force && this.now() - this.lastSyncAt < this.syncIntervalMs) return;
-    this.lastSyncAt = this.now();
     try {
+      if (!force && this.now() - this.lastSyncAt < this.syncIntervalMs) return;
+      this.lastSyncAt = this.now();
       this.broadcastSync(force);
     } catch {
-      // A hook bug must never block the decision path; the service's own sync
-      // counters (IncidentService.status) are the operator-visible health.
+      // A hook bug or a faulted clock must never block the decision path; the
+      // service's own sync counters (IncidentService.status) are the
+      // operator-visible health, and a clock fault is denied by `readClock`.
     }
   }
 
@@ -338,7 +461,7 @@ export class AuthorizationService {
     if (scope === 'tenant' && (!tenantId || tenantId.trim() === '')) {
       throw new Error('a tenant freeze requires a tenant id');
     }
-    const entry: FreezeEntry = { scope, ...(scope === 'tenant' ? { tenantId } : {}), reason, at: this.now(), actor };
+    const entry: FreezeEntry = { scope, ...(scope === 'tenant' ? { tenantId } : {}), reason, at: this.bookkeepingNow(), actor };
     if (scope === 'global') this.globalFreeze = entry;
     else this.frozenTenants.set(tenantId!, entry);
     this.eventLog.append({
@@ -356,9 +479,11 @@ export class AuthorizationService {
 
   /** Lift a freeze. Revoked capabilities are NOT restored — freeze is reversible, revocation is not. */
   unfreeze(scope: 'tenant' | 'global', tenantId: string | undefined, reason: string, actor: string): boolean {
-    const existed = scope === 'global' ? this.globalFreeze !== undefined : this.frozenTenants.delete(tenantId ?? '');
+    // H15 (ADR-027): evidence before widening. The lift event is recorded
+    // first; a freeze that cannot be recorded stays engaged (a stalled lift
+    // must not silently restore authority during a store outage).
+    const existed = scope === 'global' ? this.globalFreeze !== undefined : this.frozenTenants.has(tenantId ?? '');
     if (!existed) return false;
-    if (scope === 'global') this.globalFreeze = undefined;
     this.eventLog.append({
       tenantId: scope === 'global' ? '' : tenantId!,
       principal: actor,
@@ -370,6 +495,9 @@ export class AuthorizationService {
       result: 'success',
       metadata: { phase: 'incident-lift', scope, tenantId: tenantId ?? null, reason },
     });
+    this.health.mark('store', 'ok');
+    if (scope === 'global') this.globalFreeze = undefined;
+    else this.frozenTenants.delete(tenantId!);
     return true;
   }
 
@@ -377,6 +505,11 @@ export class AuthorizationService {
    * H13 bulk revocation: revoke every registered capability in scope, one
    * audited `capability.revoke` event per capability (the evidence shows
    * exactly what was killed, not just a count).
+   *
+   * H15 (ADR-027): revocation is a narrowing action whose state applies
+   * before its event; a per-capability evidence failure must not abort the
+   * kill switch mid-loop. Failures are loud (health transition) and the
+   * revocation still counts.
    */
   revokeAll(scope: 'tenant' | 'global', tenantId: string | undefined, reason: string): number {
     if (scope === 'tenant' && (!tenantId || tenantId.trim() === '')) {
@@ -390,7 +523,11 @@ export class AuthorizationService {
       // are not acting authority: an incident responder must still be able to
       // reconstruct and preserve evidence while the switch is engaged.
       if (cap.actions.every((a) => EVIDENCE_READ_ACTIONS.has(a))) continue;
-      this.revoke(cap.id, reason);
+      try {
+        this.revoke(cap.id, reason);
+      } catch {
+        this.health.mark('store', 'unavailable', 'evidence append failed');
+      }
       count++;
     }
     return count;
@@ -447,7 +584,11 @@ export class AuthorizationService {
     // H13: pull revocation-channel records (throttled). Bounded by the
     // configured interval, inside the ROADMAP ≤ 5 s propagation target.
     this.syncBroadcast(false);
-    const at = this.now();
+    // H15 (ADR-027): the clock is a checked dependency; a fault denies before
+    // any time-based authority check runs.
+    const clock = this.readClock();
+    if (!clock.ok) return this.clockFaultDeny(input, clock.detail);
+    const at = clock.at;
     const { principal, action, resourceId } = input;
 
     // M2: single guard — no unauthenticated principal reaches the PDP.
@@ -480,7 +621,8 @@ export class AuthorizationService {
           metadata: { phase: 'decision', reason: decision.reason, authCheck: 'failed' },
         });
       } catch {
-        // Evidence write failure on an auth check — still deny
+        // Evidence write failure on an auth check — still deny, still observed.
+        this.health.mark('store', 'unavailable', 'evidence append failed');
       }
       return decision;
     }
@@ -501,14 +643,15 @@ export class AuthorizationService {
         result: decision.decision === 'deny' ? 'denied' : 'success',
         metadata: { phase: 'decision', reason: decision.reason },
       });
+      this.health.mark('store', 'ok');
     } catch (error) {
+      // H15 (ADR-027): the observed store fault drives the health transition
+      // (one loud signal per transition, not one warning per denied decision).
+      this.health.mark('store', 'unavailable', 'evidence append failed');
       if (error instanceof StoreUnavailableError) {
-        // H15: the store is DOWN (unreachable/unmigrated/failed write). Deny
-        // with the distinct reason so an outage is not disguised as a generic
+        // The store is DOWN (unreachable/unmigrated/failed write). Deny with
+        // the distinct reason so an outage is not disguised as a generic
         // write failure — and no event can be appended while it is down.
-        process.emitWarning?.(
-          'evidence store unavailable: every decision is being denied (fail closed, H15)',
-        );
         return deny(
           principal.id,
           action,
@@ -569,10 +712,40 @@ export class AuthorizationService {
    * event log append. Default deny on every failure.
    */
   queryAudit(input: AuthorizeInput, filters: AuditFilters): AuthorizationDecision {
-    const at = this.now();
     const { principal } = input;
     const action = input.action || 'query.audit';
     const derivedResourceId = `audit-log:${principal.tenantId}`;
+
+    // H15 (ADR-027): same checked-clock contract as authorize().
+    const clock = this.readClock();
+    if (!clock.ok) {
+      const decision = deny(
+        principal.id,
+        action,
+        derivedResourceId,
+        'clock-unavailable',
+        `clock unavailable, failing closed: ${clock.detail}`,
+        Date.now(),
+      );
+      try {
+        this.eventLog.append({
+          tenantId: principal.tenantId,
+          principal: principal.id,
+          actor: principal.id,
+          actorKind: principal.kind,
+          action,
+          resourceId: derivedResourceId,
+          decision: 'deny',
+          denyReason: 'clock-unavailable',
+          result: 'denied',
+          metadata: { phase: 'decision', reason: decision.reason, fault: 'clock' },
+        });
+      } catch {
+        this.health.mark('store', 'unavailable', 'evidence append failed');
+      }
+      return decision;
+    }
+    const at = clock.at;
 
     // 1. Auth check fires first (mirrors authorize / revealEvidence)
     if (principal.kind !== 'authorization' && !isAuthenticated(principal, at)) {
@@ -601,6 +774,7 @@ export class AuthorizationService {
         });
       } catch {
         // Evidence write failure on auth check
+        this.health.mark('store', 'unavailable', 'evidence append failed');
       }
       return decision;
     }
@@ -634,6 +808,7 @@ export class AuthorizationService {
         });
       } catch {
         // Evidence write failure
+        this.health.mark('store', 'unavailable', 'evidence append failed');
       }
       return decision;
     }
@@ -749,26 +924,43 @@ export class AuthorizationService {
           continue;
         }
 
-        const result = this.engine.evaluate({
-          principal,
-          resource,
-          action,
-          now: at,
-          params,
-          approvals: approvals?.filter((a) => {
-            // M2: every approval must come from an authenticated human with MFA.
-            // Reject approvals where the reviewer lacks valid auth or MFA.
-            if (!hasMfa(a.reviewerAuth)) {
-              return false;
-            }
-            // Reject expired reviewer auth
-            if (a.reviewerAuth.expiresAt <= at) {
-              return false;
-            }
-            return true;
-          }),
-          networkHost,
-        });
+        let result;
+        try {
+          result = this.engine.evaluate({
+            principal,
+            resource,
+            action,
+            now: at,
+            params,
+            approvals: approvals?.filter((a) => {
+              // M2: every approval must come from an authenticated human with MFA.
+              // Reject approvals where the reviewer lacks valid auth or MFA.
+              if (!hasMfa(a.reviewerAuth)) {
+                return false;
+              }
+              // Reject expired reviewer auth
+              if (a.reviewerAuth.expiresAt <= at) {
+                return false;
+              }
+              return true;
+            }),
+            networkHost,
+          });
+        } catch (error) {
+          // H15 (ADR-027): the engine is a checked dependency. Its throw is
+          // observed (health transition) and denies with the distinct
+          // evaluation-error reason; degradation never widens authority.
+          this.health.mark('engine', 'unavailable', 'policy engine threw');
+          return deny(
+            principal.id,
+            action,
+            resourceId,
+            'evaluation-error',
+            `policy engine failed closed: ${(error as Error).message}`,
+            at,
+          );
+        }
+        this.health.mark('engine', 'ok');
 
         if (result.effect === 'deny') {
           return deny(principal.id, action, resourceId, 'policy-deny', result.reason, at, result.ruleId);

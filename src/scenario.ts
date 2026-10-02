@@ -23,6 +23,7 @@ import { type CapabilityRequestService } from './capability-request.ts';
 import { SessionManager } from './session-manager.ts';
 import { InMemoryRevocationChannel, IncidentService, type RevocationChannel } from './incident.ts';
 import { PostgresRevocationChannel } from './incident-store-pg.ts';
+import { type HealthState } from './health.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -85,6 +86,8 @@ export interface World {
   readonly sessions: SessionManager;
   /** H13: the incident response seam (kill switch, broadcast, preservation). */
   readonly incident: IncidentService;
+  /** H15: observed availability of the decision path's dependencies. */
+  readonly health: HealthState;
   /** Set IdP health status for degraded-mode testing */
   setIdPHealth(status: IdPHealth): void;
   session(model: ModelPort, overrides?: Partial<SessionOverrides>): AgentSession;
@@ -347,6 +350,7 @@ function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
     audit,
     sessions,
     incident,
+    health: authorization.healthState,
     setIdPHealth(status) {
       idpHealthStatus = status;
     },

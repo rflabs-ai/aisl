@@ -1762,4 +1762,105 @@ recoverable (`lift`, counters, events). Incident response can still be slower
 than the attack (the ROADMAP residual): the mechanisms shrink the window; they
 cannot shrink the attacker's head start.
 
+---
+
+## Claim 36 — Failures are loud, per-dependency, and recoverable; degradation never widens authority (H15)
+
+**Claim:** Every dependency fault on the decision path denies with its own
+distinct reason AND an observed-health transition: a throwing policy engine
+denies `evaluation-error`; an unwritable evidence store denies
+`store-unavailable` (typed backend refusal) or `evidence-write-failure` (any
+other failed write); an unusable, stalled, or backward clock denies
+`clock-unavailable` (new). A fault can never produce an allow — degradation is
+deny-only — and recovery is automatic and loud: the first successful call
+after a fault marks the dependency `ok` and emits the recovery transition.
+`HealthState` (`src/health.ts`) observes what the decision path actually
+experiences (append succeeded/failed, engine returned/threw, clock read
+valid/faulted) and emits one `process.emitWarning` per transition (down and
+recovery) instead of one warning per denied decision. `ClockGuard` treats a
+throw or non-finite reading as a clock fault always, and enables stall
+(wall frozen while an injected monotonic reference advances) and backward-jump
+detection only with that monotonic reference — deterministic test clocks
+freeze and travel backward by design. `GET /healthz` reports
+`{ idp, store, engine, clock }` when a `HealthState` is wired (the M14
+`{ idp, store }` shape otherwise). Safety mechanisms degrade the same way:
+`issue()` records the issuance event before registering the capability (a
+store outage refuses the mint — no unaudited authority); `unfreeze` records
+evidence before clearing the freeze (a lift that cannot be recorded stays
+frozen — widening needs evidence); `revokeAll` completes the kill switch past
+per-capability evidence failures and `IncidentService.engage` completes local
+enforcement during a store outage, reporting `evidenceRecorded: false`
+(narrowing applies first and reports missed evidence). The benchmark measures
+`authorize()` p99 with persistence (SQLite-file `EventLog`) and without
+(in-memory), two advisory SLO rows.
+
+**Mechanism:** `src/health.ts` (ADR-027: `HealthState` + `ClockGuard`) plus
+chokepoint edits in `src/pdp.ts` (`readClock`, `clockFaultDeny`, health marks
+on engine/append outcomes, evidence-before-authority in `issue`, evidence-
+before-`unfreeze`, resilient `revokeAll`), `src/incident.ts`
+(`engage`/`lift` report `evidenceRecorded`, `IncidentActionResult` shape),
+`src/rest-api.ts` (optional `health` dep extends `/healthz`), and the
+benchmark/SLO catalog (`src/cli.ts`, `src/slo.ts`). Health details are short
+fixed labels — never error messages, never secrets. Rate limiting is resolved
+as deployment territory (reverse proxy), not built in-process.
+
+**Threat model:** H15 (fail-closed availability — the failure modes of the
+safety mechanisms themselves); ROADMAP H15 residual (an induced fault is a
+DoS: make it loud, bounded, recoverable); TM-004 operations.
+
+**Assumptions:** fail-closed stays the default; an operator watches the
+warning stream or `/healthz` (alert routing is the operator's); the embedder
+wires the monotonic reference in production (`new ClockGuard(Date.now, {
+monotonic: () => performance.now() })` — DEPLOYMENT.md); the reverse proxy
+owns request rate limiting.
+
+**Evidence:** `tests/h15-fail-closed-availability.test.ts` — 24 cases (19
+written red-first + 5 audit-follow-up regression cases): engine throw →
+`evaluation-error` + `engine: unavailable` +
+transition; engine recovery; typed store outage → `store-unavailable` (never
+an unrecorded allow) + transition, and the untyped (full disk) variant →
+`evidence-write-failure`; store recovery; one transition per outage, not one
+per denied decision; throwing and non-finite clocks → `clock-unavailable`;
+stalled and backward clocks under the strict guard, with automatic recovery;
+the false-denial pin (frozen/backward clocks pass without a monotonic
+reference); IdP outage keeps `idp-unavailable` for unauthenticated principals
+while authenticated authority continues; `issue()` under a store outage
+refuses and leaves nothing registered; `revokeAll` completes under evidence
+failure; `engage` completes local enforcement with `evidenceRecorded: false`;
+`lift` refuses when its evidence cannot be recorded and the freeze stays
+engaged; `/healthz` reports the four statuses and tracks observed faults; the
+M14 shape is unchanged without a `HealthState`; the structural invariant —
+health state, transitions, and emitted warnings carry no secret values.
+`tests/slo.test.ts` (benchmark integration) exercises the two new advisory
+rows end to end.
+
+**Test:** the suite above; demo section 23 injects store and clock faults
+against a live stack and prints deny reason + health snapshot + recovery
+(`npm run demo`, exits 0); `npm run benchmark` prints both decision-latency
+p99 rows and exits 0.
+
+**Known limitations:** `HealthState` is in-memory — a restart resets to `ok`
+until the next observed fault re-marks it (the transition then fires again);
+clock trend detection needs the monotonic wiring (the lenient guard still
+catches throw/non-finite clocks); the engine-fault reason is shared with other
+evaluation errors (split `engine-unavailable` when an on-call rotation needs
+per-dependency alerting); health signals live outside the signed event chain
+deliberately (a fault storm must not flood the evidence chain); alert
+routing/paging is the operator's; rate limiting is the deployment's.
+
+**Residual risk:** an adversary who can induce a dependency fault gets a
+denial of service — the accepted ROADMAP trade, now loud, bounded, and
+recoverable. The safety mechanisms themselves are protected by the same
+contract: they complete what they can and report what they could not record.
+
+**Audit follow-up (2026-10-02):** the session audit found the production
+broadcast-sync hook bypassed the guarded clock read — a faulted clock crashed
+`authorize`/`issue` instead of denying `clock-unavailable` (probe-proven on
+both paths). Fixed: `syncBroadcast` try/catches its clock reads; `issue()`
+records its clock-fault refusal; grant/consume/revoke/freeze use a
+fault-tolerant `bookkeepingNow()` so a clock fault cannot disable the kill
+switch or leave a single-use capability unconsumed; `clockFaultDeny` recovers
+store health on its successful append; `queryAudit`'s clock-fault branch is
+tested. 5 regression cases added (suite: 24).
+
 

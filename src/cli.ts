@@ -22,7 +22,7 @@ import { AgentSession, LocalSandbox } from './runtime.ts';
 import { AuthorizationService } from './pdp.ts';
 import { policyBundleHash, createEngineFromBundle } from './policy-config.ts';
 import { mockAuth } from './testing.ts';
-import { verifyBundle, eventPublicKey } from './events.ts';
+import { verifyBundle, eventPublicKey, EventLog, StoreUnavailableError, type EventInput, type SecurityEvent, type EventStore } from './events.ts';
 import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-testing.ts';
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
@@ -57,6 +57,7 @@ import {
   type UpdateDescriptor,
 } from './updates.ts';
 import { InMemoryRevocationChannel, verifyIncidentBundle, type IncidentBundle } from './incident.ts';
+import { ClockGuard } from './health.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -66,6 +67,15 @@ function line(label: string, status: string, detail: string): void {
 
 function heading(text: string): void {
   console.log(`\n${text}\n${'-'.repeat(text.length)}`);
+}
+
+/** H15 demo seam: an evidence store whose append can be failed on demand. */
+class DemoFlakyStore extends EventLog {
+  fail = false;
+  override append(input: EventInput): SecurityEvent {
+    if (this.fail) throw new StoreUnavailableError('demo store outage (endpoint redacted)');
+    return super.append(input);
+  }
 }
 
 async function demo(): Promise<void> {
@@ -749,6 +759,62 @@ async function demo(): Promise<void> {
     h13NodeB.eventLog.close();
   }
 
+  // H15: fail-closed availability — fault injection, degraded mode, recovery.
+  heading('23. H15: fail-closed availability — fault injection, degraded mode, recovery');
+  {
+    const h15Dir = mkdtempSync(join(tmpdir(), 'asl-h15-'));
+    let h15Store: DemoFlakyStore | undefined;
+    try {
+      h15Store = new DemoFlakyStore(join(h15Dir, 'events.sqlite'));
+      const h15Authz = new AuthorizationService(world.registry, world.policy, h15Store, world.clock.now);
+      h15Authz.issue(world.root, {
+        subject: world.agent.id,
+        tenantId: TENANT_A,
+        resourceIds: [world.resources.repoA!],
+        actions: ['read'],
+        maxClassification: 'internal',
+        expiresAt: world.clock.now() + 600_000,
+        provenance: { source: 'policy-grant', note: 'h15 demo' },
+      });
+      const h15Healthy = h15Authz.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.repoA! });
+      line(
+        'H15 healthy decision',
+        h15Healthy.decision === 'allow' ? 'ALLOW' : 'FAIL',
+        `health=${JSON.stringify(h15Authz.healthState.snapshot())}`,
+      );
+
+      h15Store.fail = true;
+      const h15Down = h15Authz.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.repoA! });
+      line(
+        'store outage (fail-closed)',
+        h15Down.decision === 'deny' && h15Down.denyReason === 'store-unavailable' ? 'DENIED' : 'FAIL',
+        `${h15Down.denyReason}; health=${JSON.stringify(h15Authz.healthState.snapshot())}`,
+      );
+      h15Store.fail = false;
+      const h15Recovered = h15Authz.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.repoA! });
+      line(
+        'store recovery (automatic)',
+        h15Recovered.decision === 'allow' && h15Authz.healthState.snapshot().store === 'ok' ? 'ALLOW' : 'FAIL',
+        `health=${JSON.stringify(h15Authz.healthState.snapshot())}`,
+      );
+
+      h15Authz.setClockGuard(
+        new ClockGuard(() => {
+          throw new Error('demo clock fault');
+        }),
+      );
+      const h15ClockDown = h15Authz.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.repoA! });
+      line(
+        'clock fault (fail-closed)',
+        h15ClockDown.decision === 'deny' && h15ClockDown.denyReason === 'clock-unavailable' ? 'DENIED' : 'FAIL',
+        `${h15ClockDown.denyReason}; health=${JSON.stringify(h15Authz.healthState.snapshot())}`,
+      );
+    } finally {
+      h15Store?.close();
+      rmSync(h15Dir, { recursive: true, force: true });
+    }
+  }
+
   // Postgres mode: close the pools or the process hangs at exit.
   world.incident.close();
   world.eventLog.close();
@@ -877,6 +943,40 @@ async function benchmark(): Promise<void> {
   guardLatencies.sort((a, b) => a - b);
   const guardLatencyP99Ms = Math.round(guardLatencies[Math.floor(0.99 * guardLatencies.length)]! * 1000) / 1000;
 
+  // H15 (ADR-027): decision latency p99 with and without persistence - the
+  // same PDP path over a SQLite-file EventLog (durable append) and an
+  // in-memory EventLog. Isolated stacks: the world's chain and
+  // auditCompleteness are untouched.
+  const decisionLatencyP99 = (store: EventStore): number => {
+    const authz = new AuthorizationService(world.registry, world.policy, store, world.clock.now);
+    authz.issue(world.root, {
+      subject: world.agent.id,
+      tenantId: TENANT_A,
+      resourceIds: [world.resources.repoA!],
+      actions: ['read'],
+      maxClassification: 'internal',
+      expiresAt: world.clock.now() + 3_600_000,
+      provenance: { source: 'policy-grant', note: 'h15 decision latency budget' },
+    });
+    const latencies: number[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const t = performance.now();
+      authz.authorize({ principal: world.agent, action: 'read', resourceId: world.resources.repoA! });
+      latencies.push(performance.now() - t);
+    }
+    latencies.sort((a, b) => a - b);
+    store.close();
+    return Math.round(latencies[Math.floor(0.99 * latencies.length)]! * 1000) / 1000;
+  };
+  const persistenceDir = mkdtempSync(join(tmpdir(), 'asl-h15-latency-'));
+  let decisionLatencyP99WithPersistenceMs: number;
+  try {
+    decisionLatencyP99WithPersistenceMs = decisionLatencyP99(new EventLog(join(persistenceDir, 'events.sqlite')));
+  } finally {
+    rmSync(persistenceDir, { recursive: true, force: true });
+  }
+  const decisionLatencyP99WithoutPersistenceMs = decisionLatencyP99(new EventLog());
+
   const events = world.eventLog.all();
   const decisionEvents = events.filter((e) => e.metadata !== undefined && (e.metadata as { phase?: string }).phase === 'decision');
   const guardVerdictEvents = events.filter((e) => e.action === 'session.guard');
@@ -925,6 +1025,8 @@ async function benchmark(): Promise<void> {
       auditExportLatencyP99Ms,
       policyDiffLatencyMs,
       guardLatencyP99Ms,
+      decisionLatencyP99WithPersistenceMs,
+      decisionLatencyP99WithoutPersistenceMs,
       falseClaimRate,
       totalLegitimateResponses,
       legitimateResponsesNonDelivered,

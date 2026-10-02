@@ -1,28 +1,31 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H13 — incident response (ADR-026).
+Honest snapshot. Updated after H15 — fail-closed availability (ADR-027).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
 UI served by the M14 server, and the sandbox lifecycle — zero new runtime
 dependencies. H1 (ADR-023, signed delegation), H10 (ADR-024, supply-chain
 gate + signed build manifests), H12 (ADR-025, signed update channel with
-anti-rollback and sticky canary), and H13 (ADR-026, kill switch + revocation
-channel + evidence preservation) are the landed Stage 2 items. M17 closed both
+anti-rollback and sticky canary), H13 (ADR-026, kill switch + revocation
+channel + evidence preservation), and H15 (ADR-027, fail-closed availability:
+observed health, clock guard, degraded-mode matrix, latency budget) are the
+landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H15.
+Next frontier: H14 (continuous adversarial evaluation) or any remaining
+H2–H9/H11 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~11,945 lines of source across 45 modules
+TypeScript foundation on Node 24, ~12,358 lines of source across 46 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
-`rest-anchors.ts`, `updates.ts`, `incident.ts`, and `incident-store-pg.ts`
-are the latest additions), 598 tests
-(`tests/`, `security-tests/`; 579 pass, 19 Postgres-mode tests skip cleanly
+`rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, and
+`incident-store-pg.ts` are the latest additions), 622 tests
+(`tests/`, `security-tests/`; 603 pass, 19 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -298,8 +301,11 @@ Dev dependencies: `typescript`, `@types/node`.
   (`CapabilityRequestService`, MFA enforced at the boundary, narrowing
   allowed, mint unchanged), `GET /v1/audit` (`AuditQueryService` unchanged),
   `POST /v1/tasks` (the one `AgentSession.run()` path, trace summary
-  returned), `GET /healthz` → `{ idp, store }` (H15's first operator health
-  endpoint since M2). Named non-goals: rate limiting (H15/deployment), CORS
+  returned), `GET /healthz` → `{ idp, store }` (the operator health endpoint
+  since M2; H15 extends it to `{ idp, store, engine, clock }` when a
+  `HealthState` is wired). Named non-goals: rate limiting
+  (**resolved by H15/ADR-027 as deployment territory** — the reverse proxy
+  owns request rate limits; DEPLOYMENT.md), CORS
   (same-origin loopback), TLS-in-process (loopback bind; termination is the
   deployment's job — DEPLOYMENT.md), WebSockets, streaming.
 - **Document ingestion (M15):** `src/ingestion.ts` (ADR-020) — deterministic
@@ -375,7 +381,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 598 tests pass (579 green; 19 Postgres-mode tests skip without
+All 622 tests pass (603 green; 19 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1
@@ -520,11 +526,16 @@ Ordered by severity.
     trade), in-memory freeze state is lost on restart unless the Postgres
     channel replays it, and the event chain itself remains single-writer by
     design (the channel is the one deliberate multi-writer table).
-13. **Fail-closed is incompressible.** A broken engine, full disk, or closed
-    evidence store denies everything silently, with no health signal or degraded
-    mode (H15). IdP outage now has a distinct deny reason and health signal.
-    **M12 adds a third: an unreachable/mid-migration Postgres denies with
-    `store-unavailable` and a loud event — the degraded mode is explicit.**
+13. ~~**Fail-closed is incompressible.**~~ **H15 closed (ADR-027)**: every
+    dependency fault (engine throw, store unwritable, clock
+    stalled/backward/unreadable) now denies with its own distinct reason AND a
+    loud observed-health transition; the degraded mode is explicit, deny-only,
+    and recoverable; `issue()` is evidence-before-authority; the kill switch
+    completes under a store outage; the benchmark carries the decision-latency
+    budget (p99 with/without persistence, advisory). Residual: an induced
+    fault is still a DoS (accepted ROADMAP trade — now loud, bounded,
+    recoverable), and in-memory health resets to `ok` on restart until the
+    next observed fault.
 14. ~~**Policy cannot express resource hierarchy.**~~ **M5 closed**:
     `PolicyRule.resources.idPatterns` supports recursive `tenant/...` and
     single-segment `prefix*`/`prefix?` globs. Patterns are compiled once at
@@ -533,7 +544,8 @@ Ordered by severity.
     widens which RULES apply; it does not widen which resources a CAPABILITY
     may reach (`Capability.resourceIds` still lists explicit ids).
 15. **No IdP circuit breaker.** Every request attempts JWKS fetch during outage.
-    Rate limiting is left to the deployment.
+    Rate limiting is left to the deployment (H15/ADR-027 resolved it as
+    deployment territory: the reverse proxy owns request rate limits).
 
 ## What M2 closed
 
@@ -1048,6 +1060,72 @@ and global-incident events (`tenantId: ''`) were unreachable (now the
 H15 DoS trade), single-node freeze state is in-memory (durability is the
 Postgres channel's), the skip-clean live Postgres tests, and the ROADMAP
 residual that incident response can be slower than the attack.
+
+## What H15 closed
+
+H15 was the fail-closed availability milestone (ADR-027; one new module,
+chokepoint edits in the PDP/incident service/REST health route, zero new
+runtime dependencies). It did not change decision semantics: capability AND
+policy still gate every action; every fault still denies — it made the denial
+distinguishable, observable, and recoverable.
+
+1. ~~**Silent fail-closed.**~~ Every dependency fault now has its own deny
+   reason and an observed health transition: engine throws →
+   `evaluation-error`; store unavailable → `store-unavailable` (typed
+   backend error) or `evidence-write-failure` (any other failed write);
+   clock unusable/stalled/backward → `clock-unavailable` (new). None of them
+   can produce an allow while faulted.
+2. ~~**No health signal / alert spam.**~~ `src/health.ts` `HealthState`
+   observes what the decision path experiences (append succeeded/failed,
+   engine returned/threw, clock read valid/faulted) and emits one loud
+   `process.emitWarning` per transition — down and recovery — instead of one
+   warning per denied decision (the M12 per-deny warning became
+   transition-based). `ClockGuard` checks the decision clock: throws and
+   non-finite readings always fault; stall/backward detection is enabled by
+   an injected monotonic reference so deterministic test clocks keep working.
+   `GET /healthz` reports `{ idp, store, engine, clock }` when wired (M14
+   `{ idp, store }` otherwise).
+3. ~~**Safety mechanisms degrade worse than the decision path.**~~ `issue()`
+   now records the issuance event **before** registering the capability (a
+   store outage refuses the mint; no unaudited authority exists).
+   `unfreeze` records evidence before clearing the freeze (a lift that cannot
+   be recorded stays frozen — widening needs evidence), while `revoke`/
+   `freeze` apply first and report missed evidence (narrowing must not
+   abort): `revokeAll` completes the kill switch past per-capability evidence
+   failures, and `IncidentService.engage` completes local enforcement during
+   a store outage with `evidenceRecorded: false`.
+4. ~~**No latency budget.**~~ The benchmark measures `authorize()` p99 with
+   persistence (SQLite-file `EventLog`) and without (in-memory), as two
+   advisory SLO rows (ADR-014: latency never fails the build). In-process
+   sample: ~1.6 ms vs ~0.2 ms.
+
+Tests: `tests/h15-fail-closed-availability.test.ts` (24 — 19 initial + 5
+audit-follow-up regression cases; written before
+`src/health.ts` existed; the red signal — `ERR_MODULE_NOT_FOUND` without the
+module — was verified by the 2026-10-02 audit probe, not captured during the
+build — audit ticket 02). The structural invariant test asserts health state,
+transitions, and emitted warnings carry no secret values (details are fixed
+labels, never error messages). Residuals (ADR-027): `HealthState` is
+in-memory (a restart resets to `ok`; the next observed fault re-marks it);
+clock trend detection needs the embedder's monotonic wiring (DEPLOYMENT.md);
+the engine-fault reason stays shared with other evaluation errors
+(`ponytail:` marker, split `engine-unavailable` if operators need it); an
+adversary who can induce a fault still gets a DoS — accepted, now loud,
+bounded, and recoverable.
+
+**Audit follow-up (2026-10-02):** the same-day session audit found 1 must-fix +
+3 should-fix + 4 nits; all 8 tickets fixed with regression tests. The
+must-fix: `syncBroadcast` ran before the guarded clock read and read the raw
+clock, so with the production broadcast hook installed a faulted clock crashed
+`authorize`/`issue` instead of denying `clock-unavailable` (probe-proven on
+both paths); the sync body now try/catches its clock reads. Also:
+`issue()`'s clock-fault refusal now appends its `capability.issue` deny event;
+grant/consume/revoke/freeze use `bookkeepingNow()` (a faulted clock cannot
+disable the kill switch or leave a single-use capability unconsumed);
+`clockFaultDeny` recovers store health on its successful append; the
+"red-confirmed" wording, the prompt's Phase 1 constructor drift, and the
+PROJECT_CONTEXT module map are corrected; `queryAudit`'s clock-fault branch is
+tested. Tickets: `.scratch/session-audit/2026-10-02-h15-fail-closed-availability/`.
 
 ## Watch-items from the M9 audit
 

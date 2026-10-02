@@ -15,6 +15,7 @@ import type { AuthContext, Principal, Action } from './domain.ts';
 import type { AuthorizationService } from './pdp.ts';
 import type { IdentityProvider } from './identity.ts';
 import type { EventStore } from './events.ts';
+import type { HealthState } from './health.ts';
 import { registerSessionRoutes, type SessionRouteDeps } from './rest-sessions.ts';
 import { registerAuditRoutes, type AuditRouteDeps } from './rest-audit.ts';
 import { registerAnchorRoutes, type AnchorRouteDeps } from './rest-anchors.ts';
@@ -147,6 +148,12 @@ export interface RestApiDeps {
   readonly resolvePrincipal: (auth: AuthContext) => Principal | undefined;
   /** store status for /healthz. Default: () => 'ok' */
   readonly storeHealth?: () => 'ok' | 'unavailable';
+  /**
+   * H15 (ADR-027): observed health for store/engine/clock. When wired,
+   * `/healthz` reports `{ idp, store, engine, clock }`; without it the M14
+   * `{ idp, store }` shape is unchanged.
+   */
+  readonly health?: HealthState;
   /** Body size cap in bytes. Default: 1_048_576 (1 MiB). */
   readonly maxBodyBytes?: number;
   /**
@@ -193,6 +200,7 @@ export class RestApi {
   private readonly eventLog: EventStore;
   private readonly resolvePrincipalFn: (auth: AuthContext) => Principal | undefined;
   private readonly storeHealth: () => 'ok' | 'unavailable';
+  private readonly health?: HealthState;
   private readonly maxBodyBytes: number;
   private readonly incidentSync?: () => void;
   private readonly routes = new Map<string, CompiledRoute>();
@@ -205,12 +213,15 @@ export class RestApi {
     this.eventLog = deps.eventLog;
     this.resolvePrincipalFn = deps.resolvePrincipal;
     this.storeHealth = deps.storeHealth ?? (() => 'ok');
+    this.health = deps.health;
     this.maxBodyBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     this.incidentSync = deps.incidentSync;
 
     this.addRoute('GET', '/healthz', () => ({
       status: 200,
-      body: { idp: this.idp.getIdPHealth().status, store: this.storeHealth() },
+      body: this.health
+        ? { idp: this.idp.getIdPHealth().status, ...this.health.snapshot() }
+        : { idp: this.idp.getIdPHealth().status, store: this.storeHealth() },
     }));
     this.addRoute('POST', '/v1/authorize', (ctx) => this.authorizeRoute(ctx));
     for (const page of deps.staticPages ?? []) {

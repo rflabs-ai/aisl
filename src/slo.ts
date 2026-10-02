@@ -45,6 +45,8 @@ export const SLO_TARGETS: readonly SloTarget[] = [
   { id: 'audit-export-latency-p99', metric: 'evidence.auditExportLatencyP99Ms', gate: 'advisory' },
   { id: 'policy-diff-latency', metric: 'evidence.policyDiffLatencyMs', gate: 'advisory' },
   { id: 'guard-latency-p99', metric: 'evidence.guardLatencyP99Ms', gate: 'advisory' },
+  { id: 'decision-latency-p99-with-persistence', metric: 'evidence.decisionLatencyP99WithPersistenceMs', gate: 'advisory' },
+  { id: 'decision-latency-p99-without-persistence', metric: 'evidence.decisionLatencyP99WithoutPersistenceMs', gate: 'advisory' },
 ];
 
 export interface SloResult {

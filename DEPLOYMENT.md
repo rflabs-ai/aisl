@@ -92,6 +92,22 @@ The default stays SQLite (ADR-010's single-process mode). Postgres mode is
   Postgres denies every decision that needs the store with
   `denyReason: 'store-unavailable'` and one loud health event (H15). There
   is no silent fallback.
+- **Degraded-mode runbook (H15, ADR-027):** every dependency fault denies
+  with its own reason — `idp-unavailable`, `store-unavailable` /
+  `evidence-write-failure`, `evaluation-error` (policy engine), or
+  `clock-unavailable` (new: the decision clock throws, returns a non-finite
+  value, or — with strict wiring — stalls or jumps backward). HealthState
+  emits ONE `process.emitWarning` per transition (`health: <dep> unavailable
+  (<label>)`, then `health: <dep> ok` on recovery) — alert on the transition
+  stream, not on per-decision denies. Recovery is automatic: the next
+  successful call flips the dependency back to `ok`. The kill switch
+  completes during a store outage (`evidenceRecorded: false` on the engage
+  result); a `lift` that cannot record its evidence refuses and the freeze
+  stays engaged (widening needs evidence). **Clock wiring:** production
+  embedders pass `new ClockGuard(Date.now, { monotonic: () => performance.now() })`
+  to `AuthorizationService.setClockGuard` so stall/backward jumps are detected;
+  the default lenient guard still catches throw/non-finite clocks (deterministic
+  test clocks intentionally freeze, so trend detection is opt-in).
 
 ### REST API exposure (M14, ADR-019)
 
@@ -102,17 +118,19 @@ ingress. Its own in-process story is deliberately modest: it binds
 - **TLS terminates at the deployment** — reverse proxy / load balancer in
   front of the API (operator-owned, same discipline as `pg_hba` TLS above).
   Never expose the Node process directly on an untrusted network; there is
-  no in-process TLS and no rate limiting (H15/deployment territory) — a
-  proxy that terminates TLS and applies connection budgets/rate limits is
-  the required front door.
+  no in-process TLS and no in-process rate limiting (H15/ADR-027 resolved
+  rate limiting as deployment territory) — a proxy that terminates TLS and
+  applies connection budgets/rate limits is the required front door.
 - **Identity:** clients authenticate with `Authorization: Bearer <JWT>` from
   the trusted IdP (ADR-016). The deployment registers the principal table
   the resolver maps verified tokens onto — tokens decide *who*; the
   registration decides *what they may reach*. `X-*` identity headers are
   ignored by construction.
-- **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }` —
-  wire your monitor to it; IdP `unreachable` or store `unavailable` means
-  every decision is failing closed (H15).
+- **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }`, or
+  `{ idp, store, engine, clock }` when the embedder wires a `HealthState`
+  (H15) — wire your monitor to it; IdP `unreachable` or any dependency
+  `unavailable` means every decision needing that dependency is failing
+  closed (H15).
 - **Minimal UI (M15):** the static operator page (`tools/ui/index.html`) is
   served by the same loopback server when the embedder wires it via
   `staticPages` (`GET /ui`, `GET /`). It is a plain client of `/v1` — the

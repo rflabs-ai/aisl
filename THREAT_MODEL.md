@@ -45,7 +45,7 @@ at this stage.
 | Secret theft | no allow rule by default; broker gate | **mitigated** | secrets are in memory, unencrypted |
 | Network exfiltration | egress gateway, allowlist | **mitigated (decision only)** | no real proxy yet; see below |
 | Destructive action | no write/delete capability issued | **mitigated** | depends on issued scope |
-| Resource exhaustion | none | **open** | no quotas, timeouts, or rate limits |
+| Resource exhaustion | no in-process quotas; decision-latency budget measured (p99 with/without persistence, advisory) | **limited** | rate limiting is deployment territory (reverse proxy, H15/ADR-027); an induced dependency fault is a DoS |
 | Sandbox escape | none — `LocalSandbox` is not isolation | **open** | arbitrary code runs in-process |
 | Evidence tampering | hash chain + per-event Ed25519 + head-hash anchor + append-only triggers | **detected**; durable when anchor lives outside runtime trust domain | anchor rewrite by an attacker with host access to both the SQLite store and the anchor; key compromise |
 | Policy tampering (operator) | none | **open** | B10 |
@@ -54,6 +54,7 @@ at this stage.
 | Model provider compromise | no provider is wired in | **not applicable yet** | becomes critical at provider integration |
 | Replay | single-use consumption, expiry; update replay refused by the high-water mark — stale signed descriptors are `rollback-blocked` (H12) | **mitigated** | multi-node consistency not solved |
 | Active incident (cannot revoke/freeze/reconstruct/preserve fast enough) | tenant/global kill switch: freeze issuance + `incident-frozen` deny at both chokepoints, bulk capability + session revocation, multi-writer revocation channel (pull <= 1 s default, forced on issuance), paged `asl-incident-bundle` preservation + reconstruction (H13) | **mitigated** | poll-based propagation; a channel writer can freeze (DoS is the H15 accepted trade); in-memory freeze state lost on restart without the Postgres channel; response can still be slower than the attack |
+| Safety mechanism failure (broken policy engine, full disk, stalled clock) | per-dependency fault injection with distinct deny reasons (`evaluation-error`, `store-unavailable`/`evidence-write-failure`, `clock-unavailable`), observed `HealthState` with one loud signal per transition, automatic recovery, `/healthz` `{ idp, store, engine, clock }`, kill switch completes under a store outage (H15) | **mitigated/loud** | an adversary who can induce the fault still gets a DoS — accepted trade, now loud, bounded, recoverable; in-memory health resets on restart until the next observed fault |
 
 ## 5. Out of scope at this stage
 

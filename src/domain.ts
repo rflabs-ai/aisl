@@ -188,6 +188,7 @@ export type DenyReason =
   | 'evaluation-error'
   | 'evidence-write-failure'
   | 'store-unavailable'
+  | 'clock-unavailable'
   | 'issuer-not-permitted'
   | 'issuer-insufficient-authority'
   | 'unknown-resource'

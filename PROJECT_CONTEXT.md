@@ -90,6 +90,7 @@ src/
   updates.ts          signed update channel, anti-rollback mark, canary halt (H12, ADR-025)
   incident.ts         kill switch + revocation channel + evidence preservation (H13, ADR-026)
   incident-store-pg.ts Postgres revocation channel + migration 4 (H13, ADR-026)
+  health.ts           fail-closed availability: observed health + clock guard (H15, ADR-027)
   slo.ts              assurance-target catalog + gate (ADR-014, M10)
   attacks.ts          declarative adversarial harness
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)

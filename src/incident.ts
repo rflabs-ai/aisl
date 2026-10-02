@@ -127,7 +127,14 @@ export interface IncidentActionResult {
   readonly capabilitiesRevoked: number;
   readonly sessionsRevoked: number;
   readonly broadcastOk: boolean;
-  readonly eventSeq: number;
+  /**
+   * H15 (ADR-027): false when local enforcement completed but the aggregate
+   * action event could not be recorded (store outage). The safety actions'
+   * own state changes are already applied; missed evidence is reported, never
+   * silent.
+   */
+  readonly evidenceRecorded: boolean;
+  readonly eventSeq?: number;
 }
 
 export interface IncidentSyncResult {
@@ -397,7 +404,19 @@ export class IncidentService {
   engage(input: IncidentActionInput): IncidentActionResult {
     this.validate(input);
     const at = this.clock();
-    this.authorization.freeze(input.scope, input.tenantId, input.reason, input.actor);
+    // H15 (ADR-027): the kill switch completes even when the evidence store is
+    // down. Freezing and revoking are narrowing actions - their state applies
+    // before their events - so an evidence failure must not abort the local
+    // enforcement. Missed evidence is reported (`evidenceRecorded: false`).
+    let evidenceRecorded = true;
+    try {
+      this.authorization.freeze(input.scope, input.tenantId, input.reason, input.actor);
+    } catch (error) {
+      // freeze() only throws after applying state when its event fails; a
+      // throw without the freeze applied is a real error.
+      if (!this.authorization.isFrozen(input.tenantId ?? '')) throw error;
+      evidenceRecorded = false;
+    }
     const capabilitiesRevoked = this.authorization.revokeAll(input.scope, input.tenantId, input.reason);
     const sessionsRevoked =
       input.scope === 'global' ? this.sessions.revokeAll() : this.sessions.revokeAllForTenant(input.tenantId!);
@@ -413,25 +432,31 @@ export class IncidentService {
     // Async backends report a failed write through health() rather than a throw.
     if (this.channel.health().errors > 0) broadcastOk = false;
 
-    const event = this.eventLog.append({
-      tenantId: input.scope === 'global' ? '' : input.tenantId!,
-      principal: input.actor,
-      actor: input.actor,
-      actorKind: 'authorization',
-      action: 'incident.engage',
-      resourceId: input.scope,
-      decision: 'allow',
-      result: 'success',
-      metadata: {
-        phase: 'incident-engage',
-        scope: input.scope,
-        tenantId: input.tenantId ?? null,
-        reason: input.reason,
-        capabilitiesRevoked,
-        sessionsRevoked,
-        broadcastOk,
-      },
-    });
+    let eventSeq: number | undefined;
+    try {
+      const event = this.eventLog.append({
+        tenantId: input.scope === 'global' ? '' : input.tenantId!,
+        principal: input.actor,
+        actor: input.actor,
+        actorKind: 'authorization',
+        action: 'incident.engage',
+        resourceId: input.scope,
+        decision: 'allow',
+        result: 'success',
+        metadata: {
+          phase: 'incident-engage',
+          scope: input.scope,
+          tenantId: input.tenantId ?? null,
+          reason: input.reason,
+          capabilitiesRevoked,
+          sessionsRevoked,
+          broadcastOk,
+        },
+      });
+      eventSeq = event.seq;
+    } catch {
+      evidenceRecorded = false;
+    }
     return {
       scope: input.scope,
       ...(input.tenantId ? { tenantId: input.tenantId } : {}),
@@ -439,13 +464,17 @@ export class IncidentService {
       capabilitiesRevoked,
       sessionsRevoked,
       broadcastOk,
-      eventSeq: event.seq,
+      evidenceRecorded,
+      ...(eventSeq !== undefined ? { eventSeq } : {}),
     };
   }
 
   /** Lift the freeze. Revoked capabilities and sessions stay revoked. */
   lift(input: IncidentActionInput): IncidentActionResult {
     this.validate(input);
+    // H15 (ADR-027): unfreeze records its evidence before clearing the freeze;
+    // a lift that cannot be recorded refuses (state stays frozen), so a store
+    // outage can never silently widen authority.
     const existed = this.authorization.unfreeze(input.scope, input.tenantId, input.reason, input.actor);
     let broadcastOk = true;
     try {
@@ -459,17 +488,26 @@ export class IncidentService {
     } catch {
       broadcastOk = false;
     }
-    const event = this.eventLog.append({
-      tenantId: input.scope === 'global' ? '' : input.tenantId!,
-      principal: input.actor,
-      actor: input.actor,
-      actorKind: 'authorization',
-      action: 'incident.lift',
-      resourceId: input.scope,
-      decision: 'allow',
-      result: 'success',
-      metadata: { phase: 'incident-lift', scope: input.scope, tenantId: input.tenantId ?? null, reason: input.reason, previouslyFrozen: existed, broadcastOk },
-    });
+    let evidenceRecorded = true;
+    let eventSeq: number | undefined;
+    try {
+      const event = this.eventLog.append({
+        tenantId: input.scope === 'global' ? '' : input.tenantId!,
+        principal: input.actor,
+        actor: input.actor,
+        actorKind: 'authorization',
+        action: 'incident.lift',
+        resourceId: input.scope,
+        decision: 'allow',
+        result: 'success',
+        metadata: { phase: 'incident-lift', scope: input.scope, tenantId: input.tenantId ?? null, reason: input.reason, previouslyFrozen: existed, broadcastOk },
+      });
+      eventSeq = event.seq;
+    } catch {
+      // The unfreeze event itself was recorded before the state cleared; this
+      // is only the aggregate bookkeeping event.
+      evidenceRecorded = false;
+    }
     return {
       scope: input.scope,
       ...(input.tenantId ? { tenantId: input.tenantId } : {}),
@@ -477,7 +515,8 @@ export class IncidentService {
       capabilitiesRevoked: 0,
       sessionsRevoked: 0,
       broadcastOk,
-      eventSeq: event.seq,
+      evidenceRecorded,
+      ...(eventSeq !== undefined ? { eventSeq } : {}),
     };
   }
 

@@ -249,7 +249,8 @@ asks for them.
   shared (`evaluation-error`) with a `ponytail:` marker; alert routing and
   rate limiting are deployment concerns; an induced fault remains an accepted
   DoS — now loud, bounded, and recoverable.
-- Branch: work landed in `main`'s working tree; audit follow-up below.
+- Branch: committed on `fix/h15-audit-follow-ups` as `bae96bb` (H15 +
+  audit follow-ups; pre-commit gate green); merge to `main` pending.
 
 ## Audit follow-up (2026-10-02)
 
@@ -279,3 +280,4 @@ The same-day session audit
 - **08:** `queryAudit`'s clock-fault branch gained its test.
 
 Suite: 24 cases (19 + 5 regressions). Gate re-run green (622/603/0/19).
+All 8 tickets resolved in `bae96bb`; the audit record is committed with them.

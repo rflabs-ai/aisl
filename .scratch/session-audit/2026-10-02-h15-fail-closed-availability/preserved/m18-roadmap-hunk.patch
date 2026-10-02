@@ -1,0 +1,78 @@
+diff --git a/ROADMAP.md b/ROADMAP.md
+index fef2cf5..74ee4f5 100644
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -148,7 +148,11 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[
+   canary halt. **H13 [DONE]** (ADR-026) — incident response: tenant/global
+   kill switch (freeze + revoke-all, `incident-frozen`), multi-writer
+   revocation channel with bounded cross-node propagation, and paged evidence
+-  preservation (`asl-incident-bundle`) + reconstruction. Next: H15. The
++  preservation (`asl-incident-bundle`) + reconstruction. **H15 [DONE]**
++  (ADR-027) — fail-closed availability: per-dependency fault injection with
++  distinct reasons, observed health + loud transitions, clock guard, the
++  degraded-mode matrix, and the decision-latency budget. Next: H14
++  (continuous adversarial evaluation) or any remaining H2–H9/H11 item. The
+   remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after it
+   clears.
+ 
+@@ -387,7 +391,7 @@ unchanged.
+ - **Residual risk:** unknown-unknown attacks.
+ - **Class:** MVP/HA.
+ 
+-### H15 — Fail-closed availability engineering **[NEXT]**
++### H15 — Fail-closed availability engineering **[DONE]** (ADR-027)
+ 
+ - **Attack surface:** the failure modes of the safety mechanisms themselves.
+ - **Failure modes:** a broken policy engine, a full disk, or a closed evidence
+@@ -405,6 +409,42 @@ unchanged.
+   service. That is the accepted trade; make it loud, bounded, and recoverable.
+ - **Class:** MVP/E.
+ 
++**Closed (ADR-027):** `src/health.ts` (`HealthState` + `ClockGuard`) plus
++chokepoint edits in `src/pdp.ts`, `src/incident.ts`, and `src/rest-api.ts`.
++The degraded-mode matrix is explicit and deny-only: IdP unreachable
++(`idp-unavailable`, unchanged), store unavailable (`store-unavailable` for the
++typed backend error / `evidence-write-failure` for any other failed write),
++engine broken (`evaluation-error`), clock fault (`clock-unavailable`, new — a
++stalled/backward/unreadable clock must not silently extend authority).
++`HealthState` observes what the decision path experiences (append, engine
++call, clock read) and emits **one loud signal per transition** — down and
++recovery — via `process.emitWarning` instead of one warning per denied
++decision. `ClockGuard` is lenient by default (throw/non-finite only) and
++enables stall/backward detection only with an injected monotonic reference, so
++deterministic test clocks keep working (M10 false-denial budget). Two
++ordering defects closed: `issue()` records the issuance event **before**
++registering the capability (a store outage refuses the mint; no unaudited
++authority), and `unfreeze` records evidence before clearing the freeze while
++revoke/freeze apply first and report missed evidence — safety changes that
++widen record evidence first; narrowing changes apply first. `revokeAll`
++completes the kill switch past per-capability evidence failures;
++`IncidentService.engage` completes local enforcement during a store outage and
++reports `evidenceRecorded: false`. `GET /healthz` gains `{ idp, store, engine,
++clock }` when a `HealthState` is wired (M14 shape unchanged otherwise). The
++benchmark measures `authorize()` p99 with and without persistence (advisory
++SLO rows; ~1.6 ms vs ~0.2 ms in-process). Rate limiting stays deployment
++territory (reverse proxy, DEPLOYMENT.md) — the M14 named non-goal resolved.
++Tests-first: `tests/h15-fail-closed-availability.test.ts` (24; 19 initial + 5
++audit-follow-up regression cases) — the 2026-10-02 session audit closed 1
++must-fix (the broadcast-sync hook bypassed the clock guard, crashing
++`authorize`/`issue` on a clock fault in production wiring), 3 should-fix, and
++4 nits; see the prompt's audit-follow-up record. Residuals per
++ADR-027: in-memory health resets to `ok` on restart (re-marked on the next
++observed fault); clock trend detection needs the embedder's monotonic wiring;
++the engine-fault reason stays shared with other evaluation errors. The
++ROADMAP residual — an induced fault is a DoS — is unchanged and accepted,
++now loud, bounded, and recoverable.
++
+ ---
+ 
+ ## Stage 3 — VERY HARD (high-assurance engineering)
+@@ -446,7 +486,7 @@ rationale (why the client's own core promise requires it).
+ | Milestone | Client | Why structurally necessary | Gate | Status |
+ | --- | --- | --- | --- | --- |
+ | M17 | control-plane | its "external verification decides" thesis rests on a writable JSONL log with zero sandboxing — anchoring + capability-gated dispatch close H11/H13 exposure without changing its semantics | none unshipped (M4 flow + M14 API + M16 sandbox all landed) | **[DONE]** |
+-| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 [DONE] (ADR-025) — the gate is cleared; raven's updater consumes `verifyUpdate`/`applyUpdate`; kickoff 2026-10-01 — prompt at `PROMPTS/M18-federation-project-raven.md` (discovery: raven's upgrade is copy-sync with no verification, builder is headless OpenCode via a systemd path unit) | **[ ]** |
++| M18 | project-raven | self-building always-on agent: unsigned self-update is RCE by design (H12 — H10 signed builds [DONE], the manifest is the update-verification primitive); static device key (H2); unattended fail-closed (H13/H15) | H12 [DONE] (ADR-025) — the gate is cleared; raven's updater consumes `verifyUpdate`/`applyUpdate`; kickoff 2026-10-01 — prompt at `PROMPTS/M-Track/M18-federation-project-raven.md` (discovery: raven's upgrade is copy-sync with no verification, builder is headless OpenCode via a systemd path unit) | **[ ]** |
+ | M19 | home-agent | web→model→shell injection path (H4); unclassifiable personal-data egress (H7); LSM memory tamper-evidence (H11) | M13 machinery exists | **[ ]** |
+ | M20 | engineering-OS | retire its regex-gated evidence log into ASL's signed EventLog — two evidence planes is the failure mode to avoid | M17 anchor pattern | **[ ]** |
+ 

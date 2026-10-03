@@ -1909,3 +1909,140 @@ need per-dependency alerting — trigger: a real on-call rotation complaining`).
 stream; a health event in the signed event log (currently the loud signal is
 process warnings + `/healthz`, deliberately outside the evidence chain to keep
 fault storms from flooding the chain); split `engine-unavailable` if needed.
+
+---
+
+## ADR-028: Short-lived credentials — enforce at the verification seam; workload identity is derived (H2)
+
+**Context:** H2. ROADMAP names the credential failure modes: a leaked
+long-lived token; clock skew extending life; a credential left in a crash dump
+or an event payload. Test methodology: expiry fuzzing, credential-in-log
+scanning, revocation-propagation tests. `IdentityProvider.verifyToken`
+(`src/identity.ts`) is the single credential-accepting seam: `jose` verifies
+signature/iss/aud and `exp` when present, produces an `AuthContext`, and the
+PDP's one guard (`isAuthenticated`) rejects expired or missing auth (M2).
+REST clients present IdP bearer tokens; the federation client's token lives in
+a long-lived secrets posture (M17). H13 built the cross-node revocation channel
+but it carries only capability/session/freeze records. Four gaps surfaced at
+seam-mapping:
+
+1. **No lifetime ceiling.** A correctly signed token with a year-long `exp` is
+   accepted — ASL has no opinion on how long a credential may live. `exp - iat`
+   is never inspected; an `exp`-less token skips jose's expiry check and only
+   fails later at the PDP; a `jti`-less token is unrevecable.
+2. **The skew tolerance is silently ignored.** `verifyOptions.clockToleranceSec`
+   is not a `jose` option (`jose` expects `clockTolerance`), so the configured
+   30 s default has never applied — effective tolerance is 0, and the config
+   has no upper bound. TM-005's "clockTolerance is bounded" describes a config
+   that does not work.
+3. **Workload identity inherits the human's credential shape.**
+   `IdentityProvider.sessionAgent` reuses the human's full `AuthContext`
+   verbatim: the agent principal carries the human's `jti`, the full JWT
+   payload in `claims`, and the human's full validity. There is no workload
+   ceiling and no explicit derivation record.
+4. **Token revocation is per-process in-memory only** (`revokedTokens` Set). A
+   revoked token stays valid on every other node (and on this node after
+   restart).
+
+**Decision:** Short-lived credentials are enforced as a **verification
+contract** at the single credential seam — ASL remains a verifier, never a
+token issuer — and workload identity is derived, capped, and claim-minimal.
+Zero new runtime dependencies (`jose` only).
+
+1. **Admission contract (`validateTokenClaims`, pure + exported).** An accepted
+   token MUST carry: `exp` finite number (seconds), `iat` finite number, `jti`
+   non-empty string, `sub` non-empty string; lifetime `exp - iat > 0` and
+   `<= maxTokenLifetimeSec` (default 3 600 s = 1 h; the configured ceiling is
+   itself capped at 86 400 s = 24 h so "short-lived" cannot be configured
+   away); `iat` not in the future beyond `clockToleranceSec`; not expired
+   beyond tolerance. Missing/ill-typed claims return `undefined` — the same
+   fail-closed value as a bad signature (REST stays
+   `unauthenticated-principal`; no oracle). Internal rejection codes
+   (`claims-lifetime-exceeds-ceiling`, …) exist for tests/operators and never
+   carry claim values.
+2. **Bounded tolerance, actually wired.** Fix the drift: pass `jose`'s real
+   `clockTolerance` option from the same bounded config (default 30 s, hard
+   cap 60 s; a config outside the bound throws `IdentityConfigError` at
+   construction). Total accepted life is therefore
+   `min(declared lifetime, maxTokenLifetimeSec) + clockToleranceSec`.
+   Authenticated NTP stays the assumption; the H15 `ClockGuard` stays the
+   PDP-side stall/backjump detector.
+3. **Workload identity is derived, never a global credential.**
+   `IdentityProvider.workloadAuth(parent, workloadId, now, { maxLifetimeSec?
+   = 900 })` mints an `AuthContext` from an already-verified parent with a
+   distinct `subject`, `tokenId = wl:<workloadId>:<parentJti>` (derivation
+   lineage), `issuedAt = now`, `expiresAt = min(parent.expiresAt, now +
+   ceiling)`, `amr: []`, `claims: {}` (never the parent's raw payload), and an
+   explicit `derivedFrom` marker. `sessionAgent` routes through it: an agent
+   cannot outlive the launching session or the workload ceiling and cannot
+   carry the human's payload. The PDP guard is unchanged — a derived context
+   still has to be unexpired.
+4. **Revocation propagates on the H13 channel.** New `revoke-token` record
+   action. `IdentityProvider.attachRevocationFeed(feed)` pulls records on each
+   `verifyToken` with its own monotonic cursor (throttled, default 1 s, forced
+   on first call) and adds `targetId` to the revoked set —
+   `IncidentService.revokeToken(jti, tenantId, reason, actor)` applies
+   local-first when an `identity` (`TokenRevoker`) is wired, then publishes,
+   then audits (`incident.revoke`); `applyRecord` routes incoming
+   `revoke-token` records to the local IdP when wired. Because `jti` is
+   required, every accepted credential has a revocation handle; propagation is
+   bounded by the poll interval (H13's ≤ 5 s target), and a node that has not
+   synced still rejects what it revoked locally.
+5. **Credential hygiene.** The raw token string is never stored on
+   `AuthContext`; derived contexts carry no parent payload; event metadata
+   carries only the `jti` identifier (like session ids today); rejection
+   reasons and config errors carry limit numbers, never claim values. Tests
+   scan the full event log for the raw token on both success and failure
+   paths.
+
+**Alternatives:**
+- **ASL as a local token issuer / client-credentials broker.** Rejected:
+  creates a second trust root and a key-custody problem where the IdP already
+  is the issuer; ASL verifies, it does not mint identity (ADR-022: "ASL never
+  mints authority itself").
+- **SPIFFE/SPIRE workload identity (ADR-016's deferred path).** Still
+  deferred: requires attestation infrastructure, not a zero-dependency
+  change; named in the H2 skip list. Derived workload identity closes the
+  "global credential" gap without pretending to be platform attestation.
+- **mTLS / `private_key_jwt` client authentication.** Transport/IdP-side
+  work; skip list.
+- **IdP introspection per request (RFC 7662).** A network hop on the
+  verification path and an availability coupling; the H13 channel already
+  gives bounded propagation.
+- **Clamp tolerance to zero (today's effective behavior).** Rejected: real
+  deployments have clock skew; a bounded 30 s default (60 s cap) is standard
+  and now actually applied. The lifetime ceiling is unaffected by tolerance.
+- **Tenant-scoped token revocation.** A `jti` has no tenant until principal
+  resolution; the trust domain is the IdP issuer/audience, so a `revoke-token`
+  record applies deployment-wide. The record's `tenantId` is coordination and
+  evidence metadata.
+- **Require `auth_time`/MFA on workloads.** Wrong axis: approvals already
+  require an authenticated MFA human; workloads never approve.
+
+**Reasoning:** The verifier decides what it honors, regardless of what the IdP
+is willing to issue. A short ceiling makes leakage bounded; a revocation
+channel makes the residual window interruptible; a bounded skew makes both
+claims true rather than aspirational; a derived workload identity keeps
+non-human principals from inheriting human credential material. The mechanism
+is deliberately verification-side: no new trust root, no IdP changes, no new
+dependencies. Honest boundary: an attacker who can forge tokens with a
+compromised IdP key is unaffected by this ADR (M2's accepted trade).
+
+**Residual risk (ponytail):** the window of validity (≤ 1 h default) and
+in-memory exposure during token processing are the ROADMAP residuals; an
+attacker holding a valid short-lived token can replay it until expiry unless
+its `jti` is revoked; revocation is poll-based (a channel outage widens the
+window but never extends a token's own expiry); the revoked set is in-memory
+per process (the Postgres channel records are the durable coordination path,
+replayed through the feed cursor on nodes that attach it); `jti`/`sub`/`iat`
+are now required claims, so an IdP that omits them needs configuration
+(`ponytail: strict claim contract; add a configurable claims profile if a
+real IdP cannot supply exp/iat/jti/sub — trigger: a deployment whose IdP
+cannot`); IdP-side issuance (client-credentials flows for services) is
+deployment configuration, not ASL code.
+
+**Future migration path:** SPIFFE/SPIRE or platform workload attestation when
+infrastructure exists; durable per-token revocation storage (the Postgres
+channel is the current answer); introspection / CAEP push for sub-second
+revocation; hardware-backed IdP keys (ADR-016); pin the JWKS source (TM-005
+residual).

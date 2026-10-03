@@ -1,4 +1,4 @@
-Status: open
+Status: resolved (db2a93a)
 Source: session-audit 2026-10-03 (H2 short-lived credentials, branch feat/h2-short-lived-credentials)
 
 ## What's wrong

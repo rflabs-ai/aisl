@@ -1,0 +1,45 @@
+PROBE claims | exp === iat (zero lifetime)                    | ok=false reason=claims-lifetime-not-positive
+PROBE claims | exp < iat (inverted)                           | ok=false reason=claims-lifetime-not-positive
+PROBE claims | exp === now (exactly)                          | ok=true
+PROBE claims | exp === now - tolerance (exactly)              | ok=true
+PROBE claims | exp === now - tolerance - 1ms                  | ok=false reason=claims-expired
+PROBE claims | iat === now + tolerance (exactly)              | ok=true
+PROBE claims | iat === now + tolerance + 1s                   | ok=false reason=claims-issued-in-future
+PROBE claims | missing jti                                    | ok=false reason=claims-missing-jti
+PROBE claims | empty jti                                      | ok=false reason=claims-missing-jti
+PROBE claims | non-string jti                                 | ok=false reason=claims-missing-jti
+PROBE claims | missing sub                                    | ok=false reason=claims-missing-sub
+PROBE claims | empty sub                                      | ok=false reason=claims-missing-sub
+PROBE claims | string exp                                     | ok=false reason=claims-missing-exp
+PROBE claims | NaN exp                                        | ok=false reason=claims-missing-exp
+PROBE claims | Infinity exp                                   | ok=false reason=claims-missing-exp
+PROBE claims | lifetime === ceiling (3600)                    | ok=true
+PROBE claims | lifetime === ceiling + 1                       | ok=false reason=claims-lifetime-exceeds-ceiling
+PROBE claims | huge exp/iat within lifetime but future-issued | ok=false reason=claims-issued-in-future
+PROBE config | clock 0 / max 1                          | accepted
+PROBE config | clock 60 / max 86400 (caps inclusive)    | accepted
+PROBE config | clock 61                                 | IdentityConfigError
+PROBE config | clock -1                                 | IdentityConfigError
+PROBE config | max 0                                    | IdentityConfigError
+PROBE config | max 86401                                | IdentityConfigError
+PROBE config | clock NaN                                | IdentityConfigError
+PROBE workload | tokenId=wl:agent:summarizer:parent-jti-9 subject=agent:summarizer
+PROBE workload | expiresAt=1700000900000 issuedAt=1700000000000 amr=[] claims={}
+PROBE workload | derivedFrom={"subject":"user:human","tokenId":"parent-jti-9"}
+PROBE workload | short parent expiry keeps 1700000001000
+PROBE workload | expired parent -> derived.expiresAt=1699999999999 (already expired)
+PROBE workload | custom ceiling 86400 ok, 86401 throws; empty id / 0 ceiling throw
+PROBE mfa | hasMfa(parent)=true hasMfa(derived)=false
+PROBE mfa | session creation: parent ok, derived throws (requires MFA)
+Γ£ö probe: validateTokenClaims edge matrix (1.4245ms)
+Γ£ö probe: config bounds (ceiling caps, clock skew cap) (0.4564ms)
+Γ£ö probe: workloadAuth shape and clamping (0.9989ms)
+Γ£ö probe: MFA consumers on derived workload auth (0.3937ms)
+Γä╣ tests 4
+Γä╣ suites 0
+Γä╣ pass 4
+Γä╣ fail 0
+Γä╣ cancelled 0
+Γä╣ skipped 0
+Γä╣ todo 0
+Γä╣ duration_ms 105.4206

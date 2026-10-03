@@ -1,6 +1,7 @@
 # M18 — Federation: project-raven as a client (ADR-022)
 
-Status: [ ] — kickoff written 2026-10-01 (discovery session). Gate cleared:
+Status: [ ] — Phase 0 landed (ADR-029, 2026-10-03); executing Phase 1 (verified
+self-update). Kickoff written 2026-10-01 (discovery session). Gate cleared:
 H10 (ADR-024) and H12 (ADR-025) landed, so raven's self-update has a
 verification primitive to adopt. Like M17, M18 is implemented ~90% in the
 client repo; the ASL side is consume-only — REST gaps come back as tickets,
@@ -8,10 +9,11 @@ never as silent scope growth.
 
 Baseline: M14 REST (`/v1/authorize`, `/v1/sessions`,
 `/v1/capability-requests`, `/v1/audit`, `/v1/tasks`, `POST /v1/anchors`) and
-the M16 sandbox lifecycle exist. H2 (short-lived creds) and H8 (cross-tenant)
-are **not** done; ADR-022 gates non-personal tenants on H8. H13 (kill switch,
-ADR-026) and H15 (fail-closed availability, ADR-027) are **landed** — the
-stated dependencies of an unattended always-on agent are satisfied.
+the M16 sandbox lifecycle exist. H2 (short-lived creds, ADR-028) is **landed**;
+H8 (cross-tenant) is **not** done and ADR-022 gates non-personal tenants on
+it. H13 (kill switch, ADR-026) and H15 (fail-closed availability, ADR-027) are
+**landed** — the stated dependencies of an unattended always-on agent are
+satisfied.
 
 ## Discovered (2026-10-01, read-only)
 
@@ -32,11 +34,16 @@ user-level units, bash entry scripts, swappable brain. Relevant facts:
 - Raven's own tracker frontier: 19 (voice), 20 (brain-switch, shipped), 21
   (builder headless), 22 (resilience drill).
 
-## Phase 0 — ADR-028 (docs only, to be written at execution)
+(Status 2026-10-03: the builder is sandboxed by ticket 23 and hosts sync via
+the `win` git remote per ticket 24 — see ADR-029 for the executed design.)
 
-Note: H13 (ADR-026) and H15 (ADR-027) landed first, so M18's ADR number
-shifted from the kickoff note's 026 to 028 (027 was taken by H15 on
-2026-10-02).
+## Phase 0 — ADR-029 (landed 2026-10-03)
+
+Note: H13 (ADR-026), H15 (ADR-027), and H2 (ADR-028) landed first, so M18's
+ADR number shifted from the kickoff note's 026 to 029. The decisions below are
+resolved in ADR-029 (DECISIONS.md): local verification before the reset
+(descriptor committed in-tree), no new REST sandbox route (YAGNI), device
+principal with the ADR-028 credential upgrade path, offline-first.
 
 M18 needs decisions the current code cannot settle:
 

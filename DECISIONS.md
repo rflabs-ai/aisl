@@ -2046,3 +2046,102 @@ infrastructure exists; durable per-token revocation storage (the Postgres
 channel is the current answer); introspection / CAEP push for sub-second
 revocation; hardware-backed IdP keys (ADR-016); pin the JWKS source (TM-005
 residual).
+
+---
+
+## ADR-029: M18 federation — project-raven: local verified update, sandbox-local self-build, device principal, offline-first
+
+**Context:** M18. Raven is an always-on agent (WSL VM today, Pi later) whose
+`raven-builder.path` triggers a headless OpenCode self-build on a
+`builder/<ts>` branch inside a systemd sandbox (tickets 21/23: `conf/` and
+`secrets/` hidden, `memory/` read-only, integrity manifest, timeout, never
+`main`). Its upgrade path has **no network remote**: hosts sync from the
+Windows checkout through a local `win` remote
+(`git fetch win && git reset --hard win/main && git clean -fd`) with **no
+verification of what is fetched** — the exact RCE path ADR-022 names. Raven
+has zero ASL contact points today. H10/H12 (signed manifest + update
+descriptor, anti-rollback), H13/H15 (kill switch, degraded modes), and H2
+(ADR-028: verification-seam credential contract) have landed. Raven is a
+personal tenant, so ADR-022's H8 gate does not apply.
+
+**Decision:** Four parts; the ASL side stays consume-only (issuing tooling
+only, no new REST surface).
+
+1. **The update check runs locally, before `reset --hard`; ASL is the issuing
+   plane.** At release points the operator issues a signed update descriptor
+   (H12 format) embedding the H10 build manifest (source `treeDigest`, SBOM
+   digest, gate fields) for raven's tree, and commits it **into the tree it
+   describes** (descriptor path excluded from the digest, like `artifacts/` in
+   ASL). The descriptor therefore distributes atomically with the commit via
+   the existing `win` fetch — no new distribution channel. Raven's upgrade
+   flow becomes: `git fetch win` → compute the tree digest **of the fetched
+   `win/main` commit** (`git ls-tree`, blob SHAs — no checkout) → verify the
+   descriptor signature against the release public key pinned in `conf/env`
+   (`RAVEN_UPDATE_PUBKEY`), the descriptor→manifest chain, the manifest gate
+   fields, the digest match, and the anti-rollback high-water mark
+   (`run/update-state.json`) → only then `reset --hard` + `git clean -fd`.
+   Any failure refuses the update and leaves the running tree untouched
+   (fail closed; logged loudly). Node is required for verification (present
+   where the builder runs); a host without it refuses updates until
+   provisioned — never silently skips the check.
+2. **Self-build stays sandbox-local; no new ASL REST sandbox route.** The
+   ticket-23 systemd sandbox is the M16-equivalent constraint set. Phase 2
+   adds local, reviewer-readable evidence to `run/builder.log` (task digest,
+   before/after tree state, exit) — an ASL anchor of builder evidence is
+   deferred until raven actually calls an ASL feature (M17-pattern anchoring
+   when the thin client lands; the prompt's skip list already names the REST
+   sandbox-exec route).
+3. **Raven's principal: one tenant, `device:raven-<host>`, and no ASL
+   credential is needed for the update path (it is fully local).** When the
+   first ASL-calling feature lands, raven registers as that device principal
+   and presents IdP-issued short-lived bearer tokens satisfying ADR-028's
+   admission contract; until the IdP client-credentials flow exists
+   (ADR-028's skip list / deployment work), a static device secret is the
+   documented residual — the federation table already flags "static device
+   key (H2)". No authority without a human: the builder never merges
+   (`builder/` branches are reviewed), and updates apply only whole-tree
+   states from the human-controlled Windows checkout.
+4. **Offline-first, never brick.** The update path makes no ASL call, so ASL
+   availability cannot affect it; verification failure stops the update, not
+   the agent (H15's degrade-loudly shape at raven scale). Future
+   ASL-dependent features follow the same rule: unavailability blocks only
+   that feature, loudly.
+
+**Alternatives:**
+- **ASL returns a verification verdict over REST.** Rejected: the tree check
+  must run against the host's fetched tree; a remote verdict about an unseen
+  tree is faith, not verification. It would also add an availability coupling
+  for zero benefit — raven has no ASL contact today.
+- **Copy-sync with checksums.** Rejected: checksums are integrity, not
+  authenticity — the exact gap ADR-022 names.
+- **Signed git tags / `git verify-commit`.** Considered: reuses git's own
+  machinery, but bolts a second signing-key system onto a pipeline whose
+  release artifacts are already ASL manifests (treeDigest/SBOM/gate fields),
+  and raven fetches from a local checkout, not a tag-pushing remote. Not
+  chosen; revisit if a network remote appears.
+- **ASL-hosted release channel (raven pulls descriptors from ASL).** Rejected:
+  no network remote exists today; a descriptor committed in-tree is atomic
+  with the tree it describes and survives offline.
+- **Wire ASL anchor for builder evidence now.** Rejected (YAGNI): no client
+  calls one; the local reviewable log is the evidence until the thin client
+  lands.
+
+**Reasoning:** One trust anchor (the release key) and one parity contract (the
+tree-digest canonical form). The digest is computed where the tree lands; the
+descriptor travels with the tree; the refusal is fail-closed; the running
+agent is never bricked. Everything else — ASL anchors, workload credentials,
+ASL dispatch — is deliberately deferred until raven actually calls ASL.
+
+**Residual risk (ponytail):** the release key sits in raven's `conf/env`
+(host compromise = key compromise; ADR-008/ADR-025 custody is the upgrade);
+descriptor-in-tree means a repo writer without the release key cannot produce
+a verifiable release (intended), while a compromised Windows checkout plus a
+stolen key forges releases (the unchanged H10/H12 accepted trade); Node is a
+verification prerequisite on the host; the builder remains a self-edit lane
+whose control is human review of `builder/` branches plus the sandbox; Pi
+support is untested (WSL VM is the proven host).
+
+**Future migration path:** `git verify-commit`-style simplification or an
+ASL-hosted channel once a network remote exists; ADR-028 credentials when
+raven first calls ASL; M17-pattern anchoring of builder evidence; Pi
+verification parity; hardware-backed release keys (Stage 3).

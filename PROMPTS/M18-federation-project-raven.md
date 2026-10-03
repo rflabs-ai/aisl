@@ -9,9 +9,9 @@ never as silent scope growth.
 Baseline: M14 REST (`/v1/authorize`, `/v1/sessions`,
 `/v1/capability-requests`, `/v1/audit`, `/v1/tasks`, `POST /v1/anchors`) and
 the M16 sandbox lifecycle exist. H2 (short-lived creds) and H8 (cross-tenant)
-are **not** done; ADR-022 gates non-personal tenants on H8. H13/H15 (kill
-switch, fail-closed availability) are open and are stated dependencies of an
-unattended always-on agent.
+are **not** done; ADR-022 gates non-personal tenants on H8. H13 (kill switch,
+ADR-026) and H15 (fail-closed availability, ADR-027) are **landed** — the
+stated dependencies of an unattended always-on agent are satisfied.
 
 ## Discovered (2026-10-01, read-only)
 
@@ -32,10 +32,11 @@ user-level units, bash entry scripts, swappable brain. Relevant facts:
 - Raven's own tracker frontier: 19 (voice), 20 (brain-switch, shipped), 21
   (builder headless), 22 (resilience drill).
 
-## Phase 0 — ADR-027 (docs only, to be written at execution)
+## Phase 0 — ADR-028 (docs only, to be written at execution)
 
-Note: H13 landed first (ADR-026), so M18's ADR number shifted from the kickoff
-note's 026 to 027.
+Note: H13 (ADR-026) and H15 (ADR-027) landed first, so M18's ADR number
+shifted from the kickoff note's 026 to 028 (027 was taken by H15 on
+2026-10-02).
 
 M18 needs decisions the current code cannot settle:
 

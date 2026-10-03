@@ -48,7 +48,9 @@ export type RevocationAction =
   | 'revoke-caps'
   | 'revoke-sessions'
   | 'revoke-cap'
-  | 'revoke-session';
+  | 'revoke-session'
+  /** H2 (ADR-028): credential (jti) revocation; consumed by IdentityProvider feeds. */
+  | 'revoke-token';
 
 export interface RevocationInput {
   readonly action: RevocationAction;
@@ -66,6 +68,16 @@ export interface RevocationRecord extends RevocationInput {
 export interface ChannelHealth {
   readonly errors: number;
   readonly lastError?: string;
+}
+
+/**
+ * H2 (ADR-028): the IdentityProvider surface the incident service needs to
+ * apply credential revocations locally-first. Declared structurally so
+ * incident.ts does not import identity.ts.
+ */
+export interface TokenRevoker {
+  revokeToken(tokenId: string): void;
+  isTokenRevoked(tokenId: string): boolean;
 }
 
 /**
@@ -352,6 +364,12 @@ export interface IncidentServiceDeps {
   readonly clock?: () => number;
   /** Channel poll interval on the authorize path. Default 1000 ms (≤ 5 s target). */
   readonly syncIntervalMs?: number;
+  /**
+   * H2 (ADR-028): optional credential-revocation target. When wired,
+   * `revokeToken` applies locally before broadcasting and incoming
+   * `revoke-token` records revoke on this node's IdP too.
+   */
+  readonly identity?: TokenRevoker;
 }
 
 export class IncidentService {
@@ -362,6 +380,7 @@ export class IncidentService {
   private readonly channel: RevocationChannel;
   private readonly clock: () => number;
   private readonly syncIntervalMs: number;
+  private readonly identity: TokenRevoker | undefined;
   private cursor = -1;
   private lastSyncAt = Number.NEGATIVE_INFINITY;
   private syncFailures = 0;
@@ -375,6 +394,7 @@ export class IncidentService {
     this.channel = deps.channel;
     this.clock = deps.clock ?? Date.now;
     this.syncIntervalMs = deps.syncIntervalMs ?? 1_000;
+    this.identity = deps.identity;
     // The PDP pulls this on every authorize (throttled) and issue (forced).
     this.authorization.setBroadcastSync((force) => {
       this.sync(force);
@@ -556,6 +576,32 @@ export class IncidentService {
   }
 
   /**
+   * H2 (ADR-028): single-target credential (jti) revocation. Local enforcement
+   * first — an unavailable channel must not leave this node accepting a
+   * revoked token — then the channel record, then evidence (the signed log is
+   * the evidence of record; the channel row is coordination data). The record
+   * applies deployment-wide: a `jti` has no tenant until principal resolution,
+   * so `tenantId` is coordination/evidence metadata.
+   */
+  revokeToken(targetId: string, tenantId: string, reason: string, actor = 'system'): void {
+    if (!targetId || !tenantId || !reason) throw new IncidentInputError('revokeToken requires tokenId, tenantId, and reason');
+    const at = this.clock();
+    this.identity?.revokeToken(targetId);
+    this.eventLog.append({
+      tenantId,
+      principal: actor,
+      actor,
+      actorKind: 'authorization',
+      action: 'incident.revoke',
+      resourceId: targetId,
+      decision: 'allow',
+      result: 'success',
+      metadata: { phase: 'incident-revoke-token', tokenId: targetId, tenantId, reason },
+    });
+    this.channel.publish({ action: 'revoke-token', scope: 'tenant', tenantId, targetId, reason, at });
+  }
+
+  /**
    * Pull revocation-channel records into local state. Throttled unless
    * forced; the cursor only moves forward, and replay from -1 (a fresh node)
    * reconstructs freeze state and revocations.
@@ -592,6 +638,12 @@ export class IncidentService {
         return;
       case 'revoke-session':
         if (record.targetId) this.sessions.revoke(record.targetId);
+        return;
+      case 'revoke-token':
+        // H2 (ADR-028): idempotent with the IdentityProvider's own feed
+        // consumption; this path matters on nodes whose incident sync runs
+        // before the next verification.
+        if (record.targetId) this.identity?.revokeToken(record.targetId);
         return;
       default:
         this.authorization.applyIncidentRecord(record);

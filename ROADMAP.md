@@ -151,9 +151,15 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   preservation (`asl-incident-bundle`) + reconstruction. **H15 [DONE]**
   (ADR-027) — fail-closed availability: per-dependency fault injection with
   distinct reasons, observed health + loud transitions, clock guard, the
-  degraded-mode matrix, and the decision-latency budget. Next: H14
+  degraded-mode matrix, and the decision-latency budget. **H2 [DONE]**
+  (ADR-028) — short-lived credentials: an admission contract at the single
+  verification seam (required `sub`/`exp`/`iat`/`jti`, lifetime ceiling,
+  bounded and actually-wired clock tolerance — the jose option name was a
+  silent no-op), derived workload identity (`workloadAuth`/`sessionAgent`
+  capped and claim-minimal), and `jti` revocation propagated on the H13
+  channel. Next: H14
   (continuous adversarial evaluation) or any remaining H2–H9/H11 item. The
-  remaining ten (H2–H9, H11, H14) stay open [ ] until prioritized after it
+  remaining nine (H3–H9, H11, H14) stay open [ ] until prioritized after it
   clears.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
@@ -181,7 +187,7 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   (`tests/h1-signed-delegation.test.ts` + rewritten invariant 6). Residual:
   symmetric key (known-gap #4), no depth limit (cycles cannot escalate).
 
-### H2 — Short-lived credentials and workload identity — *structurally necessary at federation (ADR-022)*
+### H2 — Short-lived credentials and workload identity — *structurally necessary at federation (ADR-022)* **[DONE]** (ADR-028)
 
 - **Attack surface:** credential issuance, transport, storage in memory, reuse.
 - **Failure modes:** leaked long-lived token; clock skew extending life; credential
@@ -191,6 +197,19 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   fails if any event contains a known secret value); revocation propagation tests.
 - **Residual risk:** window of validity; in-memory exposure.
 - **Class:** E.
+- **Closed:** ADR-028 — the verification seam (`IdentityProvider.verifyToken`)
+  refuses any token without `sub`/`exp`/`iat`/`jti`, a positive lifetime within
+  `maxTokenLifetimeSec` (default 1 h, configured cap 24 h), and `iat`/`exp`
+  inside a clock tolerance that is bounded (default 30 s, cap 60 s) and now
+  actually wired into jose (the old `clockToleranceSec` key was silently
+  ignored). Workload identity is derived and capped
+  (`IdentityProvider.workloadAuth`; `sessionAgent` routes through it), never
+  the launching human's raw claims. `jti` revocation propagates on the H13
+  channel (new `revoke-token` record; `attachRevocationFeed`;
+  `IncidentService.revokeToken` local-first, CLI `incident revoke-token`).
+  Scan tests assert no raw token or payload canary reaches any event or error.
+  Residual: in-memory revoked set per process (Postgres channel is the durable
+  coordination path), poll-bounded propagation, SPIFFE/SPIRE still deferred.
 
 ### H3 — Policy evaluation under adversarial conditions
 

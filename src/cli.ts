@@ -1460,7 +1460,7 @@ async function updateCommand(): Promise<void> {
 
 /**
  * H13 incident-response commands (ADR-026):
- * `incident status|engage|lift|revoke-cap|revoke-session|preserve|report`.
+ * `incident status|engage|lift|revoke-cap|revoke-session|revoke-token|preserve|report`.
  *
  * The kill switch applies locally first and broadcasts through the revocation
  * channel (Postgres mode reaches a running node / other nodes). preserve and
@@ -1480,6 +1480,7 @@ async function incidentCommand(): Promise<void> {
     console.error('         incident lift   <tenant <id> | global> <reason...>');
     console.error('         incident revoke-cap <capabilityId> <tenantId> <reason...>');
     console.error('         incident revoke-session <sessionId> <tenantId> <reason...>');
+    console.error('         incident revoke-token <tokenId> <tenantId> <reason...>');
     console.error('         incident preserve <tenantId | *> <fromSeq> <toSeq> [outPath]');
     console.error('         incident report <tenantId | *> <fromSeq> <toSeq>');
     process.exitCode = 1;
@@ -1527,13 +1528,14 @@ async function incidentCommand(): Promise<void> {
       return;
     }
 
-    if (sub === 'revoke-cap' || sub === 'revoke-session') {
+    if (sub === 'revoke-cap' || sub === 'revoke-session' || sub === 'revoke-token') {
       const targetId = process.argv[4] ?? '';
       const tenantId = process.argv[5] ?? '';
       const reason = process.argv.slice(6).join(' ').trim();
       if (!targetId || !tenantId || !reason) return usage();
       if (sub === 'revoke-cap') world.incident.revokeCapability(targetId, tenantId, reason);
-      else world.incident.revokeSession(targetId, tenantId, reason);
+      else if (sub === 'revoke-session') world.incident.revokeSession(targetId, tenantId, reason);
+      else world.incident.revokeToken(targetId, tenantId, reason, operator);
       await world.incident.flush();
       // Mirror the engage branch: never print REVOKED as if it propagated
       // when the channel write failed (ADR-026 fail-loud).

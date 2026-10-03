@@ -27,14 +27,26 @@ import {
   type RevocationRecord,
 } from './incident.ts';
 
-const REVOCATION_ACTIONS: readonly RevocationAction[] = [
-  'freeze',
-  'unfreeze',
-  'revoke-caps',
-  'revoke-sessions',
-  'revoke-cap',
-  'revoke-session',
-];
+/**
+ * The action allowlist for the Postgres channel (H13 + H2). The `satisfies`
+ * makes a new `RevocationAction` union member a compile error until it is
+ * admitted here — the channel refuses unknown rows fail-closed (parse below).
+ */
+const REVOCATION_ACTIONS = Object.keys({
+  freeze: true,
+  unfreeze: true,
+  'revoke-caps': true,
+  'revoke-sessions': true,
+  'revoke-cap': true,
+  'revoke-session': true,
+  // H2 (ADR-028): credential (jti) revocation.
+  'revoke-token': true,
+} satisfies Record<RevocationAction, true>);
+
+/** Type predicate over the validated action vocabulary (narrows without a cast). */
+function isRevocationAction(value: string): value is RevocationAction {
+  return REVOCATION_ACTIONS.includes(value);
+}
 
 export const INCIDENT_MIGRATION: StoreMigration = {
   id: 4,
@@ -92,7 +104,7 @@ function parseChannelRow(row: ChannelRow): RevocationRecord {
   if (!Number.isInteger(seq) || seq < 0 || !Number.isInteger(at)) {
     throw new Error('revocation channel row is malformed: refusing to apply');
   }
-  if (!REVOCATION_ACTIONS.includes(row.action as RevocationAction)) {
+  if (!isRevocationAction(row.action)) {
     throw new Error('revocation channel row has an unknown action: refusing to apply');
   }
   if (row.scope !== 'tenant' && row.scope !== 'global') {
@@ -103,7 +115,7 @@ function parseChannelRow(row: ChannelRow): RevocationRecord {
   }
   return {
     seq,
-    action: row.action as RevocationAction,
+    action: row.action,
     scope: row.scope,
     ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
     ...(row.target_id !== null ? { targetId: row.target_id } : {}),

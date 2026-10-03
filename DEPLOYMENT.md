@@ -126,6 +126,19 @@ ingress. Its own in-process story is deliberately modest: it binds
   the resolver maps verified tokens onto — tokens decide *who*; the
   registration decides *what they may reach*. `X-*` identity headers are
   ignored by construction.
+- **Credential contract (H2, ADR-028):** the IdP must issue access tokens with
+  `sub`, `exp`, `iat`, and `jti`. ASL refuses anything else, refuses a declared
+  lifetime above `maxTokenLifetimeSec` (default 1 h; the configured ceiling is
+  capped at 24 h), and refuses `iat`/`exp` beyond a bounded clock tolerance
+  (default 30 s, hard cap 60 s) — keep NTP authenticated. Service/workload
+  clients use the IdP's short-lived issuance (client-credentials flow); a
+  long-lived static bearer token in a secrets file is refused at the seam.
+  Wire revocation across nodes: `IdentityProvider.attachRevocationFeed(channel)`
+  so `node src/cli.ts incident revoke-token <jti> <tenantId> <reason>` reaches
+  every node (Postgres channel across processes; in-memory is single-process).
+  Agent/workload identities derived in-process (`sessionAgent` →
+  `workloadAuth`) are capped at 15 minutes by default, drop the launching
+  human's claims/MFA methods, and still expire like any other auth.
 - **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }`, or
   `{ idp, store, engine, clock }` when the embedder wires a `HealthState`
   (H15) — wire your monitor to it; IdP `unreachable` or any dependency

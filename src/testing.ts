@@ -81,12 +81,16 @@ export interface MockIdP {
     readonly iat?: number;
     readonly jti?: string;
     readonly auth_time?: number;
+    /** H2: omit standard claims to exercise the admission contract (e.g. ['exp']). */
+    readonly omit?: readonly ('exp' | 'iat' | 'jti' | 'sub')[];
     readonly [key: string]: unknown;
   }): Promise<string>;
   /** Create an IdentityProvider configured to trust this mock IdP */
   createIdP(options?: {
     readonly jwksUri?: string;
     readonly algorithms?: readonly string[];
+    readonly clockToleranceSec?: number;
+    readonly maxTokenLifetimeSec?: number;
   }): Promise<IdentityProvider>;
   /** Get the JWKS public keys as a JWK Set */
   getJWKS(): Promise<{ readonly keys: readonly JWK[] }>;
@@ -127,26 +131,36 @@ export async function createMockIdP(issuer = 'https://idp.test.example.com', aud
     issuer,
     audience,
     async signJWT(claims) {
-      const { sub, amr, acr, jti, auth_time, exp, iat, ...rest } = claims;
-      const jwt = await new SignJWT({
+      const { sub, amr, acr, jti, auth_time, exp, iat, omit = [], ...rest } = claims;
+      const payload: Record<string, unknown> = {
         iss: issuer,
         aud: audience,
-        sub,
         amr: amr ?? ['pwd', 'mfa'],
         acr: acr ?? 'urn:mace:incommon:iap:silver',
-        jti: jti ?? `tok-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         auth_time: auth_time ?? Math.floor(Date.now() / 1000),
         ...rest,
-      })
-        .setProtectedHeader({ alg: 'RS256', kid: 'test-key-001' })
-        .setIssuedAt(claims.iat ?? Math.floor(Date.now() / 1000))
-        .setExpirationTime(claims.exp ? Math.floor(claims.exp / 1000) : '1h')
-        .sign(privateKey);
-      return jwt;
+      };
+      if (!omit.includes('sub')) payload.sub = sub;
+      if (!omit.includes('jti')) payload.jti = jti ?? `tok-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // Default exp is iat-relative (not wall-relative): the declared lifetime
+      // is exactly 3600s even if a second boundary is crossed between reads,
+      // so the H2 ceiling is not flaky.
+      const issuedAtSec = iat ?? Math.floor(Date.now() / 1000);
+      let jwt = new SignJWT(payload).setProtectedHeader({ alg: 'RS256', kid: 'test-key-001' });
+      if (!omit.includes('iat')) jwt = jwt.setIssuedAt(issuedAtSec);
+      if (!omit.includes('exp')) jwt = jwt.setExpirationTime(exp ? Math.floor(exp / 1000) : issuedAtSec + 3600);
+      return jwt.sign(privateKey);
     },
     async createIdP(options) {
       return new IdentityProvider(
-        { issuer, audience, jwksUri: options?.jwksUri ?? `${issuer}/jwks`, algorithms: options?.algorithms },
+        {
+          issuer,
+          audience,
+          jwksUri: options?.jwksUri ?? `${issuer}/jwks`,
+          algorithms: options?.algorithms,
+          clockToleranceSec: options?.clockToleranceSec,
+          maxTokenLifetimeSec: options?.maxTokenLifetimeSec,
+        },
         mockFetch,
       );
     },

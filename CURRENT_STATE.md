@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H15 — fail-closed availability (ADR-027).
+Honest snapshot. Updated after H2 — short-lived credentials (ADR-028).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -8,24 +8,26 @@ UI served by the M14 server, and the sandbox lifecycle — zero new runtime
 dependencies. H1 (ADR-023, signed delegation), H10 (ADR-024, supply-chain
 gate + signed build manifests), H12 (ADR-025, signed update channel with
 anti-rollback and sticky canary), H13 (ADR-026, kill switch + revocation
-channel + evidence preservation), and H15 (ADR-027, fail-closed availability:
-observed health, clock guard, degraded-mode matrix, latency budget) are the
+channel + evidence preservation), H15 (ADR-027, fail-closed availability:
+observed health, clock guard, degraded-mode matrix, latency budget), and H2
+(ADR-028, short-lived credentials: verification-seam lifetime ceiling, bounded
+skew, derived workload identity, channel-propagated jti revocation) are the
 landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
 Next frontier: H14 (continuous adversarial evaluation) or any remaining
-H2–H9/H11 item.
+H3–H9/H11 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~12,358 lines of source across 46 modules
+TypeScript foundation on Node 24, ~12,678 lines of source across 46 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, and
-`incident-store-pg.ts` are the latest additions), 622 tests
-(`tests/`, `security-tests/`; 603 pass, 19 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 653 tests
+(`tests/`, `security-tests/`; 634 pass, 19 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -381,12 +383,12 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 622 tests pass (603 green; 19 Postgres-mode tests skip without
+All 653 tests pass (634 green; 19 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1
 environment-gated skip, 0 fail). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -406,6 +408,8 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **H10 supply chain (20: SBOM deterministic + complete 2, pins 4, drift gate 5, tree digest 2, manifest sign/verify 5)**.
 | **H12 secure updates (20: descriptor signature 4, chain vs live tree 4, anti-rollback 3, rollout 3, grant 4, structural invariants 2)**.
 | **H13 incident response (37: acceptance + audit follow-ups 29 — unfreeze propagation and issuance-fence regressions, `revoke-cap` tenant scope, grant semantics; Postgres channel 7, of which 4 live, skip-clean without `DATABASE_URL`; import-cycle regression 1)**.
+| **H15 fail-closed availability (24: 19 acceptance — per-dependency fault matrix, recovery, false-denial pin, degraded mode, safety ordering, `/healthz` shape + structural no-secrets — plus 5 audit-follow-up regressions)**.
+| **H2 short-lived credentials (31: admission contract + 2000-case fuzz 8, end-to-end jose verification 6, workload derivation 6, revocation propagation 8, credential-in-log scanning 3)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -471,8 +475,14 @@ Ordered by severity.
 1. **IdP is a trust dependency.** A compromised IdP can issue valid tokens.
    The runtime cannot distinguish stolen tokens from legitimate ones (M2
    accepted tradeoff — ADR-016).
-2. **Token replay within the expiry window.** No revocation cache or token
-   blacklist. The IdP's token lifecycle is the control.
+2. ~~**Token replay within the expiry window.**~~ **H2 closed (ADR-028)**: the
+   verification seam refuses tokens without a bounded lifetime (`exp - iat`
+   ceiling, default 1 h) and a revocation handle (`jti`), and `jti` revocations
+   propagate across nodes on the H13 channel. Residual: a stolen valid token is
+   replayable inside its (short) window unless its `jti` is revoked;
+   revocation propagation is poll-bounded (1 s default); the revoked set is
+   in-memory per process (the Postgres channel is the durable coordination
+   path); SPIFFE/SPIRE workload attestation remains deferred.
 3. ~~**Event log is writable.**~~ **M3 closed**: per-event Ed25519 signatures,
    head-hash anchor file, append-only SQLite triggers, and offline verifier
    detect modification, deletion, recomputation, and tail truncation when the
@@ -1126,6 +1136,49 @@ disable the kill switch or leave a single-use capability unconsumed);
 "red-confirmed" wording, the prompt's Phase 1 constructor drift, and the
 PROJECT_CONTEXT module map are corrected; `queryAudit`'s clock-fault branch is
 tested. Tickets: `.scratch/session-audit/2026-10-02-h15-fail-closed-availability/`.
+
+## What H2 closed
+
+H2 was the short-lived-credentials milestone (ADR-028; zero new runtime
+dependencies, no new module). It did not change the decision model — the PDP's
+single authentication guard (`isAuthenticated`) is unchanged; what changed is
+which credentials are worth trusting and for how long.
+
+1. ~~**Leaked long-lived token.**~~ `IdentityProvider.verifyToken` now
+   enforces an admission contract: `sub`, `exp`, `iat`, and `jti` are required;
+   the declared lifetime (`exp - iat`) must be positive and at most
+   `maxTokenLifetimeSec` (default 1 h; the configured ceiling is capped at
+   24 h); a `jti` revocation is honored immediately (local set) and across
+   nodes (H13 `revoke-token` records consumed by `attachRevocationFeed`;
+   `IncidentService.revokeToken` applies local-first, publishes, and audits;
+   CLI `incident revoke-token`). A long-lived token is refused at the seam
+   even when its signature is perfect.
+2. ~~**Clock skew extending life.**~~ Clock tolerance is bounded (default
+   30 s, hard cap 60 s; a config outside the bound throws `IdentityConfigError`)
+   and — for the first time — actually applied: the old `clockToleranceSec`
+   option was silently ignored because jose expects `clockTolerance`. Tokens
+   issued beyond tolerance in the future are refused. Total accepted life is
+   bounded by `min(declared lifetime, ceiling) + tolerance`.
+3. ~~**Credential left in a crash dump or event payload.**~~ Workload identity
+   is derived, not inherited: `IdentityProvider.workloadAuth` (and
+   `sessionAgent` through it) mints a context with a distinct subject, a
+   derivation-linked token id (`wl:<workload>:<parent jti>`), `amr: []`,
+   `claims: {}`, and an expiry capped by the parent and a 15-minute default
+   workload ceiling. Raw JWTs are never stored on the context; tests scan the
+   full event log for a minted token and a payload canary on success and
+   failure paths.
+
+Tests: `tests/h2-short-lived-credentials.test.ts` (31 — admission contract +
+deterministic 2000-case expiry fuzz, end-to-end jose verification including
+the tolerance regression, workload derivation, cross-node revocation
+propagation, credential-in-log scanning). Written before the implementation;
+the red signal (missing module exports) is captured at `.scratch/h2/red.txt`.
+Residuals (ADR-028): window of validity (≤ 1 h default) and in-memory exposure
+during processing; a stolen valid token is replayable until expiry unless its
+`jti` is revoked; revocation propagation is poll-bounded; the revoked set is
+per-process in-memory; `jti`/`sub`/`iat` are now required claims (an IdP that
+omits them needs configuration); SPIFFE/SPIRE attestation remains HARD-stage
+(skip list).
 
 ## Watch-items from the M9 audit
 

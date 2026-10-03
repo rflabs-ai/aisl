@@ -15,7 +15,7 @@ implementation needed / external validation needed.
 | --- | --- | --- | --- | --- | --- | --- |
 | GV-01 policy & governance | this doc set | partial | no formal policy set, no owner | doc set + review records | written policies, review cadence | no |
 | ID-AM identity & authn | none | **absent** | no authentication at all | authn event log | OIDC + MFA (ADR-006) | yes, penetration test |
-| ID-AM-08 (service identities) | Principal kinds | design only | no workload identity | service authn events | workload identity | yes |
+| ID-AM-08 (service identities) | Principal kinds + derived workload identity (H2) | partial | SPIFFE/SPIRE attestation deferred (H2 skip list); derived workload contexts are in-process, not IdP-issued credentials | `tests/h2-short-lived-credentials.test.ts` (workload derivation + bounds); service IdP tokens are short-lived and revocable like any other | workload identity | yes |
 | PR-AA-01 least privilege | capabilities | implemented | operator scope discipline | capability issuance events | approval workflow | yes |
 | PR-AA-05 separation of duties | Approvals | implemented | no authenticated approver | approval records | M2 | yes |
 | PR-DS-01 confidentiality at rest | none | **absent** | no encryption at rest | encryption config | envelope encryption + KMS | yes |
@@ -51,10 +51,10 @@ implementation needed / external validation needed.
 
 | Pillar | Status | Gap |
 | --- | --- | --- |
-| Identity | absent | no IdP, no MFA, no device posture |
+| Identity | partial | OIDC + MFA (M2); short-lived revocation-capable tokens (H2); no device posture |
 | Device | absent | no device inventory or attestation |
 | Network | design only | no micro-segmentation or proxy |
-| Application/workload | partial | capabilities exist; no workload identity |
+| Application/workload | partial | capabilities + derived workload identity (H2); SPIFFE/SPIRE attestation deferred |
 | Data | partial | classification exists; no encryption or DLP |
 | Visibility & analytics | partial | events exist; no analytics or alerting |
 | Automation & orchestration | partial | decisions are automated; incident containment (freeze/revoke/broadcast/preserve) exists (H13); no analytics or alerting |

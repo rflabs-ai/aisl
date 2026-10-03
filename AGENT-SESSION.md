@@ -24,6 +24,69 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 35 — 2026-10-03 — opencode/h2-short-lived-credentials
+
+**Did:**
+- Executed H2 (ROADMAP Stage 2 — the federation-critical credential item) on
+  branch `feat/h2-short-lived-credentials`; Phase 0 commit `a5ec515`
+  (ADR-028, docs only), implementation + docs commit on the same branch.
+- **Phase 0:** ADR-028 in `DECISIONS.md` — short-lived credentials are a
+  verification contract at the single seam (`IdentityProvider.verifyToken`);
+  ASL stays a verifier, never a token issuer. Admission contract:
+  `sub`/`exp`/`iat`/`jti` required, declared lifetime within
+  `maxTokenLifetimeSec` (default 1 h, configured cap 24 h), bounded tolerance
+  (default 30 s, cap 60 s). Derived workload identity
+  (`workloadAuth`/`sessionAgent` capped, claim-minimal). `jti` revocation on
+  the H13 channel. Seam-mapping found the M2 tolerance config was silently
+  ignored (`clockToleranceSec` is not a jose option; `clockTolerance` is) —
+  fixed and regression-tested.
+- **Tests first:** `tests/h2-short-lived-credentials.test.ts` (31) written
+  before implementation; red captured at `.scratch/h2/red.txt` (missing
+  module exports → ESM link error).
+- **Implementation:** `src/identity.ts` (`validateTokenClaims` pure contract +
+  2 000-case deterministic fuzz; `IdentityConfigError`; bounded config;
+  `workloadAuth`; `attachRevocationFeed`; correct jose `clockTolerance`
+  wiring); `src/domain.ts` (`AuthContext.derivedFrom`); `src/incident.ts`
+  (`revoke-token` record action, `TokenRevoker`, local-first `revokeToken`,
+  `applyRecord` routing); `src/cli.ts` (`incident revoke-token`); `src/testing.ts`
+  (mock IdP `omit` support + config pass-through; iat-relative default expiry
+  so the ceiling boundary is not second-flaky).
+- **Docs:** ROADMAP H2 [DONE] + mechanism; CURRENT_STATE (header, intro,
+  counts ~12,678 lines / 653 tests, gap #2 closed, "What H2 closed");
+  SECURITY_CLAIMS Claim 37 (+ Claim 17 limitations updated); THREAT_MODEL
+  replay row; TM-005 attack paths/controls/residual; DEPLOYMENT credential
+  contract; COMPLIANCE service-identity + Zero-Trust rows; prompt stub
+  resolution.
+- **Gate:** `npm run typecheck` clean; `npm test` 653 / 634 pass / 0 fail /
+  19 Postgres-mode skips (baseline 622/603/19; +31 H2). No new runtime
+  dependencies; no `as any`/`as never`; no secrets in events/errors (scanned
+  by test).
+
+**Left:**
+- Merge to `main` pending (operator instruction: do not merge).
+- `benchmarks/results.json` remains modified in the working tree (not
+  committed, per the milestone-boundary convention).
+- Named H2 skip-list items (ADR-028): SPIFFE/SPIRE attestation,
+  mTLS/`private_key_jwt` client auth, IdP introspection/CAEP push, IdP-side
+  issuance changes.
+- M17's control-plane bearer token in the `data/secrets.json` posture is now
+  subject to the lifetime ceiling (default 1 h): the federation client must
+  switch to IdP client-credentials issuance — a cross-repo change, documented
+  in DEPLOYMENT.md.
+
+**Next session should:**
+- Read ADR-028 and SECURITY_CLAIMS Claim 37, then pick H14 (continuous
+  adversarial evaluation) or a remaining H3–H9/H11 item; M18's raven work is
+  no longer blocked on H2 (H2 [DONE]).
+
+**Evidence:**
+- Full gate: 653 tests / 634 pass / 0 fail / 19 skipped; pre-commit hook runs
+  the same gate.
+- Branch `feat/h2-short-lived-credentials`; ADR commit `a5ec515`,
+  implementation commit on this branch (hash recorded in the session report).
+
+---
+
 ### SESSION 34 — 2026-10-02 — opencode/h15-fail-closed-availability
 
 **Did:**

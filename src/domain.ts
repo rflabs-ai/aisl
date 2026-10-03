@@ -27,7 +27,8 @@ export const NON_AUTHORITY_KINDS: readonly PrincipalKind[] = ['model', 'tool', '
 
 /**
  * Authentication context: proof that this principal authenticated via a trusted
- * IdP. Produced ONLY by IdentityProvider.verifyToken (src/identity.ts).
+ * IdP. Produced ONLY by IdentityProvider.verifyToken or derived from a verified
+ * parent by IdentityProvider.workloadAuth (src/identity.ts).
  * M2 structural guarantee: the PDP rejects any principal whose auth field is
  * undefined.
  */
@@ -54,6 +55,14 @@ export interface AuthContext {
   readonly claims: Readonly<Record<string, unknown>>;
   /** When this token was verified by the runtime */
   readonly verifiedAt: number;
+  /**
+   * H2 (ADR-028): set when this context was derived from a verified parent
+   * (workload identity). Absent on IdP-verified contexts.
+   */
+  readonly derivedFrom?: {
+    readonly subject: string;
+    readonly tokenId: string;
+  };
 }
 
 export interface Principal {

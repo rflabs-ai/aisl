@@ -602,11 +602,14 @@ test suite covers signature verification, alg:none rejection, etc.
 
 **Test:** `tests/invariants.test.ts` invariant 13 (expired auth case).
 
-**Known limitations:** token replay within the expiry window is not detected
-by the runtime — the IdP's token lifecycle and revocation are the control.
+**Known limitations:** replay within a token's validity window is not detected
+— the IdP's token lifecycle and the H2 revocation channel are the control (H2
+bounds the window with a lifetime ceiling and adds `jti` revocation; see
+Claim 37).
 
-**Residual risk:** stolen valid tokens; IdP token lifetime exceeding the
-session lifetime.
+**Residual risk:** stolen valid tokens, bounded by the H2 lifetime ceiling and
+revocable by `jti`; a token lifetime exceeding the session lifetime; a
+compromised IdP signing key.
 
 ---
 
@@ -1862,5 +1865,83 @@ fault-tolerant `bookkeepingNow()` so a clock fault cannot disable the kill
 switch or leave a single-use capability unconsumed; `clockFaultDeny` recovers
 store health on its successful append; `queryAudit`'s clock-fault branch is
 tested. 5 regression cases added (suite: 24).
+
+---
+
+## Claim 37 — Only short-lived, revocable credentials are honored; workload identity is derived and claim-minimal (H2)
+
+**Claim:** `IdentityProvider.verifyToken` refuses any JWT that does not carry a
+non-empty `sub`, finite `exp` and `iat`, and a non-empty `jti`; a positive
+declared lifetime (`exp - iat`) at most `maxTokenLifetimeSec` (default 3 600 s
+= 1 h; the configured ceiling is itself capped at 86 400 s = 24 h); an `iat`
+no more than the clock tolerance in the future; and an `exp` no more than the
+tolerance in the past. The tolerance is bounded (default 30 s, hard cap 60 s —
+a config outside the bound throws `IdentityConfigError`) and is **actually
+applied**: the old `clockToleranceSec` option is not a `jose` option
+(`clockTolerance` is), so the configured tolerance had silently never applied
+before H2. Missing or ill-typed claims produce the same fail-closed result as
+a bad signature (no reason oracle to the caller). A revoked `jti` is rejected
+immediately on the local node and across nodes on the H13 revocation channel
+(`revoke-token` records consumed by `attachRevocationFeed` or routed by
+`IncidentService.applyRecord`; `IncidentService.revokeToken` applies
+local-first before broadcasting; CLI `incident revoke-token`). Workload
+identity is derived from an already-verified parent by
+`IdentityProvider.workloadAuth` (and `sessionAgent` through it): distinct
+subject, `wl:<workload>:<parent jti>` token id, `issuedAt` = now, expiry
+`min(parent.expiresAt, now + maxLifetimeSec)` (default 900 s), `amr: []`,
+`claims: {}`, explicit `derivedFrom`. Raw JWTs are never stored on an
+`AuthContext`; no event or error response contains a minted token or a token
+payload claim.
+
+**Mechanism:** `src/identity.ts` (`validateTokenClaims`; bounded config +
+admission check in `verifyToken`; `workloadAuth`; `attachRevocationFeed`; the
+jose `clockTolerance` wiring); `src/domain.ts` (`AuthContext.derivedFrom`);
+`src/incident.ts` (`revoke-token` record action, `TokenRevoker`,
+`IncidentService.revokeToken`, `applyRecord` routing); `src/cli.ts`
+(`incident revoke-token`). Zero new runtime dependencies (ADR-028).
+
+**Threat model:** TM-005 (token forgery/algorithm confusion — the lifetime and
+claim contract); ROADMAP H2 failure modes (leaked long-lived token, clock skew
+extending life, credential in a crash dump or event payload).
+
+**Assumptions:** the IdP includes `sub`/`exp`/`iat`/`jti` (RFC 9068 requires
+them for JWT access tokens) and issues short lifetimes; NTP with
+authentication; credential revocation rides the H13 channel (Postgres across
+processes, in-memory single-process).
+
+**Evidence:** `tests/h2-short-lived-credentials.test.ts` — 31 cases: admission
+contract (missing/ill-typed claims, non-positive lifetime, boundary ceiling,
+future `iat`, expired beyond tolerance) plus a deterministic 2 000-case expiry
+fuzz whose acceptance matches the declared predicate; end-to-end jose
+verification (1 h verifies, 2 h refused, missing claims refused, the tolerance
+regression — expired-by-10 s verifies, expired-by-45 s refused — future-issued
+refused, config bounds throw); workload derivation (workload cap, parent cap,
+empty claims/`amr`, derivation marker, expired parent denies
+`unauthenticated-principal`, custom ceiling, argument validation);
+revocation propagation (node A local-first rejection, node B via the feed, the
+`applyRecord` path, target-less records ignored, feed outage keeps verification
+available, REST 403 before principal mint); credential-in-log scanning (raw
+token and payload canary absent from events, responses, and errors on success
+and failure paths; no serialized `claims`).
+
+**Test:** `tests/h2-short-lived-credentials.test.ts`; the full gate
+(`npm run typecheck && npm test` — 653 tests / 634 pass / 0 fail / 19
+Postgres-mode skips).
+
+**Known limitations:** the revoked set is in-memory per process (the Postgres
+channel is the durable coordination path); revocation propagation is
+poll-bounded (1 s default); the window of validity (≤ 1 h default) and
+in-memory exposure during token processing are the ROADMAP residuals; a stolen
+valid token is replayable until expiry unless its `jti` is revoked; derived
+workload contexts are in-process values, not IdP-issued credentials, so they
+cannot cross a process boundary; SPIFFE/SPIRE attestation and
+mTLS/`private_key_jwt` client auth are the named H2 skip-list items; the
+ceiling applies to ASL as verifier — other consumers of the same IdP tokens
+are unaffected.
+
+**Residual risk:** a compromised IdP key can forge tokens this claim cannot
+distinguish from legitimate ones (M2's accepted trust dependency); clock skew
+is bounded, not eliminated; a channel outage delays revocation propagation (it
+never extends a token's own expiry).
 
 

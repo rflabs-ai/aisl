@@ -306,7 +306,11 @@ was left, and what the next session should pick up.
   Commits `7c30aad` (fix) + `de018c9` (tickets).
 - M18 kickoff written after read-only discovery of
   `C:\Users\<user>\projects\project-raven`:
-  `PROMPTS/M-Track/M18-federation-project-raven.md`. Findings: self-build is
+  `PROMPTS/M-Track/M18-federation-project-raven.md`. (Path superseded the
+  same day by chore `b0c6c8d`, "move M18 prompt to PROMPTS root, remove
+  M-Track": the prompt lives at `PROMPTS/M18-federation-project-raven.md`
+  until M18 is done. A stale working-tree half-reversal of that move was
+  diagnosed and undone on 2026-10-02 — see SESSION 34.) Findings: self-build is
   headless OpenCode via `raven-builder.path` + `bin/run-builder.sh` with
   `RAVEN_BUILDER_TASK`; self-update has no git remote — hosts are copy-synced
   with no verification (the RCE path ADR-022 names); raven has zero ASL

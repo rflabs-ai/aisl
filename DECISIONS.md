@@ -2145,3 +2145,147 @@ support is untested (WSL VM is the proven host).
 ASL-hosted channel once a network remote exists; ADR-028 credentials when
 raven first calls ASL; M17-pattern anchoring of builder evidence; Pi
 verification parity; hardware-backed release keys (Stage 3).
+
+---
+
+## ADR-030: Cross-tenant isolation — one probe over every surface; a v2 evidence key opens only for its tenant (H8)
+
+**Context:** H8 (ROADMAP Stage 2) is the federation gate (ADR-022): before any
+non-personal tenant joins, cross-tenant isolation must close or its residual be
+explicitly accepted per deployment. Much of the surface already exists — the
+PDP tenant guard (`resource.tenantId === principal.tenantId`, evaluated before
+policy), tenant-bound capabilities, tenant-scoped audit query/export and REST
+routes (M14/M17), and, in Postgres mode only, `FORCE ROW LEVEL SECURITY` plus
+per-tenant evidence keys (`evidence-key:v2:<tenant>:<level>`, M12). SQLite mode
+stays app-level. The shared PROCESS remains in both modes (known-gap #7):
+logical isolation only, one memory-safety bug crosses every boundary. Physical
+isolation (microVM/process-per-tenant) is Stage 3. What did not exist was one
+automated, table-driven cross-tenant probe over the whole current surface —
+and the probe finds two real gaps:
+
+1. **`AuthorizationService.revealEvidence` was not bound to the sealed key's
+   tenant.** A v2 keyId names its tenant, but `revealEvidence` derived only the
+   classification from the keyId and returned `open(sealed)`, dispatching the
+   key derivation on whatever `sealed.keyId` said. It lazily registered an
+   unknown keyId as a `'system'` resource under the CALLER's tenant. Capability
+   resource ids are opaque strings, so a tenant-A root could mint a capability
+   naming tenant B's keyId (`evidence-key:v2:B:<level>`); the tenant check then
+   saw a resource bound to A, the capability matched, and the HKDF derivation
+   from the keyId decrypted B's content. Probe-proven before the fix: an `acme`
+   auditor capability naming `evidence-key:v2:globex:confidential` read a
+   globex seal and bound the globex key to `acme` in the registry.
+2. **`CapabilityRequestService.approve`/`deny` had no reviewer-tenant
+   predicate.** The REST boundary checked it, so the HTTP surface was safe; the
+   in-process decision surface (the M4 service itself — an embedder API and the
+   guard's escalation lane) would let a tenant-B user approve a tenant-A
+   request and record a B reviewer on an A approval. Probe-proven before the
+   fix.
+
+**Decision:**
+
+1. **The milestone artifact is one reusable, table-driven cross-tenant probe**
+   (`tests/h8-cross-tenant-probe.test.ts`): every REST route (authorize,
+   sessions, capability requests, audit, tasks, anchors, healthz, static pages)
+   and every in-process query surface (audit query/export, event-store reads,
+   registry, sessions, capability requests, persistence). Each row asserts one
+   of: (a) isolation in both directions, (b) a log-scan property (no foreign
+   tenant marker or content in the caller's visible records or responses), or
+   (c) a named `global-by-design` exposure. Postgres-gated rows skip cleanly
+   without `DATABASE_URL`. A new tenant-facing surface MUST add a row; a
+   surface without a row is unproven.
+2. **Cryptographic isolation is key-binding at the evidence seam.** A v2 keyId
+   may only be decrypted by the tenant it names. `revealEvidence` refuses a
+   foreign keyId before any registration or authorization, records one clean
+   deny event in the caller's own tenant (without naming the foreign key), and
+   opens with `openFor(principal.tenantId, …)` as a second binding.
+   `tenantFromKeyId` is the new seal helper (`src/seal.ts`). Legacy
+   `evidence-key:<level>` seals keep their documented tenant-agnostic behavior
+   — no silent re-encryption.
+3. **Approval tenancy is enforced at the decision surface.** `approve`/`deny`
+   refuse a reviewer whose tenant differs from the request's, not only at the
+   HTTP boundary. The refusal is thrown before any event append, so a rejected
+   cross-tenant review writes nothing into the request's tenant log.
+4. **Named global-by-design surfaces** (never tenant-facing; no REST route
+   exposes them): the single evidence chain (`all`, `bundle`, `verify`, and
+   chain-slice verification — one signer, world-order seq, needed for
+   resume/verify), and the embedder/operator views (`ResourceRegistry.list()`
+   with no tenant, `SessionManager.all`, `CapabilityRequestService.all`).
+   Deny/decision events may name the attempted foreign resource or action —
+   that is the caller's own audit record, not the other tenant's data.
+5. **SQLite mode stays app-level; Postgres mode keeps database-enforced RLS
+   and per-tenant keys.** No new runtime dependency, no new service, no new
+   REST surface.
+
+**Alternatives:**
+- **Per-tenant processes now (finish H8 physically).** Rejected: physical
+  isolation is Stage 3 (microVM, no shared kernel) and depends on the
+  container/microVM track; pulling it forward would delay the software-boundary
+  probe and the two fixes. The shared-process residual is named, not hidden.
+- **Rely on key possession alone (the keyId is public in the event metadata,
+  so the master-key holder can always derive).** Rejected as the only control:
+  the process holds the master key in both modes by design, so decryption must
+  be bound by authorization; the keyId-to-tenant binding is the enforceable
+  half, and it is now checked before authorization instead of after.
+- **Optional tenant parameter on low-level helpers (`SessionManager.get`,
+  `activeSessionsFor`, `registry.get`).** Rejected: an optional check is not a
+  boundary. The enforced boundary is the route/service that may expose them;
+  low-level views stay named and non-tenant-facing.
+- **One probe per milestone suite instead of one table.** Rejected: coverage
+  becomes unknowable; the H8 failure mode "a query missing a tenant predicate"
+  is exactly what a surface table prevents.
+
+**Reasoning:** H8's honest scope is not new isolation architecture; it is
+proving the isolation contract of the surface that exists and closing what the
+proof finds. The probe is the same pattern as the rest of the repo — one
+enumerable table, each row bound to an assertion, no claim without a case. The
+two fixes are both "a check that was assumed to exist at the wrong layer":
+key-tenant binding was assumed to follow from the keyId shape (it did not),
+and reviewer-tenant binding was assumed to be the route's job (it was, for the
+route only). Both are now at the decision seam, with the probe as the
+regression test. The process-boundary residual is not new and not closable in
+this milestone; it stays visible in Claim 9, CURRENT_STATE known-gap #7, and
+the THREAT_MODEL cross-tenant row.
+
+**Security implications:** Closes one real cross-tenant evidence-decryption
+path (probe-proven) and one cross-tenant approval path, and turns cross-tenant
+coverage into an inspectable table. Does NOT close: the shared process (both
+modes), SQLite's app-level-only checks, hardware side channels, or hypervisor
+bugs. The per-tenant Postgres keys and RLS are unchanged.
+
+**Tradeoffs:** Test-only code growth (the probe suite); Postgres rows skip
+without a database; a cross-tenant `revealEvidence` now produces one clean
+deny event in the caller's tenant instead of a possibly-allowing authorize
+event. No production dependency, schema, or API change.
+
+**Residual risk (ponytail):** accepted and named, per deployment:
+- **Shared process memory, both modes (known-gap #7).** A memory-disclosure or
+  serialization bug crosses the boundary; Stage 3 physical isolation is the
+  structural fix.
+- **SQLite mode is app-level only.** No database-enforced RLS; the PDP and
+  service checks are the control (parity-tested).
+- **Hardware-level side channels and hypervisor bugs** (the ROADMAP H8
+  residual) are outside software control.
+- **Principal ids are not enforced globally unique.** `capabilitiesFor(principalId)`
+  may return a colliding tenant's capability; every authorization path
+  re-checks capability tenant in `verifyCapability`, and the only non-PDP
+  consumer (`deriveClassification`) is monotone-raise (conservative). Named,
+  not tenant-facing.
+- **`SessionManager.get`/`activeSessionsFor`/`revokeAllFor(principalId)`** are
+  principal-id-keyed without a tenant predicate; the REST route owns the tenant
+  check and no tenant-facing surface calls them. Revisit when an operator
+  surface uses them.
+- **One `CapabilityRequestService` per root.** Approving a request from a
+  tenant other than the root's fails closed (`issuer may not mint capabilities
+  in another tenant`); a multi-tenant deployment needs one service/root per
+  tenant (or a per-tenant root resolver). Functional, fail-closed, not a leak.
+- **The probe proves absence of the markers it plants**, not absence of
+  unknown leak channels; continuous adversarial evaluation is H14.
+- **BYOK/HYOK, cross-domain transfer, and physical controls** remain Stage 3+
+  and are untouched.
+
+**Future migration path:** each new tenant-facing surface adds a probe row (a
+review condition, like a new security invariant); Stage 3 physical isolation
+lands under the same probe as its software regression suite; tenant-scoped
+low-level session/registry helpers when an operator surface needs them; a
+per-tenant `CapabilityRequestService` root resolver for multi-tenant
+capability-request deployments.

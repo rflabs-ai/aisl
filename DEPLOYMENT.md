@@ -422,7 +422,9 @@ process, and the CLI says so.
    "<reason>"`. Clears the freeze only. Revoked capabilities stay revoked;
    re-issue authority through the ordinary issuance/approval paths.
 4. **Narrow revocation:** `incident revoke-cap <capabilityId> <tenantId>
-   "<reason>"`, `incident revoke-session <sessionId> <tenantId> "<reason>"` —
+   "<reason>"`, `incident revoke-session <sessionId> <tenantId> "<reason>"`,
+   `incident revoke-token <tokenId> <tenantId> "<reason>"` (the credential's
+   `jti`, H2) —
    local + broadcast, single-target. Cross-node session revocation is this
    incident path; the ordinary `DELETE /v1/sessions/:id` is node-local
    (single-node REST posture) and does not publish to the channel.

@@ -145,7 +145,7 @@ Dev dependencies: `typescript`, `@types/node`.
   summarizes the authorized slice, with `tenantId: '*'` as the global view
   over the events recorded with no tenant. CLI:
   `node src/cli.ts incident status|engage|lift|revoke-cap|revoke-session|
-  preserve|report` (+ `npm run incident:status`; the CLI builds a
+  revoke-token|preserve|report` (+ `npm run incident:status`; the CLI builds a
   bootstrap-free world so operator commands mint and append no fixture
   evidence). Demo section 22 shows a
   measured engage→deny latency, a two-node interval-bounded broadcast, and a

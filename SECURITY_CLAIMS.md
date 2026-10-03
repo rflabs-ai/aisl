@@ -1667,7 +1667,8 @@ multi-writer table (append-only by privilege: `app_rw` SELECT/INSERT, no
 UPDATE/DELETE grant, no RLS — control-plane coordination data with no claim
 content); the event chain stays single-writer. Records are scope-level
 (`freeze`/`unfreeze`/`revoke-caps`/`revoke-sessions`) and single-target
-(`revoke-cap`/`revoke-session`); a tenant-scoped `revoke-cap` record can only
+(`revoke-cap`/`revoke-session`/`revoke-token`); a tenant-scoped `revoke-cap`
+record can only
 revoke a capability registered to that tenant (audit 12), and `revoke-caps`
 is fenced by local issuance
 time so replay cannot kill authority issued after the incident. A fresh node
@@ -1679,7 +1680,7 @@ loud through `health()`. A channel outage still engages locally and reports
 `flush()` awaits every in-flight write and refresh before health is read
 (audit 19, live PG).
 CLI: `node src/cli.ts incident status|engage|lift|revoke-cap|
-revoke-session|preserve|report`; operator commands build a bootstrap-free
+revoke-session|revoke-token|preserve|report`; operator commands build a bootstrap-free
 world (no fixture issuance/appends) and print a diagnosable refusal instead of
 a stack trace.
 

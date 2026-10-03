@@ -308,6 +308,17 @@ NULL → false → **zero rows against hostile queries** (tested via
 is not the proof); per-tenant evidence keys (`sealFor`/`openFor`,
 `evidence-key:v2:<tenant>:<level>`) bind decryption to tenant identity, so
 one tenant's sealed evidence does not open under another tenant's key.
+**H8 (ADR-030):** one table-driven probe
+(`tests/h8-cross-tenant-probe.test.ts`) enumerates every REST route and every
+in-process query surface, and the two gaps it proved are closed:
+`revealEvidence` binds a v2 keyId to its tenant (`tenantFromKeyId`) before any
+registration/authorization and opens with `openFor(principal.tenantId, …)` —
+a foreign-tenant seal returns `undefined`, records one clean deny event in the
+caller's own tenant (without naming the foreign key), and never binds the
+foreign key to the caller; `CapabilityRequestService.approve`/`deny` enforce
+reviewer tenancy at the decision surface, not only at the REST boundary; and
+the H13 global view (`tenantId: '*'`) is authorized only by the caller's own
+tenant audit capability and exposes only tenant-less events.
 
 **Threat model:** TM-003.
 
@@ -319,9 +330,15 @@ DEPLOYMENT.md's role setup).
 **Evidence:** invariant 9 tests (three cases); ATK-003; M12 live-DB RLS
 proofs (17 tests against a real Postgres: zero rows without context, zero
 cross-tenant rows, INSERT with wrong context rejected, no cross-tenant
-seal opening); SQLite-mode parity suite (memory + SQLite backends).
+seal opening); SQLite-mode parity suite (memory + SQLite backends); H8
+cross-tenant probe (22 cases: 8 REST routes, 12 in-process surfaces, 2
+Postgres-gated skips) plus the evidence-seal extension (`tests/evidence.test.ts`),
+including log-scan marker assertions (no foreign tenant marker or sealed
+plaintext in the caller's visible records or responses).
 
 **Test:** `tests/invariants.test.ts` invariant 9;
+`tests/h8-cross-tenant-probe.test.ts` (H8 probe);
+`tests/evidence.test.ts` (cross-tenant seal refusal, audited);
 `tests/tenant-rls.test.ts` (live-DB RLS proofs);
 `tests/event-store-pg.test.ts` (backend parity).
 
@@ -329,7 +346,14 @@ seal opening); SQLite-mode parity suite (memory + SQLite backends).
 process and one memory space. In SQLite mode they share one SQLite table
 (app-level checks are the only control); SQL-level isolation exists only
 in Postgres mode (`EVENT_STORE=postgres`), where it covers the database —
-not the shared process memory.
+not the shared process memory. The H8 probe proves absence of the markers it
+plants, not absence of unknown leak channels (H14 territory). Low-level
+id-keyed helpers (`SessionManager.get`/`activeSessionsFor`, `registry.get`)
+have no tenant predicate and are not tenant-facing (the REST route owns the
+check); `capabilitiesFor(principalId)` is principal-id-keyed (a collision is
+re-checked by `verifyCapability` and is monotone-raise in classification
+derivation); one `CapabilityRequestService` mints only for its root's tenant
+(a cross-tenant approval fails closed).
 
 **Residual risk:** memory-disclosure or serialization bugs cross the
 boundary in both modes; a superuser connection bypasses RLS entirely.
@@ -440,15 +464,20 @@ legitimate work — availability is traded for safety, deliberately.
 ## Claim 13 — Evidence is sealed at rest and decryptable by clearance
 
 **Claim:** Output content is encrypted (AES-256-GCM, one HKDF-derived key per
-classification level) before it is written to the evidence store. The plaintext
-digest is stored so integrity is verifiable without clearance. Content can be
-read only by a principal holding a capability for `evidence.decrypt` on that
-level's key resource, and the read attempt is authorized and audited.
+classification level — and, for the v2 format, per **(tenant, classification)**
+pair) before it is written to the evidence store. The plaintext digest is
+stored so integrity is verifiable without clearance. Content can be read only
+by a principal holding a capability for `evidence.decrypt` on that level's key
+resource, and the read attempt is authorized and audited. An
+`evidence-key:v2:<tenant>:<level>` seal additionally decrypts only for the
+tenant it names (H8/ADR-030).
 
-**Mechanism:** `seal`/`open` in `src/seal.ts`; `AgentSession.record` seals every
-non-empty output; `AuthorizationService.revealEvidence` authorizes before
-decrypting. Default policy contains no `evidence.decrypt` allow rule, so the
-default answer is denial.
+**Mechanism:** `seal`/`open` (legacy global-tenant) and `sealFor`/`openFor`
+(v2 per-tenant) in `src/seal.ts`; `AgentSession.record` seals every non-empty
+output under the session principal's tenant; `AuthorizationService.revealEvidence`
+checks `tenantFromKeyId` against the caller before any registration or
+authorization, then authorizes before decrypting. Default policy contains no
+`evidence.decrypt` allow rule, so the default answer is denial.
 
 **Threat model:** TM-004 (evidence store as a target), TM-003 (one store, many
 tenants), TM-001 (agent used to surface secrets to a reader).
@@ -457,16 +486,25 @@ tenants), TM-001 (agent used to surface secrets to a reader).
 master key sitting on the same host as the store gives obfuscation, not
 confidentiality.
 
-**Evidence:** `tests/evidence.test.ts` — six cases: plaintext and secrets absent
-from the serialized store; digest verifiable without clearance; unauthorized
-reveal denied and audited; cleared reviewer decrypts the exact content;
-clearance for one level does not open another; tampered ciphertext yields
-nothing.
+**Evidence:** `tests/evidence.test.ts` — eight cases: plaintext and secrets
+absent from the serialized store; digest verifiable without clearance;
+unauthorized reveal denied and audited; cleared reviewer decrypts the exact
+content; clearance for one level does not open another; a clearance naming
+another tenant's v2 key does not open ours; an acme clearance naming globex's
+v2 key cannot decrypt a globex event (refused, audited as `tenant-mismatch`,
+no foreign key id copied into acme evidence); tampered ciphertext yields
+nothing. `tests/tenant-rls.test.ts` (eight cases) pins the HKDF contract and
+per-tenant key separation; the H8 probe carries the event-level binding case.
 
-**Test:** `npm test`.
+**Test:** `tests/evidence.test.ts`; `tests/tenant-rls.test.ts`;
+`tests/h8-cross-tenant-probe.test.ts`.
 
-**Known limitations:** no key rotation (re-sealing history is a migration); one
-master key for all tenants; no per-tenant data keys; no KMS/HSM; no protection
+**Known limitations:** no key rotation (re-sealing history is a migration);
+**one master key derives every per-(tenant, level) key**, so a master-key
+holder can derive any tenant's key — tenant separation at rest is
+authorization-bound (the v2 keyId check), plus HKDF domain separation, not
+independent custody; legacy `evidence-key:<level>` seals remain
+tenant-agnostic by design (no silent re-encryption); no KMS/HSM; no protection
 if the master key and database are both taken. Outputs are sealed, not the
 decision metadata — resource ids, classifications, principals, and decisions
 remain readable in the store.
@@ -1944,5 +1982,65 @@ are unaffected.
 distinguish from legitimate ones (M2's accepted trust dependency); clock skew
 is bounded, not eliminated; a channel outage delays revocation propagation (it
 never extends a token's own expiry).
+
+---
+
+## Claim 38 — Cross-tenant isolation is probe-verified across every surface, and a v2 evidence key opens only for its tenant (H8)
+
+**Claim:** Every REST route and every in-process query surface reachable by a
+tenant enforces tenant isolation in both directions, and a cross-tenant attempt
+leaves no foreign tenant marker or content in the caller's visible records or
+responses. Specifically: an `evidence-key:v2:<tenant>:<level>` seal decrypts
+only for that tenant — a capability naming another tenant's key id cannot open
+it and cannot re-bind the key in the registry; capability-request
+approval/denial requires a reviewer from the request's tenant; the H13 global
+evidence view (`tenantId: '*'`) is authorized only by the caller's own tenant
+audit capability and exposes only tenant-less events; and audit/export,
+event-store, registry, session, capability-request, and persistence reads never
+return another tenant's rows.
+
+**Mechanism:** `src/pdp.ts` (`revealEvidence`: `tenantFromKeyId` check before
+the lazy key registration, `openFor(principal.tenantId, …)` as a second
+binding, one clean `tenant-mismatch` deny event in the caller's own tenant
+without naming the foreign key); `src/seal.ts` (`tenantFromKeyId`);
+`src/capability-request.ts` (`requireSameTenant` in `approve`/`deny`). The
+existing guards are unchanged: PDP `resource.tenantId` check, `queryAudit`
+`filters.tenantId` check, REST route tenant checks, Postgres `FORCE RLS`.
+ADR-030.
+
+**Threat model:** TM-003 (cross-tenant).
+
+**Assumptions:** the probe's rows cover every tenant-facing surface at the
+time of writing (a new surface must add a row); the planted markers are
+representative of tenant data; the process itself is not compromised
+(known-gap #7).
+
+**Evidence:** `tests/h8-cross-tenant-probe.test.ts` — 22 cases (8 REST:
+authorize, sessions, audit, capability requests, anchors, tasks, healthz,
+static pages; 12 in-process: audit query/export, event-store reads plus the
+`global-by-design` chain view, registry, tenant-wide session revocation,
+capability-request review, evidence-key binding, the incident global view and
+preserve, log-scan; 2 Postgres-gated storage cases that skip cleanly); plus the
+evidence-seal extension in `tests/evidence.test.ts` (the cross-tenant decrypt
+refusal, audited, without copying the foreign key id into the caller's
+evidence). The red run — the wrong tenant decrypted globex content and the
+cross-tenant review was accepted — is captured at `.scratch/h8/red.txt`.
+
+**Test:** `tests/h8-cross-tenant-probe.test.ts`; `tests/evidence.test.ts`
+(seal extension); `tests/tenant-rls.test.ts` (live-DB RLS proofs); the full
+gate (`npm run typecheck && npm test` — 676 tests / 655 pass / 0 fail / 21
+Postgres-mode skips).
+
+**Known limitations:** the probe proves isolation in the directions and with
+the markers it plants; it is not a proof of absence for unknown leak channels
+(H14). The shared process remains in both modes — Stage-3 physical isolation is
+the structural fix. SQLite mode stays app-level only. Legacy
+`evidence-key:<level>` seals remain tenant-agnostic by design (no silent
+re-encryption). Named residuals in ADR-030: principal-id-keyed low-level
+helpers, one `CapabilityRequestService` per root, hardware side channels.
+
+**Residual risk:** a memory-disclosure or serialization bug in the shared
+process crosses the boundary; a deployment that does not accept the
+shared-process residual must run per-tenant processes (Stage 3).
 
 

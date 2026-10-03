@@ -11,8 +11,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { type Principal } from '../src/domain.ts';
 import { type PolicyRule } from '../src/policy.ts';
-import { keyIdFor, keyIdForTenant, open, type Sealed } from '../src/seal.ts';
-import { TENANT_A } from '../src/scenario.ts';
+import { keyIdFor, keyIdForTenant, open, sealFor, type Sealed } from '../src/seal.ts';
+import { TENANT_A, TENANT_B } from '../src/scenario.ts';
 import { testWorld, mockAuth } from '../src/testing.ts';
 
 const auditorAuth = mockAuth({ subject: 'user:auditor', amr: ['pwd', 'mfa'] });
@@ -142,9 +142,53 @@ describe('evidence sealing', () => {
       provenance: { source: 'policy-grant' },
     });
 
-    // The sealed keyId names acme; a capability on another tenant's key id
-    // never matches, so tenant binding is enforced at the authorization layer.
+    // The capability names another tenant's key id; it never matches the
+    // seal's key resource, so the reveal is denied (no-capability). The
+    // event-level key/tenant binding is covered by the H8 case below.
     assert.equal(w.authorization.revealEvidence(AUDITOR, event), undefined);
+  });
+
+  test("a clearance for the sealed key's tenant cannot decrypt another tenant's event (H8/ADR-030)", () => {
+    const w = testWorld({ policies: [EVIDENCE_RULE] });
+    const foreignKeyId = keyIdForTenant(TENANT_B, 'internal');
+    const sealed = sealFor(TENANT_B, 'globex-only-content', 'internal');
+    const event = w.eventLog.append({
+      tenantId: TENANT_B,
+      principal: 'agent:globex',
+      actor: 'agent:globex',
+      actorKind: 'agent',
+      action: 'write',
+      resourceId: 'doc:globex-strategy',
+      result: 'success',
+      metadata: { sealed },
+    });
+
+    // Tenant A holds a capability naming tenant B's key id — resource ids are
+    // opaque strings, so the mint is legal. The key binding must refuse before
+    // any registry registration or authorization.
+    w.authorization.issue(w.root, {
+      subject: AUDITOR.id,
+      tenantId: TENANT_A,
+      resourceIds: [foreignKeyId],
+      actions: ['evidence.decrypt'],
+      maxClassification: 'internal',
+      expiresAt: w.clock.now() + 600_000,
+      provenance: { source: 'policy-grant' },
+    });
+
+    assert.equal(w.authorization.revealEvidence(AUDITOR, event), undefined);
+    assert.notEqual(w.registry.get(foreignKeyId)?.tenantId, TENANT_A, 'the foreign key must not bind to the caller tenant');
+
+    const denial = w.eventLog.all().at(-1)!;
+    assert.equal(denial.action, 'evidence.decrypt');
+    assert.equal(denial.decision, 'deny');
+    assert.equal(denial.denyReason, 'tenant-mismatch');
+    assert.equal(denial.tenantId, TENANT_A);
+    assert.equal(
+      JSON.stringify(denial).includes(foreignKeyId),
+      false,
+      'the refusal must not copy the foreign key id into acme evidence',
+    );
   });
 
   test('tampered ciphertext yields nothing', () => {

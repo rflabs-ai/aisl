@@ -29,7 +29,7 @@ import {
 import { type EventStore, type SecurityEvent, type AuditFilters, StoreUnavailableError } from './events.ts';
 import { BASELINE_ROLES, type Approval, type PolicyEngine } from './policy.ts';
 import { type ResourceRegistry, UnknownResourceError, defineResource } from './registry.ts';
-import { type Sealed, classificationFromKeyId, open } from './seal.ts';
+import { type Sealed, classificationFromKeyId, openFor, tenantFromKeyId } from './seal.ts';
 import { hasMfa, type IdPHealth } from './identity.ts';
 import { ClockGuard, HealthState } from './health.ts';
 
@@ -683,6 +683,34 @@ export class AuthorizationService {
     const sealed = (event.metadata as { sealed?: Sealed } | undefined)?.sealed;
     if (!sealed) return undefined;
 
+    // H8 (ADR-030): a v2 keyId names exactly one tenant. Refuse a seal bound
+    // to another tenant BEFORE the lazy registry registration below — without
+    // this check the foreign key id would be registered under the caller's
+    // tenant, the caller's own capability (resource ids are opaque strings)
+    // would match, and the keyId-derived key would decrypt the content. Fail
+    // closed, and record the refusal in the caller's own evidence without
+    // naming the foreign key.
+    const keyTenant = tenantFromKeyId(sealed.keyId);
+    if (keyTenant !== undefined && keyTenant !== principal.tenantId) {
+      try {
+        this.eventLog.append({
+          tenantId: principal.tenantId,
+          principal: principal.id,
+          actor: principal.id,
+          actorKind: principal.kind,
+          action: 'evidence.decrypt',
+          decision: 'deny',
+          denyReason: 'tenant-mismatch',
+          result: 'denied',
+          metadata: { phase: 'evidence-reveal-refused', reason: 'sealed key belongs to another tenant' },
+        });
+        this.health.mark('store', 'ok');
+      } catch {
+        this.health.mark('store', 'unavailable', 'evidence append failed');
+      }
+      return undefined;
+    }
+
     const classification = classificationFromKeyId(sealed.keyId);
     if (!this.registry.get(sealed.keyId)) {
       this.registry.add(
@@ -703,7 +731,9 @@ export class AuthorizationService {
       approvals,
     });
     if (decision.decision !== 'allow') return undefined;
-    return open(sealed);
+    // H8 (ADR-030): open under the caller's tenant (v2) — a second binding on
+    // top of the keyTenant check; legacy seals keep their documented behavior.
+    return openFor(principal.tenantId, sealed);
   }
 
   /**

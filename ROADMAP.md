@@ -157,10 +157,15 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   bounded and actually-wired clock tolerance — the jose option name was a
   silent no-op), derived workload identity (`workloadAuth`/`sessionAgent`
   capped and claim-minimal), and `jti` revocation propagated on the H13
-  channel. Next: H14
+  channel. **H8 [DONE]** (ADR-030) — cross-tenant isolation: one table-driven
+  probe over every REST route and in-process query surface, which proved and
+  closed two gaps — a v2 evidence key now opens only for the tenant it names,
+  and capability-request review enforces reviewer tenancy at the decision
+  surface; the H13 global view is probe-pinned to the caller's own tenant
+  authority and tenant-less events. Next: H14
   (continuous adversarial evaluation) or any remaining H2–H9/H11 item. The
-  remaining nine (H3–H9, H11, H14) stay open [ ] until prioritized after it
-  clears.
+  remaining eight (H3–H7, H9, H11, H14) stay open [ ] until prioritized after
+  it clears.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
@@ -267,7 +272,7 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
 - **Residual risk:** human-approved exfiltration; steganography.
 - **Class:** E/HA.
 
-### H8 — Cross-tenant isolation (cryptographic and physical) — *structurally necessary at federation (ADR-022)*
+### H8 — Cross-tenant isolation (cryptographic and physical) — *structurally necessary at federation (ADR-022)* **[DONE]** (ADR-030)
 
 - **Attack surface:** shared process, shared database, shared caches, logs.
 - **Failure modes:** a query missing a tenant predicate; a cache key collision;
@@ -277,6 +282,30 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   query); per-tenant key separation tests; log-scrubbing tests.
 - **Residual risk:** hardware-level side channels; hypervisor bugs.
 - **Class:** E/HA.
+
+**Closed (ADR-030):** one table-driven cross-tenant probe
+(`tests/h8-cross-tenant-probe.test.ts`) enumerates every REST route
+(authorize, sessions, capability requests, audit, tasks, anchors, healthz,
+static pages) and every in-process query surface (audit query/export,
+event-store reads, registry, sessions, capability requests, persistence), each
+row asserting isolation in both directions, a log-scan property (no foreign
+marker/content in the caller's visible records or responses), or a named
+`global-by-design` exposure; Postgres-gated rows skip cleanly. The probe proved
+and this milestone closed two real gaps: `revealEvidence` did not bind a v2
+keyId to its tenant — a tenant-A capability naming tenant B's key could decrypt
+B's seal and bind the foreign key to A in the registry — now refused before
+any registration/authorization, with one clean deny event in the caller's own
+tenant and `openFor(tenantId)` as a second binding; and
+`CapabilityRequestService.approve`/`deny` had no reviewer-tenant predicate (the
+REST boundary had one — the in-process decision surface now enforces it). The
+H13 global view (`tenantId: '*'`) is probe-pinned: authorized only by the
+caller's own tenant audit capability and exposing only tenant-less events.
+Residuals per ADR-030: the shared process (known-gap #7; physical isolation is
+Stage 3), SQLite app-level-only checks, hardware side channels, principal-id
+collisions on non-tenant-facing helpers, one `CapabilityRequestService` per
+root, and the probe's marker-scope limitation. 22 probe cases (20 live, 2
+Postgres-gated) + 1 evidence-seal extension; gate 676 tests / 655 pass / 0
+fail / 21 skip.
 
 ### H9 — Secure artifact handling
 
@@ -514,9 +543,11 @@ dispatch (SUGGESTION != CANON) and reads audit through the ordinary client
 path. Its capture-and-refinement surface is the reason the stack exists, not
 a component that needs enforcement.
 
-The federation itself pulls H8 (cross-tenant), H2, and H13 forward — those
-three are annotated above. Gate: before any non-personal tenant joins, H8
-must close or its residual be explicitly accepted per deployment.
+The federation itself pulls H8 (cross-tenant), H2, and H13 forward — all three
+closed (ADR-030, ADR-028, ADR-026). Gate: before any non-personal tenant joins,
+H8 must close or its residual be explicitly accepted per deployment — H8 is
+closed with ADR-030's named residuals (the shared process / Stage-3 physical
+isolation is the one a deployment must accept explicitly).
 
 ---
 
@@ -677,8 +708,9 @@ results) lives in `CURRENT_STATE.md` and `AGENT-SESSION.md`.
 Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
-(HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12
-[DONE], H13 [DONE], next H15).
+(HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
+H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE]; the remaining eight are H3–H7,
+H9, H11, H14).
 
 ### M0 — Architectural foundation (done)
 

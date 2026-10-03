@@ -87,6 +87,15 @@ export function classificationFromKeyId(keyId: string): string {
   return keyId.startsWith(KEY_PREFIX) ? keyId.slice(KEY_PREFIX.length) : 'x-unknown';
 }
 
+/**
+ * H8 (ADR-030): the tenant a v2 keyId is bound to; undefined for legacy
+ * (`evidence-key:<level>`) and unknown shapes. Callers that authorize
+ * decryption use this to bind a seal to exactly one tenant.
+ */
+export function tenantFromKeyId(keyId: string): string | undefined {
+  return splitV2KeyId(keyId)?.tenantId;
+}
+
 /** Legacy derivation (ADR-013 as shipped): info `evidence:<classification>`. */
 function legacyKeyFor(classification: Classification): Buffer {
   return Buffer.from(hkdfSync('sha256', masterKey(), SALT, Buffer.from(`evidence:${classification}`), 32));

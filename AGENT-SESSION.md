@@ -24,6 +24,69 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 36 — 2026-10-03 — opencode/h8-cross-tenant-isolation
+
+**Did:**
+- Executed H8 (ROADMAP Stage 2 — the federation gate item) on branch
+  `feat/h8-cross-tenant-isolation`; Phase 0 commit `5a86157` (ADR-030, docs
+  only), implementation + docs on the same branch.
+- **Phase 0:** ADR-030 in `DECISIONS.md` — scope honest: cryptographic
+  isolation exists (per-tenant v2 evidence keys, Postgres FORCE RLS) but is
+  enforced at the decrypt/authorization seam; the shared process remains
+  (known-gap #7) and physical isolation is Stage 3. The milestone artifact is
+  ONE reusable table-driven probe; a new tenant-facing surface must add a row.
+- **Tests first (red captured):** `tests/h8-cross-tenant-probe.test.ts` +
+  a `tests/evidence.test.ts` extension, written before the fixes; the red run
+  proved two real gaps (`.scratch/h8/red.txt`): an `acme` capability naming
+  `evidence-key:v2:globex:confidential` decrypted a globex seal and bound the
+  foreign key to acme in the registry, and `CapabilityRequestService.approve`
+  accepted a globex reviewer on an acme request.
+- **Fixes (smallest each, probe as regression):** `revealEvidence`
+  (`src/pdp.ts`) refuses a foreign keyId before any registration/authorization
+  (`tenantFromKeyId`, new in `src/seal.ts`), records one clean
+  `tenant-mismatch` deny event in the caller's own tenant without naming the
+  foreign key, and opens with `openFor(principal.tenantId, …)`;
+  `CapabilityRequestService.approve`/`deny` (`src/capability-request.ts`) now
+  refuse a reviewer from another tenant via `requireSameTenant`.
+- **Probe coverage:** 22 cases — 8 REST routes (authorize, sessions,
+  capability requests, audit, tasks, anchors, healthz, static pages), 12
+  in-process surfaces (audit query/export, event-store reads + the
+  global-by-design chain view, registry, tenant-wide revocation,
+  capability-request review, evidence-key binding, incident global view +
+  preserve, log-scan), 2 Postgres-gated storage cases skipping cleanly; plus
+  the evidence-seal extension. The H13 `tenantId: '*'` view is pinned:
+  caller's-own-tenant capability only, tenant-less events only.
+- **Docs:** ROADMAP H8 [DONE] + closed paragraph + working order; CURRENT_STATE
+  (header, counts ~12,744 lines / 676 tests, gap #7 refresh, "What H8
+  closed"); SECURITY_CLAIMS Claim 38 + Claim 9 refresh; THREAT_MODEL
+  cross-tenant row; prompt stub resolution.
+- **Gate:** `npm run typecheck` clean; `npm test` 676 / 655 pass / 0 fail /
+  21 Postgres-mode skips (baseline 653/634/19; +23: 21 live + 2 skips). No
+  new runtime dependencies; no `as any`/`as never`; no secrets in events or
+  errors.
+
+**Left:**
+- Merge to `main` pending (operator instruction: do not merge).
+- `benchmarks/results.json` remains modified in the working tree (not
+  committed, per the milestone-boundary convention).
+- The Postgres-gated probe cases were not run live in this session (no
+  `DATABASE_URL`); they follow the M12 scratch-database convention and skip
+  cleanly. The physical-isolation residual (per-tenant processes/microVM,
+  Stage 3) is explicitly accepted per ADR-030; a non-personal tenant joining
+  must accept it per deployment.
+
+**Next session should:**
+- Pick H14 (continuous adversarial evaluation) or a remaining H3–H7/H9/H11
+  item; read ADR-030 and SECURITY_CLAIMS Claim 38 first.
+
+**Evidence:**
+- ADR commit `5a86157`; branch `feat/h8-cross-tenant-isolation`.
+- Gate: typecheck clean; 676 tests / 655 pass / 0 fail / 21 skip.
+- Red capture: `.scratch/h8/red.txt`; probe file
+  `tests/h8-cross-tenant-probe.test.ts`.
+
+---
+
 ### SESSION 35 — 2026-10-03 — opencode/h2-short-lived-credentials
 
 **Did:**

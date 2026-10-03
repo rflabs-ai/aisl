@@ -39,7 +39,7 @@ at this stage.
 | Prompt injection (direct) | data/authority split | **mitigated by construction** | model may still refuse to work |
 | Indirect injection (docs, repos, web, email) | same | **mitigated by construction** | same |
 | Tool-output injection | same; tool context has no issuance handle | **mitigated** | none identified |
-| Cross-tenant access | `@tenant-isolation` + PDP tenant check | **mitigated** | shared-process memory safety |
+| Cross-tenant access | `@tenant-isolation` + PDP tenant check; database-enforced RLS + per-tenant evidence keys (Postgres, M12); H8 one table-driven probe over every REST route and in-process query surface, v2 evidence keys tenant-bound at the decrypt seam, reviewer tenancy at the decision surface, H13 global view pinned to the caller's own tenant authority + tenant-less events (ADR-030) | **mitigated** | shared-process memory safety (both modes; physical isolation is Stage 3); SQLite mode is app-level only; the probe proves absence of its planted markers, not of unknown leak channels; hardware side channels / hypervisor bugs |
 | Cross-customer (same tenant) | capability scope | **mitigated** | policy authoring errors |
 | Privilege escalation | issuer-kind allowlist + attenuation | **mitigated** | operator-issued over-broad caps |
 | Secret theft | no allow rule by default; broker gate | **mitigated** | secrets are in memory, unencrypted |

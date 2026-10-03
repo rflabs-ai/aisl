@@ -2285,7 +2285,19 @@ event. No production dependency, schema, or API change.
 
 **Future migration path:** each new tenant-facing surface adds a probe row (a
 review condition, like a new security invariant); Stage 3 physical isolation
-lands under the same probe as its software regression suite; tenant-scoped
-low-level session/registry helpers when an operator surface needs them; a
-per-tenant `CapabilityRequestService` root resolver for multi-tenant
-capability-request deployments.
+lands under the same probe, which becomes its software regression suite;
+tenant-scoped low-level session/registry helpers when an operator surface
+needs them; a per-tenant `CapabilityRequestService` root resolver for
+multi-tenant capability-request deployments.
+
+**Addendum (executed 2026-10-03):** the probe landed first and captured red at
+`.scratch/h8/red.txt` (three failing assertions: the cross-tenant decrypt
+returned the globex plaintext, the cross-tenant approval was accepted, and the
+seal-test extension failed on the same decrypt), then the two fixes above.
+`tests/h8-cross-tenant-probe.test.ts` (22: 8 REST, 12 in-process,
+2 Postgres-gated skips) + the `tests/evidence.test.ts` extension (1). Gate:
+`npm run typecheck` clean; `npm test` 676 / 655 pass / 0 fail / 21
+Postgres-mode skips (baseline 653/634/19). The Postgres-gated rows follow the
+M12 scratch-database convention and were not run live this session (no
+`DATABASE_URL`). Branch `feat/h8-cross-tenant-isolation`, ADR commit
+`5a86157`.

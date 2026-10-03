@@ -146,6 +146,11 @@ export class CapabilityRequestService {
       throw new Error('a principal cannot approve its own capability request');
     }
 
+    // H8 (ADR-030): tenancy is enforced at the decision surface, not only at
+    // the REST boundary. A reviewer from another tenant can never decide this
+    // request or be recorded on it.
+    this.requireSameTenant(request, reviewer);
+
     const now = this.clock();
     const resources = scope?.resources ?? request.requestedResources;
     const actions = scope?.actions ?? request.requestedActions;
@@ -202,6 +207,20 @@ export class CapabilityRequestService {
   }
 
   /**
+   * H8 (ADR-030): a reviewer may only decide a request from their own tenant.
+   * The REST boundary checks this too; the service is the decision surface and
+   * must hold on its own (embedders and the guard's escalation lane call it
+   * directly).
+   */
+  private requireSameTenant(request: CapabilityRequest, reviewer: Principal): void {
+    if (reviewer.tenantId !== request.tenantId) {
+      throw new Error(
+        `reviewer ${reviewer.id} belongs to tenant '${reviewer.tenantId}', not '${request.tenantId}': refusing cross-tenant review`,
+      );
+    }
+  }
+
+  /**
    * Deny a capability request. No capability is minted.
    */
   deny(requestId: string, reviewer: Principal): CapabilityRequest {
@@ -212,6 +231,8 @@ export class CapabilityRequestService {
     if (reviewer.kind !== 'user') {
       throw new Error(`principal of kind '${reviewer.kind}' may not deny capability requests`);
     }
+
+    this.requireSameTenant(request, reviewer);
 
     const now = this.clock();
     const denied: CapabilityRequest = {

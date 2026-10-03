@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H2 — short-lived credentials (ADR-028).
+Honest snapshot. Updated after H8 — cross-tenant isolation (ADR-030).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -9,25 +9,28 @@ dependencies. H1 (ADR-023, signed delegation), H10 (ADR-024, supply-chain
 gate + signed build manifests), H12 (ADR-025, signed update channel with
 anti-rollback and sticky canary), H13 (ADR-026, kill switch + revocation
 channel + evidence preservation), H15 (ADR-027, fail-closed availability:
-observed health, clock guard, degraded-mode matrix, latency budget), and H2
+observed health, clock guard, degraded-mode matrix, latency budget), H2
 (ADR-028, short-lived credentials: verification-seam lifetime ceiling, bounded
-skew, derived workload identity, channel-propagated jti revocation) are the
+skew, derived workload identity, channel-propagated jti revocation), and H8
+(ADR-030, a table-driven cross-tenant probe over every REST route and
+in-process query surface, which proved and closed a v2-evidence-key
+tenant-binding gap and a capability-request reviewer-tenancy gap) are the
 landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
 Next frontier: H14 (continuous adversarial evaluation) or any remaining
-H3–H9/H11 item.
+H3–H7/H9/H11 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~12,678 lines of source across 46 modules
+TypeScript foundation on Node 24, ~12,744 lines of source across 46 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, and
-`incident-store-pg.ts` are the latest additions), 653 tests
-(`tests/`, `security-tests/`; 634 pass, 19 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 676 tests
+(`tests/`, `security-tests/`; 655 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -383,12 +386,12 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 653 tests pass (634 green; 19 Postgres-mode tests skip without
+All 676 tests pass (655 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1
 environment-gated skip, 0 fail). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2, H8:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -410,8 +413,9 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **H13 incident response (37: acceptance + audit follow-ups 29 — unfreeze propagation and issuance-fence regressions, `revoke-cap` tenant scope, grant semantics; Postgres channel 7, of which 4 live, skip-clean without `DATABASE_URL`; import-cycle regression 1)**.
 | **H15 fail-closed availability (24: 19 acceptance — per-dependency fault matrix, recovery, false-denial pin, degraded mode, safety ordering, `/healthz` shape + structural no-secrets — plus 5 audit-follow-up regressions)**.
 | **H2 short-lived credentials (31: admission contract + 2000-case fuzz 8, end-to-end jose verification 6, workload derivation 6, revocation propagation 8, credential-in-log scanning 3)**.
+| **H8 cross-tenant isolation (23: probe 22 — 8 REST + 12 in-process + 2 Postgres-gated; plus 1 evidence-seal extension)**.
 
-Plus: policy semantics (10), capability integrity (5), evidence sealing (6),
+Plus: policy semantics (10), capability integrity (5), evidence sealing (8),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
 workload (2), hostile-model behaviours, 29 M1 enforcement tests (container
 sandbox, egress proxy, DNS pinning, envelope secrets, brokered injection,
@@ -508,8 +512,12 @@ Ordered by severity.
    bug crosses every boundary. Container sandbox isolates per-task when Docker is
    available. **M12 (Postgres mode) narrows the data blast radius: the database
    enforces tenant isolation on stored rows (RLS) and per-tenant keys bind
-   sealed-evidence decryption to tenant identity — but the shared PROCESS
-   remains (both modes).**
+   sealed-evidence decryption to tenant identity - but the shared PROCESS
+   remains (both modes). H8 (ADR-030) closes the software-surface gaps the
+   cross-tenant probe proved (a v2 evidence key opened for its own tenant only;
+   capability-request review enforces reviewer tenancy at the decision surface)
+   and now covers every REST route and in-process query surface - the shared
+   PROCESS remains (physical isolation is Stage 3).**
 8. **No transport security in-process.** M14 gives the platform its first
    network ingress (REST API, ADR-019): a `node:http` whitelist router bound
    to loopback with bearer-JWT authn and whitelist parsing. TLS-in-process is
@@ -1179,6 +1187,48 @@ during processing; a stolen valid token is replayable until expiry unless its
 per-process in-memory; `jti`/`sub`/`iat` are now required claims (an IdP that
 omits them needs configuration); SPIFFE/SPIRE attestation remains HARD-stage
 (skip list).
+
+## What H8 closed
+
+H8 was the cross-tenant-isolation milestone (ADR-030; zero new runtime
+dependencies, no new module). The artifact is one table-driven probe
+(`tests/h8-cross-tenant-probe.test.ts`) that enumerates the whole
+tenant-facing surface — 8 REST routes and 12 in-process query surfaces, plus
+2 Postgres-gated storage cases that skip cleanly. Every row asserts isolation
+in both directions, a log-scan property, or a named `global-by-design`
+exposure. The probe proved two real gaps, both closed in this branch:
+
+1. ~~**A v2 evidence key could be decrypted by the wrong tenant.**
+   `revealEvidence` did not check the tenant named by the sealed keyId. A
+   tenant-A capability naming tenant B's key (`evidence-key:v2:B:<level>` —
+   resource ids are opaque strings, so the mint was legal) registered B's key
+   under A and decrypted B's content. It now refuses a foreign keyId before
+   any registration or authorization, records one clean deny event in the
+   caller's own tenant, and opens with `openFor(principal.tenantId, …)` as a
+   second binding (`tenantFromKeyId` is the new seal helper). Legacy
+   `evidence-key:<level>` seals keep their documented tenant-agnostic
+   behavior.
+2. ~~**Capability-request review had no reviewer-tenant predicate.**
+   `CapabilityRequestService.approve`/`deny` now refuse a reviewer from
+   another tenant — the REST boundary already did; the in-process decision
+   surface (embedders, the guard's escalation lane) now holds on its own, and
+   a refused review appends nothing.
+
+The probe also pins the H13 global view: `tenantId: '*'` is authorized only by
+the caller's own tenant audit capability and exposes only tenant-less events
+(reconstruct and preserve), while a cross-tenant window and a caller without
+its own audit authority are refused. The log-scan rows assert tenant B's
+unique marker and sealed plaintext never appear in tenant A's visible records,
+exports, or REST responses.
+
+Tests: `tests/h8-cross-tenant-probe.test.ts` (22: 8 REST, 12 in-process, 2
+Postgres-gated skips) + 1 evidence-seal extension in `tests/evidence.test.ts`,
+written before the fixes; the red signal (the globex content returned to an
+acme clearance; the cross-tenant review accepted) is captured at
+`.scratch/h8/red.txt`. Residuals (ADR-030): the shared process (known-gap #7;
+physical isolation is Stage 3), SQLite app-level-only checks, hardware side
+channels, principal-id collisions on non-tenant-facing helpers, one
+`CapabilityRequestService` per root, and the probe's marker-scope limitation.
 
 ## Watch-items from the M9 audit
 

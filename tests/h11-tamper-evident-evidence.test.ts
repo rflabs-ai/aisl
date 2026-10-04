@@ -45,6 +45,7 @@ import {
 import { RetentionLedger } from '../src/retention.ts';
 import { AnchorRegistry } from '../src/rest-anchors.ts';
 import { authorizationRoot } from '../src/pdp.ts';
+import { buildWorld } from '../src/scenario.ts';
 
 function tmpDir(name: string): string {
   return mkdtempSync(join(tmpdir(), `asl-h11-${name}-`));
@@ -119,6 +120,27 @@ class RecordingSink implements AnchorSink {
 }
 
 describe('H11: anchor sinks', () => {
+  test('self-contained (memory) worlds never inherit the environment witness sink', async () => {
+    const originalUrl = process.env.EVENT_ANCHOR_WITNESS_URL;
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    process.env.EVENT_ANCHOR_WITNESS_URL = 'https://witness.invalid/heads';
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response('ok', { status: 200 });
+    }) as typeof globalThis.fetch;
+    try {
+      const world = buildWorld({ memory: true });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      world.eventLog.close();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.EVENT_ANCHOR_WITNESS_URL;
+      else process.env.EVENT_ANCHOR_WITNESS_URL = originalUrl;
+    }
+    assert.equal(calls, 0, 'a demo world must not publish fixture heads to the configured witness');
+  });
+
   test('FileAnchorSink writes the M3 line format and counts publishes', () => {
     const dir = tmpDir('file-sink');
     try {

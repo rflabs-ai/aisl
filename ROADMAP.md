@@ -383,7 +383,7 @@ structural — no update/delete path at any layer — and legal holds are signed
 (`RetentionLedger`, rehydrated from the log, tenant-bound: a principal may only
 hold its own tenant). CLI: `node src/cli.ts evidence
 status|checkpoint|verify|witness|hold|release` (+ `npm run evidence:status`).
-Tests-first suite: `tests/h11-tamper-evident-evidence.test.ts` (34) + the H8
+Tests-first suite: `tests/h11-tamper-evident-evidence.test.ts` (35) + the H8
 probe's new `retention-ledger-tenancy` row (23 cases now). Zero new runtime
 dependencies. Residuals per ADR-031: a host attacker controlling every witness
 and checkpoint, witness-operator collusion/split-view, signing-key custody

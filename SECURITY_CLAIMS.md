@@ -2045,7 +2045,7 @@ cross-tenant review was accepted — is captured at `.scratch/h8/red.txt`.
 
 **Test:** `tests/h8-cross-tenant-probe.test.ts`; `tests/evidence.test.ts`
 (seal extension); `tests/tenant-rls.test.ts` (live-DB RLS proofs); the full
-gate (`npm run typecheck && npm test` — 711 tests / 690 pass / 0 fail / 21
+gate (`npm run typecheck && npm test` — 712 tests / 691 pass / 0 fail / 21
 Postgres-mode skips).
 
 **Known limitations:** the probe proves isolation in the directions and with
@@ -2101,8 +2101,9 @@ runtime's trust domain (filesystem ACLs/WORM mount, an operator-held file, or
 a witness host); the witness token, when configured, is secret; the witness
 operator does not collude with the attacker.
 
-**Evidence:** `tests/h11-tamper-evident-evidence.test.ts` (34: sink fan-out +
-failure isolation + queue bound + token-redaction 8; witness protocol 4;
+**Evidence:** `tests/h11-tamper-evident-evidence.test.ts` (35: sink fan-out +
+failure isolation + queue bound + token-redaction + memory-world env exclusion
+9; witness protocol 4;
 anchor reconciliation — binding, truncation, gap, fork, unanchored tail,
 timestamp anomalies 10; checkpoints — round trip, truncation, full re-signed
 rewrite, tamper/wrong key, chaining/fork 6; federation head rehydration 1;
@@ -2114,8 +2115,8 @@ verifying, a re-signed truncation detected, a fork detected, and a hold
 surviving a ledger rebuild (demo exits 0).
 
 **Test:** `tests/h11-tamper-evident-evidence.test.ts`;
-`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 711 tests
-/ 690 pass / 0 fail / 21 Postgres-mode skips.
+`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 712 tests
+/ 691 pass / 0 fail / 21 Postgres-mode skips.
 
 **Known limitations:** a bundle with no source/checkpoint presented verifies
 internally but is reported `unanchored` — external corroboration is only as

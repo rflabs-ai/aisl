@@ -195,11 +195,14 @@ tool is built.
   `6ab8386` (docs only, with this prompt expanded to the full M4–M16 format
   in the same commit).
 - **Tests first (red captured):** `tests/h11-tamper-evident-evidence.test.ts`
-  (34) written before `src/anchors.ts` / `src/retention.ts` existed; the red
+  (35) written before `src/anchors.ts` / `src/retention.ts` existed; the red
   run is `.scratch/h11/red.txt` (`ERR_MODULE_NOT_FOUND` from the missing
   module). One test-writer bug was caught by the red/green loop: mutating a
   signed timestamp breaks the hash, so the anomaly test now appends a valid
-  chain with regressing timestamps at append time.
+  chain with regressing timestamps at append time. A self-review fix was
+  pinned red-first (test 35): `memory: true` worlds must not inherit
+  `EVENT_ANCHOR_WITNESS_URL` (a demo publishing fixture heads to a live
+  witness); explicit injected anchors still apply.
 - **Implementation:** `src/anchors.ts` (AnchorSink port, FileAnchorSink,
   non-blocking HttpAnchorSink with bounded queue + `flush()` and loud
   counters, `parseAnchorLines`, `verifyAnchoredEvidence` — binding, coverage,
@@ -219,8 +222,8 @@ tool is built.
 - **H8 probe:** a new `retention-ledger-tenancy` row (ADR-030's review
   condition for a new tenant-facing surface); the probe is now 23 cases
   (8 REST, 13 in-process, 2 Postgres-gated skips).
-- **Gate:** `npm run typecheck` clean; `npm test` 711 / 690 pass / 0 fail /
-  21 Postgres-mode skips (baseline 676/655/0/21; +35: 34 H11 + 1 probe row).
+- **Gate:** `npm run typecheck` clean; `npm test` 712 / 691 pass / 0 fail /
+  21 Postgres-mode skips (baseline 676/655/0/21; +36: 35 H11 + 1 probe row).
   `npm run demo` exits 0 with section 24 (sources + checkpoint VERIFIED,
   re-signed truncation DETECTED, fork DETECTED, hold survives rebuild,
   witness delivery 7/7). `npm run benchmark` exits 0, 0 hard failures.

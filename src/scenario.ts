@@ -169,7 +169,10 @@ function anchorSinksFromEnv(): readonly AnchorSink[] {
  * default for all runs that do not explicitly ask for Postgres (ADR-018).
  */
 function makeEventLog(options: { sqlitePath?: string; memory?: boolean; anchors?: readonly AnchorSink[] }): EventStore {
-  const sinks = options.anchors ?? anchorSinksFromEnv();
+  // Self-contained (memory) worlds never inherit the process's env witness: a
+  // demo must not publish fixture heads to an operator's live witness. Explicit
+  // injected anchors still apply (tests/demos wire their own fake witness).
+  const sinks = options.anchors ?? (options.memory ? [] : anchorSinksFromEnv());
   const sinkOptions = sinks.length > 0 ? { sinks } : {};
   if (options.memory) {
     // Self-contained worlds (the demo's two-node incident simulation) must

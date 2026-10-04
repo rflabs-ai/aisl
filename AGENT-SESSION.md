@@ -43,10 +43,14 @@ was left, and what the next session should pick up.
   `evidence.hold`/`evidence.release` events with a tenant-bound
   `RetentionLedger`.
 - **Tests first (red captured):** `tests/h11-tamper-evident-evidence.test.ts`
-  (34) written before `src/anchors.ts`/`src/retention.ts` existed; the red
+  (35) written before `src/anchors.ts`/`src/retention.ts` existed; the red
   run is `.scratch/h11/red.txt` (`ERR_MODULE_NOT_FOUND`). One test-writer bug
   found red-then-fixed: mutating a signed timestamp breaks the hash — the
   anomaly case now appends a *valid* chain with regressing timestamps.
+  Self-review fix (red-first, test 35): `memory: true` self-contained worlds
+  no longer inherit `EVENT_ANCHOR_WITNESS_URL` — a demo must not publish
+  fixture heads to an operator's live witness (explicitly injected anchors
+  still apply).
 - **Implementation:** `src/anchors.ts` (new), `src/retention.ts` (new);
   `src/events.ts` (`TimestampAnomaly` + `collectTimestampAnomalies`,
   `VerificationResult.timestampAnomalies`, `EventStore.flushAnchors`, sink
@@ -61,8 +65,8 @@ was left, and what the next session should pick up.
 - **H8 probe:** new `retention-ledger-tenancy` row (the ADR-030 review
   condition for a new tenant-facing surface) — probe now 23 cases (8 REST,
   13 in-process, 2 Postgres-gated skips), all green.
-- **Gate:** `npm run typecheck` clean; `npm test` 711 / 690 pass / 0 fail /
-  21 Postgres-mode skips (baseline 676/655/0/21; +35: 34 H11 + 1 probe row).
+- **Gate:** `npm run typecheck` clean; `npm test` 712 / 691 pass / 0 fail /
+  21 Postgres-mode skips (baseline 676/655/0/21; +36: 35 H11 + 1 probe row).
   `npm run demo` exits 0 with section 24 (two sources + checkpoint VERIFIED,
   re-signed truncation DETECTED, fork DETECTED, hold survives rebuild,
   witness DELIVERED 7/7).
@@ -91,7 +95,7 @@ was left, and what the next session should pick up.
 
 **Evidence:**
 - ADR commit `6ab8386`; branch `feat/h11-tamper-evident-evidence`.
-- Gate: typecheck clean; 711 tests / 690 pass / 0 fail / 21 skip.
+- Gate: typecheck clean; 712 tests / 691 pass / 0 fail / 21 skip.
 - Red capture: `.scratch/h11/red.txt`; demo output: `.scratch/h11/demo.txt`.
 
 ---

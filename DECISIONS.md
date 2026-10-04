@@ -2301,3 +2301,161 @@ Postgres-mode skips (baseline 653/634/19). The Postgres-gated rows follow the
 M12 scratch-database convention and were not run live this session (no
 `DATABASE_URL`). Branch `feat/h8-cross-tenant-isolation`, ADR commit
 `5a86157`.
+
+---
+
+## ADR-031: Tamper-evident evidence — external anchors, operator-held checkpoints, recorded legal holds (H11)
+
+**Context:** M3 closed the in-process half of evidence hardening: a SHA-256
+hash chain over canonical event bodies, per-event Ed25519 signatures, an
+append-only SQLite store (BEFORE UPDATE/DELETE triggers), a `<seq>:<eventHash>`
+anchor file, and an offline `verifyBundle()`. Claim 8 names the residual
+plainly: the anchor file lives **inside the runtime's trust domain**, so an
+attacker with host access and the signing key can rewrite the store and the
+anchor consistently — the M3 anchor is a witness only if it lives somewhere the
+attacker does not control. ROADMAP H11 lists the failure modes that remain:
+whole-log rewrite, anchor collusion, clock manipulation, selective deletion,
+with the assumption "at least one append-only store the runtime cannot
+rewrite" and the test methodology "anchor consistency checks; verifier against
+adversarially rewritten logs; retention and legal-hold tests". M17 added the
+reverse direction — federation clients anchor their head-hashes INTO this plane
+(`POST /v1/anchors`) — but its `AnchorRegistry` keeps the accepted head
+in memory (an explicit ponytail marker: a restart cannot distinguish "first
+anchor" from "lost predecessor"). There is no source reconciliation anywhere:
+one anchor file, one reader, no fork detection, no operator-held proof, no
+recorded legal hold.
+
+**Decision:**
+
+1. **Anchor sinks are a port; the M3 file is one sink.** `AnchorSink`
+   (`name`, `publish(point)`, optional `flush()`, `status()`) and
+   `AnchorPublisher` (fan-out with per-sink isolation — a throwing sink must
+   not break an evidence append). `FileAnchorSink` keeps the exact M3 format
+   and stays synchronous. A new `HttpAnchorSink` POSTs
+   `{ version, kind: 'asl-anchor-head', seq, headHash, eventCount, sentAt }`
+   to an operator-configured URL with an optional bearer token (env; never
+   logged). Publication is **non-blocking**: a bounded queue, kick on publish,
+   explicit `flush()`, loud `published/failed/dropped/lastError` counters —
+   no timers, no process kept alive by a dead witness. The witness is a
+   detection surface, not a decision-path dependency, so it does not block
+   appends (availability) and does not join H15's `HealthState`; its status is
+   operator-inspectable (`evidence status`) and its failures are counted, not
+   silent.
+2. **The verifier reconciles sources.** `verifyAnchoredEvidence(bundle,
+   { sources, checkpoint?, publicKey? })` parses every source, enforces
+   monotone contiguous sequence numbers within a source, binds each line to
+   the event at its seq, requires at least one source to anchor the bundle
+   head, treats any source **ahead** of the bundle head as tail truncation,
+   and reports two sources disagreeing at one seq as a **fork** — the
+   anchor-collusion signal. A bundle without any source is reported
+   `unanchored: true`, never silently "anchored".
+3. **Operator-held checkpoints are the offline external witness.**
+   `asl-anchor-checkpoint` is an Ed25519-signed (existing event key — no new
+   key) JSON record `{ version, seq, headHash, eventCount, createdAt,
+   previousCheckpointDigest, signature }`. `verifyCheckpoint` refuses a
+   rewritten chain (the event at that seq hashes differently), a truncated
+   chain (checkpoint seq beyond the chain), a broken checkpoint chain
+   (previous digest mismatch, or the same seq with a different hash = fork),
+   and a bad signature. A checkpoint file the operator takes off-host
+   satisfies H11's assumption without requiring a live service.
+4. **The federation anchor registry becomes durable.** `AnchorRegistry`
+   replays `anchor.register` events in the constructor; the accepted head per
+   tenant survives restart, so a client's claimed previous head is still
+   checked against history. The event log is already the durable record — no
+   new table.
+5. **Clock manipulation is detected, not prevented.** Timestamps are part of
+   the signed/hashed body, so any edit breaks hash + signature; verification
+   additionally reports timestamp regressions as anomalies (non-fatal — an
+   NTP step is not an attack) and witness records carry the witness's own
+   `receivedAt`. H15's `ClockGuard` remains the runtime control; H11 adds no
+   clock authority.
+6. **Retention is structural; legal holds are signed evidence.**
+   `evidence.hold` / `evidence.release` are ordinary signed events (new
+   `KnownAction`s); `RetentionLedger` replays them (durable, restart-safe) and
+   answers `isHeld(tenant, seq)` / `activeHolds(tenant)`. No prune path
+   exists at any layer today (API surface, SQLite triggers, Postgres
+   triggers), and that is the retention control: the ledger is the contract a
+   future prune/archive-purge tool must consult, and the structural tests
+   (no delete/update method; storage-layer DELETE aborts) are its
+   enforcement.
+
+**Alternatives:**
+- **Block appends until the external witness acknowledges.** Rejected: it
+  couples evidence to witness availability and turns a detection mechanism
+  into a DoS chokepoint; H15's direction is loud degradation, not silent
+  failure — and a witness that is behind still detects truncation at its last
+  published head.
+- **A hosted transparency-log service in-repo.** Rejected: no service exists
+  and running one is deployment territory; the ADR fixes the protocol seam
+  (`POST` head, `GET` heads) so any operator-hosted sink (WORM bucket
+  front-end, transparency log) is a configuration, not a code change.
+- **Treat a second local file as "external".** Rejected: same trust domain —
+  an attacker with host access rewrites both. The honest external witnesses
+  are the operator-held checkpoint and the network sink.
+- **Persist the federation accepted heads to a table.** Rejected: the signed
+  `anchor.register` events already are the durable record; replay keeps the
+  single-writer chain as the one source of truth and avoids a second
+  consistency story.
+- **Enforce timestamp monotonicity as validity.** Rejected: a legitimate
+  clock step would invalidate an untampered log; the verifier reports the
+  anomaly and the chain/signature remain the controls.
+- **Prune/compact old evidence under retention windows.** Rejected for H11:
+  adding the first deletion path to an append-only plane to test the hold is
+  backwards; the hold ledger and structural no-delete tests establish the
+  contract, and a future archive tool is its consumer.
+
+**Reasoning:** H11's remaining gap is a trust-domain problem, not a hashing
+problem. The M3 primitives are correct; what is missing is a witness the
+runtime cannot rewrite and the reconciliation logic that makes multiple
+witnesses analytically useful. The design keeps every new piece on the
+evidence-side seam (sinks, verifier, checkpoints, holds) and adds zero
+authority: checkpoints sign with the existing event key, holds are operator
+events in the existing log, and the witness is an operator-configured
+destination. The milestone also closes the one M17 ponytail marker on the
+inbound federation path (in-memory accepted heads). The structural retention
+posture is stated as what it is: today nothing deletes, so the hold's
+enforcement is the absence of a deletion path plus storage-level triggers;
+the ledger makes the legal-hold claim a recorded fact instead of an
+implication.
+
+**Security implications:** closes Claim 8's residual **when at least one sink
+or checkpoint lives outside the runtime's trust domain** — a rewritten or
+truncated store is then caught by reconciliation even if the attacker holds
+the signing key. Adds fork detection (anchor collusion between sources) and a
+durable federation anchor history. Does NOT close: an attacker who controls
+both the store and *every* sink (for example, the witness operator colludes);
+compromised signing-key custody (ADR-008, unchanged); hardware WORM/HSM
+attestation (HARD stage); a malicious operator who never takes a checkpoint.
+The witness POST is new operator-configured egress from the evidence path;
+the token is env-only and redacted from all output.
+
+**Tradeoffs:** the witness sink is best-effort, so detection granularity
+degrades while it is down (counted, not silent); a bounded queue drops the
+oldest pending points under prolonged outage (the newest head still proves
+truncation for everything before it); checkpoints are manual operator steps;
+hold events are append-only facts whose release is itself an event (no
+history is rewritten). No new runtime dependency, no schema change, no
+decision-path change.
+
+**Residual risk (ponytail):** accepted and named:
+- **Host attacker + all witnesses compromised.** If the attacker can rewrite
+  the store, the anchor file, the witness records, and the operator's
+  checkpoint, there is no detection left — that is H11's named residual
+  ("an attacker who controls both the log and the anchor").
+- **Witness operator collusion / split-view.** Two colluding witnesses can
+  present consistent lies; reconciliation detects disagreement, not a
+  coordinated false view. Multi-party public transparency logs are the HARD
+  upgrade.
+- **Signing-key custody** stays environment/ADR-008; key rotation requires
+  re-signing history (unchanged from ADR-013/Claim 8).
+- **Clock claims** are claims: regression reporting is heuristic; the
+  authoritative time is whichever witness/checkpoint the operator holds.
+- **No prune exists**, so the legal-hold ledger is currently enforced by
+  construction plus its tests, not by a live prune gate.
+
+**Future migration path:** point `EVENT_ANCHOR_WITNESS_URL` at an
+operator-hosted transparency log or WORM front-end; batch witness publishes
+if volume grows; a hosted witness service is a separate deployment artifact;
+prune/archive tooling (if ever built) must consume `RetentionLedger.isHeld`
+and add its own structural tests; checkpoint chaining is the seed for
+publication to third-party logs.

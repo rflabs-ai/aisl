@@ -1,0 +1,10 @@
+
+> ai-security-layer@0.1.0 supply-chain
+> node src/cli.ts build gate
+
+
+SUPPLY-CHAIN GATE (H10, ADR-024)
+--------------------------------
+  OK     sbom digest                                    sha256-14b0008eb4572f506ec4a4c4e750a692b5f4d34443e5dd38e630fc944581b116
+  INFO   packages inventoried                           25
+  supply-chain gate passed.

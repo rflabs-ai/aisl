@@ -22,7 +22,19 @@ import { AgentSession, LocalSandbox } from './runtime.ts';
 import { AuthorizationService } from './pdp.ts';
 import { policyBundleHash, createEngineFromBundle } from './policy-config.ts';
 import { mockAuth } from './testing.ts';
-import { verifyBundle, eventPublicKey, EventLog, StoreUnavailableError, type EventInput, type SecurityEvent, type EventStore } from './events.ts';
+import {
+  verifyBundle,
+  eventPublicKey,
+  EventLog,
+  StoreUnavailableError,
+  GENESIS_HASH,
+  bundleFromEvents,
+  eventHash,
+  signEventBody,
+  type EventInput,
+  type SecurityEvent,
+  type EventStore,
+} from './events.ts';
 import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-testing.ts';
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
@@ -58,6 +70,18 @@ import {
 } from './updates.ts';
 import { InMemoryRevocationChannel, verifyIncidentBundle, type IncidentBundle } from './incident.ts';
 import { ClockGuard } from './health.ts';
+import {
+  HttpAnchorSink,
+  checkpointDigest,
+  createCheckpoint,
+  fetchWitnessHeads,
+  parseAnchorLines,
+  verifyAnchoredEvidence,
+  verifyCheckpoint,
+  witnessHeadsToAnchorContent,
+  type EvidenceCheckpoint,
+} from './anchors.ts';
+import { RetentionLedger } from './retention.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -76,6 +100,36 @@ class DemoFlakyStore extends EventLog {
     if (this.fail) throw new StoreUnavailableError('demo store outage (endpoint redacted)');
     return super.append(input);
   }
+}
+
+/**
+ * H11 demo seam: rebuild a chain as a host attacker WITH the signing key
+ * would — relink, rehash, re-sign. The rebuilt chain verifies against itself;
+ * only the operator-held checkpoint / anchor catches it.
+ */
+function resignChain(events: readonly SecurityEvent[]): SecurityEvent[] {
+  const out: SecurityEvent[] = [];
+  for (const e of events) {
+    const partial: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
+      seq: out.length,
+      timestamp: e.timestamp,
+      tenantId: e.tenantId,
+      principal: e.principal,
+      actor: e.actor,
+      actorKind: e.actorKind,
+      action: e.action,
+      resourceId: e.resourceId,
+      decision: e.decision,
+      denyReason: e.denyReason,
+      policyId: e.policyId,
+      capabilityId: e.capabilityId,
+      result: e.result,
+      metadata: e.metadata,
+      previousEventHash: out.at(-1)?.eventHash ?? GENESIS_HASH,
+    };
+    out.push({ ...partial, eventHash: eventHash(partial), signature: signEventBody(partial) });
+  }
+  return out;
 }
 
 async function demo(): Promise<void> {
@@ -812,6 +866,120 @@ async function demo(): Promise<void> {
     } finally {
       h15Store?.close();
       rmSync(h15Dir, { recursive: true, force: true });
+    }
+  }
+
+  // H11: tamper-evident evidence (ADR-031). A self-contained store publishes
+  // every head to an in-process witness and a local anchor file, the operator
+  // signs a checkpoint, and a host attacker WITH the signing key truncates and
+  // re-signs the chain — the checkpoint and the fork both catch it. A legal hold
+  // is recorded as signed evidence and survives a ledger rebuild.
+  heading('24. H11: tamper-evident evidence — witness, checkpoint, fork, legal hold');
+  {
+    const h11Dir = mkdtempSync(join(tmpdir(), 'asl-h11-'));
+    let h11Store: EventLog | undefined;
+    try {
+      const anchorPath = join(h11Dir, 'evidence.anchor');
+      const witnessRecords = new Map<number, string>();
+      const witnessFetch: typeof globalThis.fetch = async (_url, init) => {
+        if ((init?.method ?? 'GET') === 'POST') {
+          const point = JSON.parse(String(init?.body ?? '{}')) as { seq?: unknown; headHash?: unknown };
+          if (typeof point.seq === 'number' && typeof point.headHash === 'string') {
+            witnessRecords.set(point.seq, point.headHash);
+          }
+          return new Response('{"ok":true}', { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({
+            version: 1,
+            heads: [...witnessRecords].map(([seq, headHash]) => ({ seq, headHash, receivedAt: 1 })),
+          }),
+          { status: 200 },
+        );
+      };
+      const witnessSink = new HttpAnchorSink({ url: 'https://witness.demo/heads', fetchFn: witnessFetch });
+      h11Store = new EventLog(undefined, { anchorPath, sinks: [witnessSink] });
+      for (let i = 0; i < 6; i++) {
+        h11Store.append({
+          tenantId: TENANT_A,
+          principal: 'agent:summarizer-1',
+          actor: 'agent:summarizer-1',
+          actorKind: 'agent',
+          action: 'read',
+          decision: 'allow',
+          result: 'success',
+          metadata: { note: `h11 demo ${i}` },
+        });
+      }
+      await h11Store.flushAnchors();
+      const h11Events = h11Store.all();
+      const checkpoint = createCheckpoint(h11Events);
+      const witnessHeads = await fetchWitnessHeads('https://witness.demo/heads', { fetchFn: witnessFetch });
+      const witnessSource = { name: 'witness', content: witnessHeadsToAnchorContent(witnessHeads) };
+      const verified = verifyAnchoredEvidence(h11Store.bundle(), {
+        sources: [{ name: 'local-file', content: h11Store.anchor() }, witnessSource],
+        publicKey: eventPublicKey(),
+        checkpoint,
+      });
+      const h11Check = (ok: boolean): void => {
+        if (!ok) process.exitCode = 1;
+      };
+      line(
+        'two anchor sources + checkpoint',
+        verified.valid ? 'VERIFIED' : 'FAIL',
+        `${h11Events.length} events, ${witnessHeads.length} witness heads, ${verified.sources.length} sources bound`,
+      );
+      h11Check(verified.valid);
+
+      const rewritten = resignChain(h11Events.slice(0, 4));
+      const selfCheck = verifyBundle(bundleFromEvents(rewritten), { publicKey: eventPublicKey() });
+      const caught = verifyCheckpoint(checkpoint, rewritten, { publicKey: eventPublicKey() });
+      const truncationCaught = !caught.valid && selfCheck.valid;
+      line(
+        're-signed chain truncation (host attacker has the key)',
+        truncationCaught ? 'DETECTED' : 'FAIL',
+        caught.errors[0] ?? 'not detected',
+      );
+      h11Check(truncationCaught);
+
+      const forkedLines = h11Store.anchor().split('\n');
+      forkedLines[3] = `3:${'f'.repeat(64)}`;
+      const forked = verifyAnchoredEvidence(h11Store.bundle(), {
+        sources: [{ name: 'local-file-forked', content: forkedLines.join('\n') }, witnessSource],
+        publicKey: eventPublicKey(),
+      });
+      line(
+        'anchor fork (two sources disagree)',
+        forked.fork?.seq === 3 ? 'DETECTED' : 'FAIL',
+        forked.fork ? `seq ${forked.fork.seq} across ${forked.fork.hashes.length} sources` : 'no fork found',
+      );
+      h11Check(forked.fork?.seq === 3);
+
+      const ledger = new RetentionLedger(h11Store);
+      const hold = ledger.hold(world.user, { tenantId: TENANT_A, fromSeq: 2, toSeq: 4, reason: 'demo legal hold' });
+      const rebuilt = new RetentionLedger(h11Store);
+      const holdOk = rebuilt.isHeld(TENANT_A, 3) && !rebuilt.isHeld(TENANT_A, 5);
+      line(
+        'legal hold (signed, survives rebuild)',
+        holdOk ? 'RECORDED' : 'FAIL',
+        `hold event #${hold.eventSeq}, tenant ${TENANT_A} seq 2..4`,
+      );
+      if (!holdOk) process.exitCode = 1;
+
+      // The hold appended one more event; drain it so the delivery numbers are
+      // final (a pending queue is honest, a stale check is not).
+      await h11Store.flushAnchors();
+      const sinkStatus = witnessSink.status();
+      const delivered = sinkStatus.pending === 0 && sinkStatus.published === h11Store.all().length;
+      line(
+        'witness delivery',
+        delivered ? 'DELIVERED' : 'FAIL',
+        `published=${sinkStatus.published}/${h11Store.all().length} failed=${sinkStatus.failed} pending=${sinkStatus.pending} dropped=${sinkStatus.dropped}`,
+      );
+      if (!delivered) process.exitCode = 1;
+    } finally {
+      h11Store?.close();
+      rmSync(h11Dir, { recursive: true, force: true });
     }
   }
 
@@ -1600,6 +1768,185 @@ async function incidentCommand(): Promise<void> {
   }
 }
 
+/**
+ * H11 evidence commands (ADR-031):
+ * `evidence status|checkpoint|verify|witness|hold|release`.
+ *
+ * Operator commands build a bootstrap-free world (no fixture issuance, no
+ * fixture appends). The checkpoint is signed with the event-signing key and is
+ * meant to be moved OFF this host — it is the external witness. Legal holds
+ * are signed events; the operator may only hold its own tenant.
+ */
+async function evidenceCommand(): Promise<void> {
+  const sub = process.argv[3] ?? 'status';
+  const world = await buildWorldAsync({ bootstrap: false });
+
+  const usage = (): void => {
+    console.error('  usage: evidence status');
+    console.error('         evidence checkpoint [outPath] [previousCheckpointPath]');
+    console.error('         evidence verify <bundlePath> [anchorPath] [checkpointPath]');
+    console.error('         evidence witness <url> [anchorPath]');
+    console.error('         evidence hold <tenantId> <fromSeq> <toSeq> <reason...>');
+    console.error('         evidence release <holdSeq> <reason...>');
+    process.exitCode = 1;
+  };
+
+  try {
+    if (sub === 'status') {
+      const chain = world.eventLog.verify({ publicKey: eventPublicKey() });
+      const anchorContent = world.eventLog.anchor();
+      const parsed = parseAnchorLines(anchorContent);
+      const holds = new RetentionLedger(world.eventLog).status();
+      heading('EVIDENCE STATUS (H11, ADR-031)');
+      line('hash chain + signatures', chain.valid ? 'VALID' : 'INVALID', `${chain.count} events`);
+      line(
+        'local anchor file',
+        anchorContent ? 'CONFIGURED' : 'NOT CONFIGURED',
+        anchorContent ? `${parsed.lines.length} lines, head seq ${parsed.lines.at(-1)?.seq ?? 'none'}` : 'set EVENT_ANCHOR_PATH for a local witness',
+      );
+      line(
+        'external witness',
+        process.env.EVENT_ANCHOR_WITNESS_URL ? 'CONFIGURED' : 'NOT CONFIGURED',
+        process.env.EVENT_ANCHOR_WITNESS_URL ? 'EVENT_ANCHOR_WITNESS_URL is set (publishes every head)' : 'set EVENT_ANCHOR_WITNESS_URL to anchor outside this host',
+      );
+      line(
+        'legal holds',
+        holds.active > 0 ? 'ACTIVE' : 'none',
+        `${holds.active} active of ${holds.holds} recorded${holds.tenants.length > 0 ? ` (${holds.tenants.join(', ')})` : ''}`,
+      );
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log("  note: this process has an in-memory world — set EVENT_STORE=postgres + DATABASE_URL to read the running node's evidence.");
+      }
+      return;
+    }
+
+    if (sub === 'checkpoint') {
+      const events = world.eventLog.all();
+      const outPath = process.argv[4] ?? join(ROOT, 'artifacts', 'evidence-checkpoint.json');
+      const previousPath = process.argv[5];
+      const previous: EvidenceCheckpoint | undefined = previousPath
+        ? (JSON.parse(readFileSync(previousPath, 'utf8')) as EvidenceCheckpoint)
+        : undefined;
+      const checkpoint = createCheckpoint(events, previous ? { previous } : {});
+      const verified = verifyCheckpoint(checkpoint, events, {
+        publicKey: eventPublicKey(),
+        ...(previous ? { previous } : {}),
+      });
+      if (!verified.valid) throw new Error(`checkpoint failed self-verification: ${verified.errors.join('; ')}`);
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+      await world.eventLog.flushAnchors();
+      line('evidence checkpoint', 'SIGNED', `head seq ${checkpoint.seq}, digest ${checkpointDigest(checkpoint).slice(0, 19)}...`);
+      console.log(`  artifact: ${outPath} — move it off this host; it is the external witness`);
+      return;
+    }
+
+    if (sub === 'verify') {
+      const bundlePath = process.argv[4] ?? '';
+      if (!bundlePath) return usage();
+      const anchorPath = process.argv[5];
+      const checkpointPath = process.argv[6];
+      const sources = anchorPath
+        ? [{ name: 'anchor-file', content: readFileSync(anchorPath, 'utf8') }]
+        : [];
+      const checkpoint: EvidenceCheckpoint | undefined = checkpointPath
+        ? (JSON.parse(readFileSync(checkpointPath, 'utf8')) as EvidenceCheckpoint)
+        : undefined;
+      const result = verifyAnchoredEvidence(readFileSync(bundlePath, 'utf8'), {
+        sources,
+        publicKey: eventPublicKey(),
+        ...(checkpoint ? { checkpoint } : {}),
+      });
+      heading('EVIDENCE VERIFY (H11, ADR-031)');
+      line('bundle chain + signatures', result.bundle.valid ? 'VALID' : 'INVALID', `${result.bundle.eventCount} events`);
+      for (const source of result.sources) {
+        line(
+          `source ${source.name}`,
+          source.errors.length === 0 && source.matchesBundleHead ? 'MATCHES' : 'MISMATCH',
+          `${source.lines} lines, head seq ${source.headSeq ?? 'none'}, ahead=${source.aheadOfBundle}, head-covered=${source.matchesBundleHead}`,
+        );
+      }
+      if (result.fork) line('anchor fork', 'DETECTED', `seq ${result.fork.seq}: ${result.fork.hashes.map((h) => `${h.source}=${h.headHash.slice(0, 12)}...`).join(' vs ')}`);
+      if (checkpoint && result.checkpoint) {
+        line('checkpoint', result.checkpoint.valid ? 'VALID' : 'INVALID', result.checkpoint.errors.join('; ') || `bound at seq ${checkpoint.seq}`);
+      }
+      if (result.bundle.timestampAnomalies.length > 0) {
+        line('timestamp anomalies', 'REPORTED', `${result.bundle.timestampAnomalies.length} regression(s) — inspect, not fatal`);
+      }
+      for (const error of result.errors) console.log(`         ${error}`);
+      line(
+        'result',
+        result.valid ? (result.unanchored ? 'UNANCHORED' : 'VERIFIED') : 'REFUSED',
+        result.unanchored ? 'the chain verifies but no source/checkpoint was presented' : result.errors.length === 0 ? 'all checks passed' : `${result.errors.length} failure(s)`,
+      );
+      if (!result.valid) process.exitCode = 1;
+      return;
+    }
+
+    if (sub === 'witness') {
+      const url = process.argv[4] ?? '';
+      if (!url) return usage();
+      const anchorPath = process.argv[5];
+      const heads = await fetchWitnessHeads(url, {
+        ...(process.env.EVENT_ANCHOR_WITNESS_TOKEN ? { token: process.env.EVENT_ANCHOR_WITNESS_TOKEN } : {}),
+      });
+      const sources = [
+        { name: 'witness', content: witnessHeadsToAnchorContent(heads) },
+        ...(anchorPath ? [{ name: 'anchor-file', content: readFileSync(anchorPath, 'utf8') }] : []),
+      ];
+      const result = verifyAnchoredEvidence(world.eventLog.bundle(), { sources, publicKey: eventPublicKey() });
+      heading('EVIDENCE WITNESS (H11, ADR-031)');
+      line('witness heads', heads.length > 0 ? 'FETCHED' : 'EMPTY', `${heads.length} heads from the configured witness`);
+      for (const source of result.sources) {
+        line(`source ${source.name}`, source.errors.length === 0 ? 'OK' : 'MISMATCH', `${source.lines} lines, head seq ${source.headSeq ?? 'none'}`);
+        for (const error of source.errors) console.log(`         ${error}`);
+      }
+      if (result.fork) line('anchor fork', 'DETECTED', `seq ${result.fork.seq}`);
+      line('result', result.valid ? 'CONSISTENT' : 'REFUSED', result.errors.join('; ') || 'the witness corroborates the local chain');
+      if (!result.valid) process.exitCode = 1;
+      return;
+    }
+
+    if (sub === 'hold') {
+      const tenantId = process.argv[4] ?? '';
+      const fromSeq = Number(process.argv[5]);
+      const toSeq = Number(process.argv[6]);
+      const reason = process.argv.slice(7).join(' ').trim();
+      if (!tenantId || !Number.isInteger(fromSeq) || !Number.isInteger(toSeq) || !reason) return usage();
+      const ledger = new RetentionLedger(world.eventLog);
+      const hold = ledger.hold(world.user, { tenantId, fromSeq, toSeq, reason });
+      line('legal hold recorded', 'HELD', `tenant ${tenantId} seq ${fromSeq}..${toSeq} — event #${hold.eventSeq} (${reason})`);
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log("  note: this process has an in-memory world — set EVENT_STORE=postgres + DATABASE_URL to hold a running node's evidence.");
+      }
+      return;
+    }
+
+    if (sub === 'release') {
+      const holdSeq = Number(process.argv[4]);
+      const reason = process.argv.slice(5).join(' ').trim();
+      if (!Number.isInteger(holdSeq) || !reason) return usage();
+      const ledger = new RetentionLedger(world.eventLog);
+      const released = ledger.release(world.user, { holdSeq, reason });
+      line('legal hold released', 'RELEASED', `hold event #${released.eventSeq} — ${reason} (the hold stays in the log)`);
+      return;
+    }
+
+    usage();
+  } catch (error) {
+    // Refusals (cross-tenant hold, empty chain checkpoint, bad witness) print a
+    // diagnosable line instead of a raw stack trace.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`  evidence command refused: ${message}`);
+    process.exitCode = 1;
+  } finally {
+    await world.eventLog.flushAnchors().catch(() => {});
+    await world.incident.flush().catch(() => {});
+    world.incident.close();
+    world.eventLog.close();
+  }
+}
+
 const command = process.argv[2] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
@@ -1607,7 +1954,8 @@ else if (command === 'benchmark') await benchmark();
 else if (command === 'build') await buildCommand();
 else if (command === 'update') await updateCommand();
 else if (command === 'incident') await incidentCommand();
+else if (command === 'evidence') await evidenceCommand();
 else {
-  console.error(`unknown command: ${command} (try demo | attack | benchmark | build | update | incident)`);
+  console.error(`unknown command: ${command} (try demo | attack | benchmark | build | update | incident | evidence)`);
   process.exitCode = 1;
 }

@@ -8,10 +8,9 @@
  * from the body (a mismatched `tenant` field is refused, not silently ignored).
  * The payload is a hash + counts only — no project plaintext crosses in.
  *
- * ponytail: the registry is in-memory (mismatch detection is advisory; the
- * durable attestation is the event itself, which the EventStore already
- * persists append-only). Upgrade: persist accepted heads to a table if a
- * restart must distinguish "first anchor" from "lost predecessor".
+ * H11 (ADR-031): the accepted head per tenant is rehydrated from the durable
+ * `anchor.register` events on construction — mismatch detection survives a
+ * restart (the M17 in-memory marker is closed).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -43,6 +42,23 @@ export class AnchorRegistry {
   constructor(eventLog: EventStore, now: () => number = Date.now) {
     this.eventLog = eventLog;
     this.now = now;
+    this.rehydrateAcceptedHeads();
+  }
+
+  /**
+   * H11 (ADR-031): rebuild the accepted head per tenant from the append-only
+   * event log — the durable record is the `anchor.register` event itself. A
+   * restarted registry therefore still distinguishes "first anchor" from
+   * "lost predecessor" (closes the M17 in-memory ponytail marker).
+   */
+  private rehydrateAcceptedHeads(): void {
+    for (const event of this.eventLog.all()) {
+      if (event.action !== 'anchor.register') continue;
+      const metadata = event.metadata;
+      if (!metadata || metadata.phase !== 'federation-anchor') continue;
+      const headHash = metadata.headHash;
+      if (typeof headHash === 'string') this.lastHeadByTenant.set(event.tenantId, headHash);
+    }
   }
 
   /**

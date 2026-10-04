@@ -27,6 +27,10 @@ import {
   type PrincipalKind,
   canonicalJson,
 } from './domain.ts';
+// Type-only: the sink port is implemented in src/anchors.ts (H11, ADR-031).
+// A full `import type` statement is erased at runtime — an inline `{ type X }`
+// would keep a load edge back to anchors.ts and close a cycle (H13 lesson).
+import type { AnchorPoint, AnchorSink } from './anchors.ts';
 
 export type EventResult = 'success' | 'denied' | 'error';
 
@@ -109,6 +113,8 @@ export interface EventStore {
   verify(options?: { publicKey?: KeyObject }): ChainVerification;
   bundle(): string;
   anchor(): string;
+  /** H11: drain every configured anchor sink (external witness delivery). */
+  flushAnchors(): Promise<void>;
   close(): void;
 }
 
@@ -281,6 +287,35 @@ export interface ChainVerification {
   readonly detail?: string;
 }
 
+/**
+ * H11 (ADR-031): a signed timestamp that regresses against its predecessor.
+ * Reported, never fatal — a legitimate clock step is not an attack, and the
+ * hash chain + signature remain the integrity controls.
+ */
+export interface TimestampAnomaly {
+  readonly seq: number;
+  readonly previousSeq: number;
+  readonly timestamp: number;
+  readonly previousTimestamp: number;
+}
+
+export function collectTimestampAnomalies(events: readonly SecurityEvent[]): TimestampAnomaly[] {
+  const anomalies: TimestampAnomaly[] = [];
+  for (let i = 1; i < events.length; i++) {
+    const previous = events[i - 1]!;
+    const current = events[i]!;
+    if (current.timestamp < previous.timestamp) {
+      anomalies.push({
+        seq: current.seq,
+        previousSeq: previous.seq,
+        timestamp: current.timestamp,
+        previousTimestamp: previous.timestamp,
+      });
+    }
+  }
+  return anomalies;
+}
+
 export interface SigningKeyPair {
   readonly privateKey: KeyObject;
   readonly publicKey: KeyObject;
@@ -371,9 +406,11 @@ export class EventLog implements EventStore {
   private readonly db?: DatabaseSync;
   private readonly insert?: ReturnType<DatabaseSync['prepare']>;
   private readonly anchorPath?: string;
+  private readonly anchorSinks: readonly AnchorSink[];
 
-  constructor(sqlitePath?: string, options: { anchorPath?: string } = {}) {
+  constructor(sqlitePath?: string, options: { anchorPath?: string; sinks?: readonly AnchorSink[] } = {}) {
     if (options.anchorPath) this.anchorPath = options.anchorPath;
+    this.anchorSinks = options.sinks ?? [];
     if (!sqlitePath) return;
     this.db = new DatabaseSync(sqlitePath);
     this.db.exec(`
@@ -438,7 +475,34 @@ export class EventLog implements EventStore {
     this.events.push(event);
     this.insert?.run(event.seq, event.tenantId, event.timestamp, event.eventHash, JSON.stringify(event));
     if (this.anchorPath) this.appendAnchor(event);
+    this.publishAnchorPoint(event);
     return event;
+  }
+
+  /**
+   * H11 (ADR-031): fan the head out to every configured sink. A throwing sink
+   * is wrapped — the evidence append must never fail because a witness did.
+   */
+  private publishAnchorPoint(event: SecurityEvent): void {
+    if (this.anchorSinks.length === 0) return;
+    const point: AnchorPoint = {
+      seq: event.seq,
+      headHash: event.eventHash,
+      eventCount: event.seq + 1,
+      at: event.timestamp,
+    };
+    for (const sink of this.anchorSinks) {
+      try {
+        sink.publish(point);
+      } catch {
+        process.emitWarning?.(`anchor sink '${sink.name}' threw on publish (evidence append unaffected)`);
+      }
+    }
+  }
+
+  /** H11: drain external witness delivery (Postgres/HTTP sinks may be async). */
+  async flushAnchors(): Promise<void> {
+    await Promise.all(this.anchorSinks.map((sink) => sink.flush()));
   }
 
   /**
@@ -546,6 +610,8 @@ export interface VerificationResult {
   readonly signatureValid: boolean;
   readonly anchorMatch: boolean;
   readonly errors: readonly string[];
+  /** H11: timestamp regressions across the verified slice (reported, not fatal). */
+  readonly timestampAnomalies: readonly TimestampAnomaly[];
 }
 
 /**
@@ -562,7 +628,7 @@ export function verifyBundle(
     try {
       parsed = JSON.parse(bundleJson) as typeof parsed;
     } catch (e) {
-      return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: [`bundle is not valid JSON: ${(e as Error).message}`] };
+      return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: [`bundle is not valid JSON: ${(e as Error).message}`], timestampAnomalies: [] };
     }
   } else if (Array.isArray(bundleJson)) {
     parsed = {
@@ -580,8 +646,9 @@ export function verifyBundle(
   }
   const events = parsed.events ?? [];
   if (events.length === 0) {
-    return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: ['bundle contains no events'] };
+    return { valid: false, eventCount: 0, signatureValid: false, anchorMatch: false, errors: ['bundle contains no events'], timestampAnomalies: [] };
   }
+  const timestampAnomalies = collectTimestampAnomalies(events);
 
   let prev = parsed.genesis ?? (parsed.previousHead !== undefined && parsed.previousHead !== null ? parsed.previousHead : GENESIS_HASH);
   let signatureValid = true;
@@ -589,7 +656,7 @@ export function verifyBundle(
   for (const e of events) {
     if (e.previousEventHash !== prev) {
       errors.push(`seq ${e.seq}: previousEventHash does not match expected predecessor`);
-      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors };
+      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors, timestampAnomalies };
     }
     const body: Omit<SecurityEvent, 'eventHash' | 'signature'> = {
       seq: e.seq,
@@ -611,7 +678,7 @@ export function verifyBundle(
     const recomputed = eventHash(body);
     if (recomputed !== e.eventHash) {
       errors.push(`seq ${e.seq}: eventHash recomputation mismatch`);
-      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors };
+      return { valid: false, eventCount: events.length, signatureValid: false, anchorMatch: false, errors, timestampAnomalies };
     }
     if (options.publicKey) {
       if (!e.signature || !verifyEventSignature(e, options.publicKey)) {
@@ -625,7 +692,7 @@ export function verifyBundle(
   const last = events.at(-1)!;
   if (parsed.head !== undefined && parsed.head !== last.eventHash) {
     errors.push(`bundle head ${parsed.head} does not match last event hash ${last.eventHash}: tail truncation suspected`);
-    return { valid: false, eventCount: events.length, signatureValid: signatureChecked ? signatureValid : true, anchorMatch: false, errors };
+    return { valid: false, eventCount: events.length, signatureValid: signatureChecked ? signatureValid : true, anchorMatch: false, errors, timestampAnomalies };
   }
 
   let anchorMatch = true;
@@ -642,5 +709,6 @@ export function verifyBundle(
     signatureValid: signatureChecked ? signatureValid : true,
     anchorMatch,
     errors,
+    timestampAnomalies,
   };
 }

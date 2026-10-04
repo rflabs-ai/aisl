@@ -91,10 +91,12 @@ src/
   incident.ts         kill switch + revocation channel + evidence preservation (H13, ADR-026)
   incident-store-pg.ts Postgres revocation channel + migration 4 (H13, ADR-026)
   health.ts           fail-closed availability: observed health + clock guard (H15, ADR-027)
+  anchors.ts          external anchor sinks + multi-source reconciliation + signed checkpoints (H11, ADR-031)
+  retention.ts        recorded legal holds replayed from the event log (H11, ADR-031)
   slo.ts              assurance-target catalog + gate (ADR-014, M10)
   attacks.ts          declarative adversarial harness
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)
-  cli.ts              demo | attack | benchmark
+  cli.ts              demo | attack | benchmark | build | update | incident | evidence
   testing.ts          test wiring only
 
 tests/             unit + integration + the 12 security invariants + milestone suites

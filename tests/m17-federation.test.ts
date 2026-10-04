@@ -282,6 +282,7 @@ class ThrowingEventLog implements EventStore {
   anchor(): string {
     return '';
   }
+  async flushAnchors(): Promise<void> {}
   close(): void {}
 }
 

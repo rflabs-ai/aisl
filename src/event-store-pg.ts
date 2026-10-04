@@ -34,6 +34,8 @@ import {
   signEventBody,
   verifyChain,
 } from './events.ts';
+// Type-only: sink port implemented in src/anchors.ts (H11, ADR-031).
+import type { AnchorPoint, AnchorSink } from './anchors.ts';
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -84,6 +86,8 @@ export interface PostgresEventLogConfig {
   /** DDL-capable role connection (app_ddl). Omit when migrations are already applied. */
   readonly migrateUrl?: string;
   readonly anchorPath?: string;
+  /** H11: external anchor sinks (HTTP witnesses, extra file witnesses). */
+  readonly sinks?: readonly AnchorSink[];
 }
 
 function migrationHash(sql: string): string {
@@ -151,6 +155,7 @@ export class PostgresEventLog implements EventStore {
   private readonly events: SecurityEvent[] = [];
   private readonly sql: Sql;
   private readonly anchorPath?: string;
+  private readonly anchorSinks: readonly AnchorSink[];
   /** Endpoint host only — the full URL is a secret and is never retained. */
   private readonly endpoint: string;
   private tail: Promise<void>;
@@ -159,6 +164,7 @@ export class PostgresEventLog implements EventStore {
 
   constructor(config: PostgresEventLogConfig) {
     this.anchorPath = config.anchorPath;
+    this.anchorSinks = config.sinks ?? [];
     this.endpoint = endpointOf(config.url);
     this.sql = postgres(config.url);
     this.tail = this.connect(config);
@@ -291,7 +297,27 @@ export class PostgresEventLog implements EventStore {
     };
     this.events.push(event);
     if (this.anchorPath) appendAnchorLine(this.anchorPath, event);
+    if (this.anchorSinks.length > 0) {
+      const point: AnchorPoint = {
+        seq: event.seq,
+        headHash: event.eventHash,
+        eventCount: event.seq + 1,
+        at: event.timestamp,
+      };
+      for (const sink of this.anchorSinks) {
+        try {
+          sink.publish(point);
+        } catch {
+          process.emitWarning?.(`anchor sink '${sink.name}' threw on publish (evidence append unaffected)`);
+        }
+      }
+    }
     return event;
+  }
+
+  /** H11: drain external witness delivery (HTTP sinks may be async). */
+  async flushAnchors(): Promise<void> {
+    await Promise.all(this.anchorSinks.map((sink) => sink.flush()));
   }
 
   /** Store-level migrate event: mirrored synchronously, persisted directly (not queued). */

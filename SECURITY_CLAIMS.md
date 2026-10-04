@@ -257,7 +257,16 @@ persistence drops) cannot make a stored event irreproducible after reload
 (`src/events.ts:204`); head-hash anchor file (`<seq>:<eventHash>\n`,
 `src/events.ts:269`); standalone `verifyBundle()` verifier that operates
 entirely on an exported bundle plus optional public key and anchor content
-(`src/events.ts:357`).
+(`src/events.ts:357`). **H11 (ADR-031):** external anchor sinks
+(`src/anchors.ts`) publish every head to operator-configured witnesses
+(`HttpAnchorSink`, a second `FileAnchorSink`) without blocking an append;
+`verifyAnchoredEvidence` reconciles any number of anchor sources — line/event
+binding, head coverage, a source ahead of the bundle head = tail truncation,
+two sources disagreeing at one seq = **fork**; `createCheckpoint` /
+`verifyCheckpoint` sign and verify an operator-held `asl-anchor-checkpoint`
+with the same event key (no new key), refusing truncation, rewrite, broken
+chaining, same-seq forks, and bad signatures. Timestamp regressions are
+reported as non-fatal anomalies; witness records carry the witness clock.
 
 **Threat model:** TM-004 (evidence store as a target).
 
@@ -273,20 +282,26 @@ check that EventLog has no update or delete method); benchmark `hashChainValid`.
 **Test:** `tests/invariants.test.ts` invariant 8;
 `tests/m3-evidence-hardening.test.ts`.
 
-**Known limitations:** an attacker with host access can rewrite both the
-event store and the anchor file *consistently* if they hold the signing key —
-that is the residual risk and the reason the anchor is meant to live on a
-witness the attacker does not control (a customer-held WORM bucket, a
-transparency log, or a separate storage tier). Verification without the
+**Known limitations:** a host attacker who holds the signing key can rewrite
+the event store and a local anchor file *consistently* — H11 (ADR-031) closes
+this whenever at least one anchor sink or the operator-held checkpoint lives
+outside the runtime's trust domain (a truncated chain re-signed with the same
+key fails the checkpoint; cross-source disagreement is reported as a fork).
+The remaining residual is an attacker who controls the store **and every
+witness and checkpoint** (including a colluding/split-view witness operator) —
+that is the residual risk. Verification without the
 public key still detects modification and tail truncation via the hash chain;
 signature verification is what proves *who* signed each event. Rotation of
 the signing key is not implemented — a key compromise requires re-signing
 history (a migration, not a flag), same caveat as ADR-013.
 
-**Residual risk:** MEDIUM when the anchor file is on attacker-accessible
-storage; LOW when the anchor is on a witness outside the runtime's trust
-domain. Hardware-backed key custody (HSM/TPM) and external transparency-log
-publication are HARD-stage items that close the residual.
+**Residual risk:** LOW when an H11 witness or checkpoint is off-host and HONEST
+(a signed checkpoint catches a full re-signed rewrite; a witness ahead of the
+bundle catches truncation); MEDIUM when the anchor file and the store share the
+runtime's trust domain and no checkpoint is taken; the named residual is an
+attacker who controls every witness and checkpoint — multi-party public
+transparency logs are the HARD-stage upgrade. Hardware-backed key custody
+(HSM/TPM) remains a HARD-stage item.
 
 ---
 
@@ -331,7 +346,7 @@ DEPLOYMENT.md's role setup).
 proofs (17 tests against a real Postgres: zero rows without context, zero
 cross-tenant rows, INSERT with wrong context rejected, no cross-tenant
 seal opening); SQLite-mode parity suite (memory + SQLite backends); H8
-cross-tenant probe (22 cases: 8 REST routes, 12 in-process surfaces, 2
+cross-tenant probe (23 cases: 8 REST routes, 13 in-process surfaces, 2
 Postgres-gated skips) plus the evidence-seal extension (`tests/evidence.test.ts`),
 including log-scan marker assertions (no foreign tenant marker or sealed
 plaintext in the caller's visible records or responses).
@@ -2016,12 +2031,13 @@ time of writing (a new surface must add a row); the planted markers are
 representative of tenant data; the process itself is not compromised
 (known-gap #7).
 
-**Evidence:** `tests/h8-cross-tenant-probe.test.ts` — 22 cases (8 REST:
+**Evidence:** `tests/h8-cross-tenant-probe.test.ts` — 23 cases (8 REST:
 authorize, sessions, audit, capability requests, anchors, tasks, healthz,
-static pages; 12 in-process: audit query/export, event-store reads plus the
+static pages; 13 in-process: audit query/export, event-store reads plus the
 `global-by-design` chain view, registry, tenant-wide session revocation,
-capability-request review, evidence-key binding, the incident global view and
-preserve, log-scan; 2 Postgres-gated storage cases that skip cleanly); plus the
+capability-request review, retention-ledger tenancy, evidence-key binding, the
+incident global view and preserve, log-scan; 2 Postgres-gated storage cases
+that skip cleanly); plus the
 evidence-seal extension in `tests/evidence.test.ts` (the cross-tenant decrypt
 refusal, audited, without copying the foreign key id into the caller's
 evidence). The red run — the wrong tenant decrypted globex content and the
@@ -2029,7 +2045,7 @@ cross-tenant review was accepted — is captured at `.scratch/h8/red.txt`.
 
 **Test:** `tests/h8-cross-tenant-probe.test.ts`; `tests/evidence.test.ts`
 (seal extension); `tests/tenant-rls.test.ts` (live-DB RLS proofs); the full
-gate (`npm run typecheck && npm test` — 676 tests / 655 pass / 0 fail / 21
+gate (`npm run typecheck && npm test` — 711 tests / 690 pass / 0 fail / 21
 Postgres-mode skips).
 
 **Known limitations:** the probe proves isolation in the directions and with
@@ -2043,5 +2059,80 @@ helpers, one `CapabilityRequestService` per root, hardware side channels.
 **Residual risk:** a memory-disclosure or serialization bug in the shared
 process crosses the boundary; a deployment that does not accept the
 shared-process residual must run per-tenant processes (Stage 3).
+
+---
+
+## Claim 39 — External anchoring and recorded legal holds make host-level evidence tampering detectable (H11)
+
+**Claim:** A whole-log rewrite, tail truncation, selective line deletion, or
+anchor edit is detected against external evidence — an operator-configured
+anchor sink (HTTP witness or second file path) or an operator-held signed
+checkpoint — even when the attacker holds the event-signing key and re-signs
+the rewritten chain. Verification dispatches on multiple anchor sources: a
+line that disagrees with the event at its seq fails binding, a source ahead of
+the bundle head is tail truncation, two sources disagreeing at one seq is a
+reported fork, and a bundle head no source anchors fails closed as
+`unanchored`. A signed checkpoint binds `(seq, headHash)` and chains to its
+predecessor; it refuses a truncated chain, a rewritten event at the bound seq,
+a broken chain link, a same-seq fork, and a bad signature. Anchor publication
+never blocks an evidence append, and a failing witness is loud (counters +
+fixed-label error) rather than silent. Legal holds are signed
+`evidence.hold`/`evidence.release` events replayed into a tenant-bound ledger;
+a principal can only hold or release ranges in its own tenant, and no
+update/delete path exists at any storage layer.
+
+**Mechanism:** `src/anchors.ts` (`AnchorSink`,
+`FileAnchorSink`, `HttpAnchorSink` — bounded queue, kick + `flushAnchors()`,
+env-only bearer token never logged; `parseAnchorLines`,
+`verifyAnchoredEvidence`, `createCheckpoint`/`verifyCheckpoint` signed with the
+existing event key; `fetchWitnessHeads` shape-validates the witness response
+and never echoes its body). `src/events.ts` fans every append out to the
+configured sinks (a throwing sink is wrapped) and reports timestamp
+regressions in `VerificationResult.timestampAnomalies`.
+`src/rest-anchors.ts` rehydrates accepted federation heads from
+`anchor.register` events. `src/retention.ts` (`RetentionLedger`, rehydrated
+from the log; `evidence.hold`/`evidence.release` in `KnownAction`). ADR-031.
+
+**Threat model:** TM-004 (evidence store as a target: whole-log rewrite,
+anchor collusion, clock manipulation, selective deletion).
+
+**Assumptions:** at least one anchor sink or checkpoint lives outside the
+runtime's trust domain (filesystem ACLs/WORM mount, an operator-held file, or
+a witness host); the witness token, when configured, is secret; the witness
+operator does not collude with the attacker.
+
+**Evidence:** `tests/h11-tamper-evident-evidence.test.ts` (34: sink fan-out +
+failure isolation + queue bound + token-redaction 8; witness protocol 4;
+anchor reconciliation — binding, truncation, gap, fork, unanchored tail,
+timestamp anomalies 10; checkpoints — round trip, truncation, full re-signed
+rewrite, tamper/wrong key, chaining/fork 6; federation head rehydration 1;
+holds — record, release, rebuild, cross-tenant refusal, structural no-delete 5).
+Plus the H8 probe's `retention-ledger-tenancy` row. The red run —
+`ERR_MODULE_NOT_FOUND` before the module existed — is captured at
+`.scratch/h11/red.txt`. Demo section 24 shows two anchor sources + a checkpoint
+verifying, a re-signed truncation detected, a fork detected, and a hold
+surviving a ledger rebuild (demo exits 0).
+
+**Test:** `tests/h11-tamper-evident-evidence.test.ts`;
+`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 711 tests
+/ 690 pass / 0 fail / 21 Postgres-mode skips.
+
+**Known limitations:** a bundle with no source/checkpoint presented verifies
+internally but is reported `unanchored` — external corroboration is only as
+good as what the verifier is given. Checkpoints verify the **full dense chain
+from seq 0**; a tenant slice must be anchored per-event (slice bundles verify
+with `contiguous: false` semantics via `verifyBundle`). The HTTP witness
+protocol has no paging above 100,000 heads (`ponytail:` upgrade path named).
+Publication is best-effort: a witness outage reduces granularity and a queue
+overflow drops the oldest points (counted). Clock anomalies are reported, not
+fatal (a legitimate clock step exists). `evidence.hold` currently guards a
+future prune path, not a live deletion operation — there is none.
+
+**Residual risk:** an attacker who controls the store, the local anchor, every
+witness, and the operator's checkpoints leaves no external evidence to
+disagree with (H11's named residual); witness-operator collusion or a
+coordinated split view is not detectable by reconciliation alone — multi-party
+public transparency logs are the HARD-stage upgrade. Signing-key custody and
+rotation remain ADR-008-family residuals.
 
 

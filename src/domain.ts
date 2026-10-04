@@ -167,7 +167,9 @@ export type KnownAction =
   | 'evidence.decrypt'
   | 'query.audit'
   | 'audit.export'
-  | 'anchor.register';
+  | 'anchor.register'
+  | 'evidence.hold'
+  | 'evidence.release';
 
 export type Action = KnownAction | (string & {});
 

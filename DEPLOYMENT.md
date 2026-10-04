@@ -34,7 +34,9 @@ backups, DR, admin access, customer responsibility, vendor responsibility.
   operator-managed passphrase.
 - **Networking:** egress proxy allowlist; no inbound except the UI.
 - **Updates:** signed release bundles, verified before apply.
-- **Logging:** local evidence store; per-event head-hash anchor file (M3); periodic publication of the anchor to a customer-held WORM bucket or transparency log.
+- **Logging:** local evidence store; per-event head-hash anchor file (M3);
+  external anchor sinks + operator-held signed checkpoints (H11); periodic
+  publication of the anchor to a customer-held WORM bucket or transparency log.
 - **Backups:** encrypted, tested restore.
 - **DR:** rebuild from bundle + restore evidence; RPO/RTO declared per customer.
 - **Admin access:** named accounts, MFA, dual control for policy changes.
@@ -108,6 +110,55 @@ The default stays SQLite (ADR-010's single-process mode). Postgres mode is
   to `AuthorizationService.setClockGuard` so stall/backward jumps are detected;
   the default lenient guard still catches throw/non-finite clocks (deterministic
   test clocks intentionally freeze, so trend detection is opt-in).
+
+### External anchoring, checkpoints, and legal holds (H11, ADR-031)
+
+The M3 anchor file lives inside the runtime's trust domain; H11 adds the
+witnesses that make a host-level rewrite detectable.
+
+- **Anchor witness (automated):** set `EVENT_ANCHOR_WITNESS_URL` to an
+  operator-hosted endpoint that accepts `POST` with
+  `{ version, kind: 'asl-anchor-head', seq, headHash, eventCount, sentAt }`
+  and answers `GET` with `{ version, heads: [{ seq, headHash, receivedAt }] }`.
+  `EVENT_ANCHOR_WITNESS_TOKEN` (optional) is sent as a bearer header — it is a
+  secret; keep it in the secret broker/env, never in logs (status and errors
+  are fixed labels by construction). Publication is **non-blocking**: every
+  append fans out, a bounded queue retries on the next publish, and
+  `EventStore.flushAnchors()` (called by the CLI commands) drains it. A dead
+  witness reduces detection granularity; it never blocks a decision and never
+  drops silently — inspect `node src/cli.ts evidence status` (`published`,
+  `failed`, `dropped`, `pending` in the sink status; the status view reports
+  configuration, the sink counters are on the sink object for embedders).
+- **Checkpoints (manual, offline):**
+  `node src/cli.ts evidence checkpoint [outPath] [previousCheckpointPath]`
+  signs the current head with the event-signing key and writes
+  `asl-anchor-checkpoint` JSON. **Move it off the host** (password manager,
+  WORM share, customer archive) and keep the chain: pass the previous
+  checkpoint for the next one — chaining refuses a broken link and a same-seq
+  fork. A checkpoint catches a truncated chain, a rewritten event at the
+  bound seq (even a fully re-signed rewrite), and a forged signature. This is
+  the "append-only store the runtime cannot rewrite" in file form; no service
+  required.
+- **Verification:**
+  `node src/cli.ts evidence verify <bundlePath> [anchorPath] [checkpointPath]`
+  reports per-source binding/coverage, a `fork` when two sources disagree at
+  one seq, tail truncation when a source is ahead of the bundle, timestamp
+  anomalies, and exits nonzero on any failure. With no source/checkpoint the
+  result is `UNANCHORED` (chain valid, no external corroboration) — treat an
+  unanchored bundle as unverified for assurance purposes.
+  `node src/cli.ts evidence witness <url> [anchorPath]` fetches the witness
+  heads and reconciles them with the local anchor file.
+- **Legal hold (retention):**
+  `node src/cli.ts evidence hold <tenantId> <fromSeq> <toSeq> <reason...>` and
+  `node src/cli.ts evidence release <holdSeq> <reason...>`. Holds are signed
+  `evidence.hold`/`evidence.release` events, replayed into a tenant-bound
+  ledger; a principal may only hold/release its own tenant. Retention is
+  **structural** — there is no update/delete path at any layer (API, SQLite
+  triggers, Postgres privileges) — so the hold ledger is the contract any
+  future prune/archive tool must consult; do not build one that does not.
+- **Postgres note:** `DATABASE_URL` mode anchors the live chain; the default
+  in-process world is empty and the commands print that caveat. The anchor
+  file and checkpoints are NOT part of `pg_dump` — back them up separately.
 
 ### REST API exposure (M14, ADR-019)
 
@@ -494,3 +545,6 @@ Security is not only software. These belong on the roadmap and in runbooks:
   anomalies, egress volume, and evidence chain failures.
 - **Breach notification:** customer notification path with defined timelines.
 - **Evidence preservation:** legal hold, retention policy, immutable copies.
+  H11 makes the hold a recorded fact (`evidence hold|release`, signed events)
+  and the immutable copy practical: external anchor sinks, operator-held
+  signed checkpoints, and `evidence verify` against both (see the H11 runbook).

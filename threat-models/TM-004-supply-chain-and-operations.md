@@ -28,6 +28,7 @@ has already gained write access to infrastructure.
 | Steal the signing key | forge capabilities; detection depends on audit review |
 | Rewrite the event log in place | **detected** by chain + signature verification; SQLite UPDATE/DELETE refused by append-only triggers |
 | Delete the event log entirely | **detected** when the bundle is reconciled against the head-hash anchor file (and the anchor is on a different trust domain); still **succeeds** as a destruction if both store and anchor are on attacker-controlled storage |
+| Rewrite the event log AND its local anchor consistently (the attacker holds the signing key) | **detected since H11 (ADR-031)** when at least one anchor sink or the operator-held checkpoint is off-host: multi-source reconciliation reports binding mismatches, an anchor source ahead of the bundle (`truncation`), and cross-source disagreement (`fork`); a signed `asl-anchor-checkpoint` refuses a truncated or rewritten chain even when the rewrite is fully re-signed (probe-proven). Still **succeeds** when the attacker controls the store and every witness/checkpoint. |
 | Add a malicious dependency | **detected/limited** by the supply-chain gate (H10/ADR-024): exact pins, sha512 integrity + registry-pinned resolved URLs verified per lockfile entry, deterministic SBOM diffed against the committed `artifacts/sbom.json` baseline, and the `ADMITTED_RUNTIME_DEPS` allowlist — a new runtime dep fails the gate until an admission ADR lands in the same reviewed PR. A malicious update to an already-trusted dep is the residual (a version bump is a visible diff; content compromise inside a trusted version is outside this control). |
 | Direct code change | **detected/limited** since H10 (ADR-024): the signed build manifest binds `treeDigest` (git blob SHAs over all tracked files, outputs excluded), `sbomDigest`, and the gate result under an Ed25519 signature; `build verify` recomputes and refuses stale-source/stale-dependencies/bad-signature/gate-not-passed at deploy. Before a manifest exists, or with the signing key compromised, this path **succeeds** — that is the residual. |
 | Replay an old signed update (roll back to a vulnerable version) | **detected/limited** since H12 (ADR-025): the signed update descriptor must chain to the build manifest against the live tree AND beat the persisted high-water mark; a perfectly signed, stale descriptor is refused (`rollback-blocked`) and the mark never lowers, including under emergency rollback (the signed, single-use grant cannot re-open a burned version). Residual: an attacker who can delete the per-instance state file resets the mark — protect it like the manifest. |
@@ -41,6 +42,16 @@ has already gained write access to infrastructure.
   detect *forgery without the signing key*; the head-hash anchor file plus
   append-only SQLite triggers raise the bar from "edit one row" to "edit
   one row and one file in lock-step".
+- External anchoring (`src/anchors.ts`, H11/ADR-031): every head is published
+  to operator-configured sinks (HTTP witness or a second file path) without
+  blocking an append; `verifyAnchoredEvidence` reconciles any number of
+  sources (binding, head coverage, truncation, fork) and reports a
+  no-source bundle as `unanchored`; `createCheckpoint`/`verifyCheckpoint`
+  produce an operator-held, signed anchor that catches a fully re-signed
+  rewrite; timestamp regressions are reported as anomalies; legal holds are
+  signed `evidence.hold`/`evidence.release` events with a tenant-bound ledger
+  and no delete path at any layer. Residual: an attacker who controls the
+  store and every witness/checkpoint, and witness-operator collusion.
 - Capability signatures detect *forgery without the key* (`src/capability.ts:110`).
 - Every issuance is logged with provenance (`src/pdp.ts:85`).
 - Runtime dependency count is two (`jose`, `postgres`), exact-pinned, each
@@ -73,16 +84,21 @@ has already gained write access to infrastructure.
 - Operators are honest but fallible. **This is known to be insufficient** for
   high-assurance deployments.
 - The filesystem and database are not adversarially mutable at rest *unless*
-  the anchor file is on a different trust domain.
+  the anchor file is on a different trust domain; since H11 at least one
+  anchor sink or the operator-held checkpoint lives outside the runtime's
+  trust domain.
 
 ## Failure modes
 
 - Chain + signature verification proves internal consistency with cryptographic
   attribution. An attacker with host access can still rewrite both the
   SQLite store and the anchor file *consistently* if they hold the signing
-  key — which is why the anchor is meant to live on a witness the runtime
-  does not control.
-- No transparency-log publication yet (HARD stage).
+  key — H11 (ADR-031) makes that detectable with an off-host sink or
+  checkpoint (the re-signed rewrite fails the checkpoint; two sources
+  disagreeing is a fork), but an attacker who controls every witness and
+  checkpoint leaves nothing to disagree with.
+- No transparency-log publication yet (HARD stage); witness-operator
+  collusion / split-view is not detectable by reconciliation alone.
 - No separation between "can deploy" and "can read data".
 
 ## Test methodology
@@ -103,13 +119,22 @@ single-target records, channel-outage `broadcastOk=false`, REST sync hook,
 paged preservation past 1000 events, tampered-bundle refusal, no secrets on
 incident surfaces) and `tests/h13-revocation-pg.test.ts` (migration DDL
 invariants + live two-instance broadcast, append-only privilege, hostile-row
-refusal; skip-clean without `DATABASE_URL`).
+refusal; skip-clean without `DATABASE_URL`); `tests/h11-tamper-evident-evidence.test.ts`
+(external sink fan-out + failure isolation + token redaction, witness
+protocol shape validation, anchor binding/truncation/gap/fork/unanchored-tail,
+timestamp anomaly reporting, checkpoint refusal of truncation and full
+re-signed rewrites, checkpoint chaining/fork, federation head rehydration,
+legal holds with cross-tenant refusal and structural no-delete checks).
 
 ## Residual risk
 
-MEDIUM when the anchor is on attacker-accessible storage (the default in
-the demo), LOW when the anchor is on a customer-held WORM bucket or a
-transparency log the runtime cannot rewrite. Closing the gap requires
+MEDIUM when the anchor file and store share the runtime's trust domain and no
+checkpoint is taken; LOW when an H11 witness or operator-held checkpoint is
+off-host and honest — a re-signed rewrite fails the checkpoint and a witness
+ahead of the bundle exposes truncation. An attacker who controls the store
+AND every witness and checkpoint leaves nothing to reconcile against;
+witness-operator collusion / split-view requires multi-party public
+transparency logs (HARD stage). Closing the remaining gap requires
 hardware-backed keys, signed-key bundles, periodic transparency-log
 publication, and dual control for policy changes — none of which is a
 software feature alone.

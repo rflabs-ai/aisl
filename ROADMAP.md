@@ -162,10 +162,13 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   closed two gaps — a v2 evidence key now opens only for the tenant it names,
   and capability-request review enforces reviewer tenancy at the decision
   surface; the H13 global view is probe-pinned to the caller's own tenant
-  authority and tenant-less events. Next: H14
-  (continuous adversarial evaluation) or any remaining H2–H9/H11 item. The
-  remaining eight (H3–H7, H9, H11, H14) stay open [ ] until prioritized after
-  it clears.
+  authority and tenant-less events. **H11 [DONE]** (ADR-031) —
+  tamper-evident evidence: external anchor sinks (file + HTTP witness, never
+  blocking an append), multi-source reconciliation (binding, truncation, fork
+  detection), operator-held signed checkpoints, durable federation anchor
+  history, and recorded legal holds. Next: H14 (continuous adversarial
+  evaluation) or any remaining H3–H7/H9 item. The remaining seven (H3–H7, H9,
+  H14) stay open [ ] until prioritized after it clears.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 
@@ -343,7 +346,7 @@ distinct reasons. Tests-first suite: `tests/h10-supply-chain.test.ts` (20).
 The gate is wired to the local pre-commit hook; CI wiring, transparency-log
 publication, and hardware key custody are the documented upgrade paths.
 
-### H11 — Tamper-evident evidence (signatures, anchoring, retention)
+### H11 — Tamper-evident evidence (signatures, anchoring, retention) **[DONE]** (ADR-031)
 
 - **Attack surface:** the event store, the verifier, the anchor.
 - **Failure modes:** whole-log rewrite; anchor collusion; clock manipulation;
@@ -353,6 +356,38 @@ publication, and hardware key custody are the documented upgrade paths.
   adversarially rewritten logs; retention and legal-hold tests.
 - **Residual risk:** an attacker who controls both the log and the anchor.
 - **Class:** HA.
+
+**Closed (ADR-031):** `src/anchors.ts` — the M3 local anchor file stays
+byte-compatible; `AnchorSink` adds an external publication port
+(`FileAnchorSink` for a second/WORM path, `HttpAnchorSink` for an
+operator-configured witness with an optional env-only bearer token). Publication
+is non-blocking: a bounded queue with kick-on-publish + `flushAnchors()`, loud
+`published/failed/dropped/lastError` counters, a throwing sink can never break
+an append, and a failing request keeps its point for the next attempt.
+`verifyAnchoredEvidence` reconciles a bundle against any number of sources:
+parse + monotone/contiguous seq checks, line-to-event binding, head coverage
+(an uncovered tail fails closed), a source ahead of the bundle head = tail
+truncation, and two sources disagreeing at one seq = **fork** (anchor collusion).
+A bundle with no source is reported `unanchored`, never silently anchored.
+`createCheckpoint` signs an `asl-anchor-checkpoint` with the existing
+event-signing key (no new key, no new authority); `verifyCheckpoint` refuses
+truncation, rewrite (even by a host attacker who re-signs the whole chain),
+broken checkpoint chaining, same-seq forks, and bad signatures — the operator
+takes the file off-host, satisfying the "store the runtime cannot rewrite"
+assumption with no live service. The M17 `AnchorRegistry` rehydrates accepted
+heads from `anchor.register` events (the in-memory marker is closed). Timestamp
+regressions are reported as non-fatal anomalies and witness records carry the
+witness clock; the hash chain and signatures remain the controls. Retention is
+structural — no update/delete path at any layer — and legal holds are signed
+`evidence.hold`/`evidence.release` events in `src/retention.ts`
+(`RetentionLedger`, rehydrated from the log, tenant-bound: a principal may only
+hold its own tenant). CLI: `node src/cli.ts evidence
+status|checkpoint|verify|witness|hold|release` (+ `npm run evidence:status`).
+Tests-first suite: `tests/h11-tamper-evident-evidence.test.ts` (34) + the H8
+probe's new `retention-ledger-tenancy` row (23 cases now). Zero new runtime
+dependencies. Residuals per ADR-031: a host attacker controlling every witness
+and checkpoint, witness-operator collusion/split-view, signing-key custody
+(ADR-008), no prune path exists yet (the hold ledger is its future gate).
 
 ### H12 — Secure updates **[DONE]** (ADR-025)
 
@@ -709,8 +744,8 @@ Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
-H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE]; the remaining eight are H3–H7,
-H9, H11, H14).
+H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE]; the remaining seven
+are H3–H7, H9, H14).
 
 ### M0 — Architectural foundation (done)
 

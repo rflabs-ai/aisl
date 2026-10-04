@@ -21,6 +21,7 @@
     "update:verify": "node src/cli.ts update verify",
     "update:status": "node src/cli.ts update status",
     "incident:status": "node src/cli.ts incident status",
+    "evidence:status": "node src/cli.ts evidence status",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -33,6 +33,7 @@ import { PostgresEventLog } from '../src/event-store-pg.ts';
 import { PersistenceStore } from '../src/persistence.ts';
 import { authorizationRoot } from '../src/pdp.ts';
 import { keyIdForTenant, sealFor } from '../src/seal.ts';
+import { RetentionLedger } from '../src/retention.ts';
 import { AUDIT_POLICY_RULE, TENANT_A, TENANT_B, type World } from '../src/scenario.ts';
 import { createMockIdP, mockAuth, testWorld, type MockIdP } from '../src/testing.ts';
 import type { Principal } from '../src/domain.ts';
@@ -561,6 +562,28 @@ const IN_PROCESS_CASES: readonly ProbeCase[] = [
       const sameTenant = rig.requests.approve(request.id, rig.alice);
       assert.equal(sameTenant.request.status, 'approved');
       assert.equal(sameTenant.capability.tenantId, TENANT_A);
+    },
+  },
+  {
+    id: 'retention-ledger-tenancy',
+    surface: 'RetentionLedger.hold/release',
+    exposure: 'enforced',
+    run: (rig) => {
+      const ledger = new RetentionLedger(rig.world.eventLog);
+      const holdsBefore = rig.world.eventLog.all().filter((event) => event.action === 'evidence.hold').length;
+      const bHold = ledger.hold(rig.bob, { tenantId: TENANT_B, fromSeq: 0, toSeq: 0, reason: `globex ${MARKER_B}` });
+      assert.equal(ledger.isHeld(TENANT_B, 0), true);
+      assert.equal(ledger.isHeld(TENANT_A, 0), false, 'a tenant B hold must never cover tenant A');
+      assert.throws(() => ledger.hold(rig.alice, { tenantId: TENANT_B, fromSeq: 0, toSeq: 0, reason: 'cross' }), /tenant/);
+      assert.throws(() => ledger.release(rig.alice, { holdSeq: bHold.eventSeq, reason: 'cross' }), /tenant/);
+      assert.equal(
+        rig.world.eventLog.all().filter((event) => event.action === 'evidence.hold').length,
+        holdsBefore + 1,
+        'only the accepted hold writes evidence',
+      );
+      const bHoldEvent = rig.world.eventLog.all().find((event) => event.seq === bHold.eventSeq)!;
+      assert.equal(bHoldEvent.tenantId, TENANT_B, 'the hold is recorded in its own tenant');
+      assert.equal(JSON.stringify(bHoldEvent).includes(MARKER_A), false);
     },
   },
   {

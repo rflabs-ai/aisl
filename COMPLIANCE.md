@@ -20,7 +20,7 @@ implementation needed / external validation needed.
 | PR-AA-05 separation of duties | Approvals | implemented | no authenticated approver | approval records | M2 | yes |
 | PR-DS-01 confidentiality at rest | none | **absent** | no encryption at rest | encryption config | envelope encryption + KMS | yes |
 | PR-DS-02 integrity | capability signatures, event chain + per-event Ed25519 + anchor | partial | DB at-rest unencrypted; key rotation not implemented | verify() + verifyBundle() output | M3 done, key rotation HARD | yes |
-| PR-PS-06 secure disposal | none | absent | no retention or deletion policy | retention records | retention lifecycle | yes |
+| PR-PS-06 secure disposal | retention ledger + signed legal holds (H11); no deletion path at any layer | partial | append-only by design — there is no secure-disposal (deletion) operation; H11 records holds/retention as signed evidence and keeps the ledger any future prune tool must consult | `evidence hold`/`release` events + `RetentionLedger` replay + structural no-delete tests | retention lifecycle tooling (would consume the hold ledger) | yes |
 | DE-AE-03 event correlation | EventLog | partial | no shipping, no alerting | queryable evidence | OTel + SIEM export | no |
 | DE-AE-06 deletion/destruction alerts | none | absent | no detection for destructive actions | alert records | verification plane + alerting | no |
 | DE-CM-06 incident drill | kill switch + revocation broadcast + preservation (H13) | partial | automated measured drill (H13 suites + demo section 22: kill-switch latency, ≤ 1 s cross-node propagation, evidence preservation); no organizational game-day cadence | `tests/h13-*` output + demo section 22 + preserved `asl-incident-bundle` | recurring game days (process) | yes |
@@ -35,8 +35,8 @@ implementation needed / external validation needed.
 | AC-4 information flow | capability scope, egress | partial | no real egress enforcement | gateway decisions | M1, H7 | yes |
 | AC-6 least privilege | capabilities | implemented | — | issuance events | — | yes |
 | AC-17 remote access | none | absent | no product surface yet | — | future | yes |
-| AU-2/3/12 audit events | EventLog | implemented | signed (M3), anchored when configured | chain verification + signature verification | M3 | yes |
-| AU-9 protection of audit info | EventLog + append-only triggers | partial | anchor lives on attacker-accessible storage by default; SQLite is not WORM | — | anchor on WORM/witness storage is HARD stage | yes |
+| AU-2/3/12 audit events | EventLog | implemented | signed (M3); externally anchored when configured (H11 witness/checkpoint) | chain verification + signature verification + `evidence verify` | M3 + H11 | yes |
+| AU-9 protection of audit info | EventLog + append-only triggers + H11 external anchors/checkpoints | partial | off-host durability requires operator configuration — with no `EVENT_ANCHOR_WITNESS_URL` and no checkpoint taken, the anchor is only as durable as the host; SQLite is not WORM | `evidence verify` output + signed checkpoint + witness heads + fork/truncation refusals | WORM/witness storage outside the runtime trust domain; multiparty transparency log is HARD stage | yes |
 | CM-3 configuration change | signed update channel (H12) | partial | software updates are signed, anti-rollback, and canary-gated in code; no organizational change-approval process | update descriptor + signature + `update status` state | change management process | yes |
 | IA-2/IA-5 authentication | none | absent | no authn | — | M2 | yes |
 | SC-7 boundary protection | NetworkGateway | design only | no enforcement | — | M1 | yes |

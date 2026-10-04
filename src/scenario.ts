@@ -24,6 +24,7 @@ import { SessionManager } from './session-manager.ts';
 import { InMemoryRevocationChannel, IncidentService, type RevocationChannel } from './incident.ts';
 import { PostgresRevocationChannel } from './incident-store-pg.ts';
 import { type HealthState } from './health.ts';
+import { HttpAnchorSink, type AnchorSink } from './anchors.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -146,24 +147,43 @@ export const AUDIT_POLICY_RULE: PolicyRule = {
 };
 
 /**
+ * H11 (ADR-031): external anchor witnesses are operator-configured and
+ * default OFF (air-gapped posture). `EVENT_ANCHOR_WITNESS_TOKEN`, if set, is a
+ * secret: it lives in config only and is never logged.
+ */
+function anchorSinksFromEnv(): readonly AnchorSink[] {
+  const url = process.env.EVENT_ANCHOR_WITNESS_URL;
+  if (!url) return [];
+  return [
+    new HttpAnchorSink({
+      url,
+      ...(process.env.EVENT_ANCHOR_WITNESS_TOKEN ? { token: process.env.EVENT_ANCHOR_WITNESS_TOKEN } : {}),
+    }),
+  ];
+}
+
+/**
  * Postgres is opt-in (EVENT_STORE=postgres + DATABASE_URL): an ambient
  * DATABASE_URL alone would flip every in-process world to a store that
  * must be migrated and awaited — the SQLite/in-memory backends stay the
  * default for all runs that do not explicitly ask for Postgres (ADR-018).
  */
-function makeEventLog(options: { sqlitePath?: string; memory?: boolean }): EventStore {
+function makeEventLog(options: { sqlitePath?: string; memory?: boolean; anchors?: readonly AnchorSink[] }): EventStore {
+  const sinks = options.anchors ?? anchorSinksFromEnv();
+  const sinkOptions = sinks.length > 0 ? { sinks } : {};
   if (options.memory) {
     // Self-contained worlds (the demo's two-node incident simulation) must
     // not touch the process's configured store.
-    return new EventLog(undefined, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+    return new EventLog(undefined, { anchorPath: process.env.EVENT_ANCHOR_PATH, ...sinkOptions });
   }
   return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
     ? new PostgresEventLog({
         url: process.env.DATABASE_URL,
         ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
         ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
+        ...sinkOptions,
       })
-    : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH });
+    : new EventLog(options.sqlitePath, { anchorPath: process.env.EVENT_ANCHOR_PATH, ...sinkOptions });
 }
 
 /**
@@ -190,6 +210,11 @@ export interface WorldOptions {
    * not touch the process's configured store.
    */
   readonly memory?: boolean;
+  /**
+   * H11: inject anchor sinks (default: `EVENT_ANCHOR_WITNESS_URL` from the
+   * environment, or none — external anchoring is opt-in).
+   */
+  readonly anchors?: readonly AnchorSink[];
   /**
    * Default true: issue the fixture bootstrap capabilities (demo/tests).
    * `false` builds the world with no bootstrap issuance — for operator

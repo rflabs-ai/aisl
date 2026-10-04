@@ -1,7 +1,7 @@
 # H11 — Tamper-evident evidence: signatures, anchoring, retention (ROADMAP Stage 2)
 
-Status: [ ] — in progress on `feat/h11-tamper-evident-evidence`; Phase 0 is
-ADR-031 (docs only). Resolution record appended when executed.
+Status: [x] **[DONE]** (ADR-031) — executed 2026-10-04 on
+`feat/h11-tamper-evident-evidence`; resolution record at the bottom.
 
 Spec of record: ROADMAP.md "H11" (attack surface: the event store, the
 verifier, the anchor; failure modes: whole-log rewrite, anchor collusion,
@@ -186,3 +186,62 @@ skipped: hardware WORM storage / HSM attestation (HARD stage). skipped:
 actual pruning (no prune path exists; the hold ledger is its future gate).
 add when: an operator runs a witness outside this host, or a prune/archive
 tool is built.
+
+---
+
+## Resolution (executed 2026-10-04)
+
+- **ADR first:** ADR-031 (`DECISIONS.md`) landed as the Phase 0 commit
+  `6ab8386` (docs only, with this prompt expanded to the full M4–M16 format
+  in the same commit).
+- **Tests first (red captured):** `tests/h11-tamper-evident-evidence.test.ts`
+  (34) written before `src/anchors.ts` / `src/retention.ts` existed; the red
+  run is `.scratch/h11/red.txt` (`ERR_MODULE_NOT_FOUND` from the missing
+  module). One test-writer bug was caught by the red/green loop: mutating a
+  signed timestamp breaks the hash, so the anomaly test now appends a valid
+  chain with regressing timestamps at append time.
+- **Implementation:** `src/anchors.ts` (AnchorSink port, FileAnchorSink,
+  non-blocking HttpAnchorSink with bounded queue + `flush()` and loud
+  counters, `parseAnchorLines`, `verifyAnchoredEvidence` — binding, coverage,
+  truncation, fork, `unanchored` — `fetchWitnessHeads`, `createCheckpoint`,
+  `verifyCheckpoint`, `checkpointDigest`); `src/retention.ts`
+  (`RetentionLedger` + signed `evidence.hold`/`evidence.release`, replayed
+  from the log, tenant-bound); `src/events.ts`
+  (`VerificationResult.timestampAnomalies` + `collectTimestampAnomalies`,
+  `EventStore.flushAnchors`, sink fan-out on the append path — a throwing
+  sink is wrapped); `src/event-store-pg.ts` (same sink/flush surface);
+  `src/rest-anchors.ts` (accepted federation heads rehydrated from
+  `anchor.register` events); `src/domain.ts` (two new KnownActions);
+  `src/scenario.ts` (`WorldOptions.anchors` +
+  `EVENT_ANCHOR_WITNESS_URL`/`_TOKEN`, default off); `src/cli.ts` (the
+  `evidence status|checkpoint|verify|witness|hold|release` command + demo
+  section 24); `package.json` (`evidence:status`).
+- **H8 probe:** a new `retention-ledger-tenancy` row (ADR-030's review
+  condition for a new tenant-facing surface); the probe is now 23 cases
+  (8 REST, 13 in-process, 2 Postgres-gated skips).
+- **Gate:** `npm run typecheck` clean; `npm test` 711 / 690 pass / 0 fail /
+  21 Postgres-mode skips (baseline 676/655/0/21; +35: 34 H11 + 1 probe row).
+  `npm run demo` exits 0 with section 24 (sources + checkpoint VERIFIED,
+  re-signed truncation DETECTED, fork DETECTED, hold survives rebuild,
+  witness delivery 7/7). `npm run benchmark` exits 0, 0 hard failures.
+- **Docs:** ROADMAP H11 [DONE] + mechanism + working order; CURRENT_STATE
+  (header, counts ~13,962 lines / 48 modules / 711 tests, what-works,
+  "What H11 closed", gap #3, assumptions); SECURITY_CLAIMS Claim 39 + Claims
+  8/9 refresh; THREAT_MODEL evidence row; TM-004 attack path + controls +
+  assumptions + failure modes + test methodology + residual; DEPLOYMENT
+  (witness/checkpoint/legal-hold runbook + evidence-preservation note);
+  COMPLIANCE (PR-PS-06, AU-2/3/12, AU-9); PROJECT_CONTEXT module map;
+  AGENT-SESSION SESSION 37; this record.
+- **Skips (named in ADR-031):** hosted witness/transparency-log service
+  (protocol seam only; operating one is deployment), timer-driven witness
+  retries (kick + explicit flush only), key custody/rotation (ADR-008),
+  hardware WORM/HSM (HARD stage), actual pruning (no prune path exists — the
+  hold ledger is its future gate). The witness fetch is injected in tests by
+  design; no live HTTP witness or live PG sink run this session.
+- **Residuals:** a host attacker who controls the store AND every
+  witness/checkpoint; witness-operator collusion / split-view; no off-host
+  sink/checkpoint means host-level durability only; the same ADR-008
+  key-custody family as every other signing surface.
+- **Branch:** `feat/h11-tamper-evident-evidence` — Phase 0 `6ab8386`;
+  implementation + docs commit on the same branch. Merge to `main` not
+  performed this session (no operator instruction).

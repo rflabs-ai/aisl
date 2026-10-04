@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H8 — cross-tenant isolation (ADR-030).
+Honest snapshot. Updated after H11 — tamper-evident evidence (ADR-031).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -11,26 +11,28 @@ anti-rollback and sticky canary), H13 (ADR-026, kill switch + revocation
 channel + evidence preservation), H15 (ADR-027, fail-closed availability:
 observed health, clock guard, degraded-mode matrix, latency budget), H2
 (ADR-028, short-lived credentials: verification-seam lifetime ceiling, bounded
-skew, derived workload identity, channel-propagated jti revocation), and H8
+skew, derived workload identity, channel-propagated jti revocation), H8
 (ADR-030, a table-driven cross-tenant probe over every REST route and
 in-process query surface, which proved and closed a v2-evidence-key
-tenant-binding gap and a capability-request reviewer-tenancy gap) are the
-landed Stage 2 items. M17 closed both
+tenant-binding gap and a capability-request reviewer-tenancy gap), and H11
+(ADR-031, external anchor sinks + multi-source reconciliation, operator-held
+signed checkpoints, durable federation anchor history, recorded legal holds)
+are the landed Stage 2 items. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
 Next frontier: H14 (continuous adversarial evaluation) or any remaining
-H3–H7/H9/H11 item.
+H3–H7/H9 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~12,744 lines of source across 46 modules
+TypeScript foundation on Node 24, ~13,962 lines of source across 48 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
-`rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, and
-`incident-store-pg.ts` are the latest additions), 676 tests
-(`tests/`, `security-tests/`; 655 pass, 21 Postgres-mode tests skip cleanly
+`rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
+`retention.ts`, and `incident-store-pg.ts` are the latest additions), 711 tests
+(`tests/`, `security-tests/`; 690 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -378,20 +380,45 @@ Dev dependencies: `typescript`, `@types/node`.
   from the verified principal (body tenant must match, else `tenant-mismatch`),
   sha256-hex only, recorded in ASL's own append-only signed event log as an
   `anchor.register` event; a claimed `previousHeadHash` that disagrees with the
-  last accepted head flags `tamper`. `GET /v1/capability-requests/:id` lets the
-  requester read its request's outcome (pending/approved/denied/expired) and,
-  once approved, the minted capability projection — closing the gap where an
+  last accepted head flags `tamper`. **H11 closed the registry's in-memory
+  marker: the accepted head per tenant is rehydrated from those durable events,
+  so mismatch detection survives a restart.** `GET /v1/capability-requests/:id`
+  lets the requester read its request's outcome (pending/approved/denied/expired)
+  and, once approved, the minted capability projection — closing the gap where an
   approved request vanished from the pending-only list.
+- **Tamper-evident evidence, externally anchored (H11, ADR-031):**
+  `src/anchors.ts`. The M3 anchor file stays byte-compatible; `AnchorSink` adds
+  an external publication port — `FileAnchorSink` (a second/WORM path) and
+  `HttpAnchorSink` (operator-configured witness, optional env-only bearer
+  token) — with a bounded queue, kick-on-publish + `EventStore.flushAnchors()`,
+  and loud `published/failed/dropped/lastError` counters. Publication never
+  blocks an append and a throwing sink can never lose an event.
+  `verifyAnchoredEvidence` reconciles a bundle against any number of sources:
+  parse + monotone/contiguous seqs, line-to-event binding, head coverage (an
+  uncovered tail fails closed), a source ahead of the bundle head = tail
+  truncation, two sources disagreeing at one seq = **fork**. No source means
+  `unanchored: true` — never silently anchored. `createCheckpoint` signs an
+  `asl-anchor-checkpoint` with the existing event key; `verifyCheckpoint`
+  refuses truncation, rewrite (even by a host attacker who re-signs the whole
+  chain), broken chaining, same-seq forks, and bad signatures — the operator
+  holds it off-host (H11's "store the runtime cannot rewrite", no live service
+  required). Timestamp regressions are reported as non-fatal anomalies;
+  witness records carry the witness clock. `src/retention.ts` records legal
+  holds as signed `evidence.hold`/`evidence.release` events
+  (`RetentionLedger`, replayed from the log, tenant-bound); retention itself
+  is structural — no update/delete path at any layer. CLI:
+  `node src/cli.ts evidence status|checkpoint|verify|witness|hold|release`
+  (+ `npm run evidence:status`).
 - Typecheck: clean (`npx tsc --noEmit`).
 
 ## What was tested
 
-All 676 tests pass (655 green; 21 Postgres-mode tests skip without
+All 711 tests pass (690 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1
 environment-gated skip, 0 fail). Coverage of the
-twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2, H8:
+twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2, H8, H11:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot
 mint (2) | 4 tool cannot expand (2) | 5 expiry (2) | 6 attenuation (4) | 7
@@ -413,7 +440,8 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **H13 incident response (37: acceptance + audit follow-ups 29 — unfreeze propagation and issuance-fence regressions, `revoke-cap` tenant scope, grant semantics; Postgres channel 7, of which 4 live, skip-clean without `DATABASE_URL`; import-cycle regression 1)**.
 | **H15 fail-closed availability (24: 19 acceptance — per-dependency fault matrix, recovery, false-denial pin, degraded mode, safety ordering, `/healthz` shape + structural no-secrets — plus 5 audit-follow-up regressions)**.
 | **H2 short-lived credentials (31: admission contract + 2000-case fuzz 8, end-to-end jose verification 6, workload derivation 6, revocation propagation 8, credential-in-log scanning 3)**.
-| **H8 cross-tenant isolation (23: probe 22 — 8 REST + 12 in-process + 2 Postgres-gated; plus 1 evidence-seal extension)**.
+| **H8 cross-tenant isolation (24: probe 23 — 8 REST + 13 in-process + 2 Postgres-gated; plus 1 evidence-seal extension)**.
+| **H11 tamper-evident evidence (34: sinks 8, witness protocol 4, anchor reconciliation 10, checkpoints 6, federation rehydration 1, retention/holds 5)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (8),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -490,8 +518,13 @@ Ordered by severity.
 3. ~~**Event log is writable.**~~ **M3 closed**: per-event Ed25519 signatures,
    head-hash anchor file, append-only SQLite triggers, and offline verifier
    detect modification, deletion, recomputation, and tail truncation when the
-   anchor is held outside the runtime's trust domain. Residual risk: anchor
-   rewrite by an attacker with host access (see Claim 8).
+   anchor is held outside the runtime's trust domain. **H11 closed the
+   durability half (ADR-031)**: external anchor sinks (HTTP witness, second
+   file), multi-source reconciliation (binding, truncation, **fork**), and
+   signed operator-held checkpoints catch a whole-log rewrite — even by a host
+   attacker who re-signs the chain — as long as one sink/checkpoint is off-host.
+   Residual risk: an attacker who controls the store AND every witness and
+   checkpoint (witness-operator collusion / split-view; see Claim 8).
 4. **Signing key from an environment variable**, unrotated, symmetric.
    (Capability HMAC key; the Ed25519 event-signing key is generated per
    process unless `EVENT_SIGNING_*_PEM` is set.)
@@ -1238,6 +1271,55 @@ reverse direction in the session-manager row, the `revealEvidence` ordering
 rationale, and the Claim 38 `deny`-guard note. Suite unchanged: 676 / 655
 pass / 0 fail / 21 Postgres-mode skips.
 
+## What H11 closed
+
+H11 was the tamper-evident-evidence milestone (ADR-031; two new modules,
+`src/anchors.ts` + `src/retention.ts`, zero new runtime dependencies — the
+witness uses the built-in `fetch`). It did not change decision semantics: the
+PDP, capabilities, and policy are untouched; the milestone makes the evidence
+plane durable against a host attacker who holds the signing key.
+
+1. ~~**The anchor lived inside the runtime's trust domain (Claim 8 residual:
+   an attacker with host access rewrites store and anchor consistently).**~~
+   `AnchorSink` is the external publication port: `FileAnchorSink` (second
+   path, e.g. WORM mount) and `HttpAnchorSink` (operator-configured witness,
+   optional env-only bearer token). Publication is non-blocking — bounded
+   queue, kick-on-publish + `flushAnchors()`, loud counters — and a throwing
+   sink can never break an append. A dead witness degrades detection
+   granularity, never availability.
+2. ~~**One anchor file, one reader: no fork detection, no reconciliation.**~~
+   `verifyAnchoredEvidence` reconciles any number of sources: parse +
+   monotone/contiguous seqs, line-to-event binding, head coverage
+   (uncovered tail fails closed), a source ahead of the bundle head = tail
+   truncation, and two sources disagreeing at one seq = **fork** (anchor
+   collusion). No source is reported `unanchored`, never silently verified.
+3. ~~**No proof the operator can hold off-host.**~~ `createCheckpoint` signs
+   `asl-anchor-checkpoint` with the existing event key (no new key, no new
+   authority); `verifyCheckpoint` refuses truncation, rewrite (proven by a
+   test that re-signs a truncated chain with the same key), broken checkpoint
+   chaining, same-seq forks, and bad signatures. The operator moves the file
+   off-host — H11's "at least one append-only store the runtime cannot
+   rewrite" with no live service.
+4. ~~**The federation anchor registry was in-memory (M17 marker).**~~
+   `AnchorRegistry` rehydrates accepted heads from `anchor.register` events, so
+   a restarted registry still flags a rolled-back client head.
+5. ~~**Clock manipulation was unexamined; retention was implicit.**~~
+   Timestamps live inside the signed body (any edit breaks hash/signature);
+   regressions are additionally reported as non-fatal anomalies, and witness
+   records carry the witness clock. `RetentionLedger` records legal holds as
+   signed `evidence.hold`/`evidence.release` events (replayed from the log,
+   tenant-bound: a principal may only hold its own tenant; the H8 probe has the
+   new `retention-ledger-tenancy` row). Retention is structural — no
+   update/delete path exists at any layer, and storage DELETE still aborts.
+
+Tests: `tests/h11-tamper-evident-evidence.test.ts` (34, red-confirmed before
+the module existed — `ERR_MODULE_NOT_FOUND` captured at `.scratch/h11/red.txt`)
++ the H8 probe row (23 cases now). Residuals (ADR-031): a host attacker who
+controls the store *and* every witness/checkpoint; witness-operator collusion
+or a coordinated split view; signing-key custody (ADR-008 family, unchanged);
+no prune path exists yet, so the hold ledger is the contract a future
+prune/archive tool must consult rather than a live gate.
+
 ## Watch-items from the M9 audit
 
 Not vulnerabilities — deliberate ceilings with named upgrade paths (details in
@@ -1259,7 +1341,9 @@ Claim 23's limitations and RELIABILITY §8):
 - The runtime process is not compromised.
 - The clock is monotonic and not manipulated by an operator.
 - Operators who can change policy are honest.
-- The filesystem and SQLite file are not adversarially mutable at rest.
+- The filesystem and SQLite file are not adversarially mutable at rest, or at
+  least one H11 anchor sink / operator-held checkpoint lives outside the
+  runtime's trust domain (ADR-031).
 - Resource ids are not secret; authorization is the boundary.
 - TypeScript types hold at runtime (no attacker rewriting the module graph).
 - Customers will author sane capabilities. The platform constrains scope; it

@@ -248,3 +248,28 @@ tool is built.
 - **Branch:** `feat/h11-tamper-evident-evidence` — Phase 0 `6ab8386`;
   implementation + docs commit on the same branch. Merge to `main` not
   performed this session (no operator instruction).
+
+## Audit follow-up (2026-10-04)
+
+Session audit verdict: **ship-with-notes** (3 should-fix tickets, 8 nits; no
+must-fix). All resolved on the branch:
+
+- **`3f71244`** — ticket 01: `chainKeyRefusal` (`src/anchors.ts`) +
+  `requireVerifiableChain()` in `evidence checkpoint|hold|release`, so a
+  process that cannot verify the shared chain under its own event key refuses
+  fail-closed with the H13 shared-key hint (DEPLOYMENT precondition bullet
+  added). Ticket 02: Claim 8/19 refs de-numbered to symbol names;
+  `flushAnchors` added to the CURRENT_STATE EventLog enumeration. Ticket 03:
+  dead `KNOWN_ACTIONS` hand-copy deleted from `policy-testing.ts`.
+- Nits 04–11 ticketed and resolved: witness wire field `sentAt` → `eventAt`;
+  per-line ahead-anchor error noise removed (one aggregate truncation error +
+  `aheadOfBundle`); in-memory caveat on `evidence witness`; two new tests
+  (signed checkpoint `eventCount` mismatch; `MAX_WITNESS_HEADS` cap); pdp note
+  that holds are write actions with an explicit future freeze decision;
+  `resignChain` duplication accepted as intentional; `benchmarks/results.json`
+  committed at this boundary; source-line count refreshed (~14,000).
+- Follow-up gate: typecheck clean; **716 tests / 695 pass / 0 fail / 21
+  Postgres-mode skips**. Audit record:
+  `.scratch/session-audit/2026-10-04-h11-tamper-evident-evidence/`
+  (report + evidence ledger + resolution + tickets 01–11). Merge to `main`
+  performed as instructed (fast-forward); branch deleted.

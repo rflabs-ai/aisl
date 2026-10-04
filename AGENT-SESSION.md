@@ -98,6 +98,22 @@ was left, and what the next session should pick up.
 - Gate: typecheck clean; 712 tests / 691 pass / 0 fail / 21 skip.
 - Red capture: `.scratch/h11/red.txt`; demo output: `.scratch/h11/demo.txt`.
 
+**Audit follow-up (2026-10-04):** session audit returned ship-with-notes
+(3 should-fix tickets, 8 nits). Tickets 01–03 fixed in `3f71244`: the
+`evidence checkpoint|hold|release` commands now refuse fail-closed when the
+process key cannot verify the shared chain (`chainKeyRefusal`, H13 parity);
+Claim 8/19 refs de-numbered to symbol names and `flushAnchors` added to the
+CURRENT_STATE surface enumeration; the dead `KNOWN_ACTIONS` hand-copy in
+`policy-testing.ts` deleted. Nits 04–11 ticketed and resolved (witness wire
+field `sentAt` → `eventAt`; ahead-anchor error noise; witness in-memory
+caveat; two new branch tests — signed eventCount mismatch and the head cap;
+a pdp note on hold/freeze interaction; `benchmarks/results.json` committed at
+this boundary; source-line count refreshed). Follow-up gate: typecheck clean;
+716 tests / 695 pass / 0 fail / 21 Postgres-mode skips. Audit record:
+`.scratch/session-audit/2026-10-04-h11-tamper-evident-evidence/`
+(report + evidence + resolution + tickets 01–11). Merge to `main` performed
+as the operator instructed (fast-forward); the branch is deleted.
+
 ---
 
 ### SESSION 36 — 2026-10-03 — opencode/h8-cross-tenant-isolation

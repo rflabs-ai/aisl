@@ -1,7 +1,19 @@
 # Ticket 01 — `evidence hold`/`release` lacks the cross-process signing-key precondition H13 enforces
 
-Status: open
+Status: resolved (3f71244)
 Source: session-audit b3e345b..HEAD (H11, ADR-031)
+
+## Resolution
+
+`chainKeyRefusal` added to `src/anchors.ts` (returns a refusal when the store
+cannot verify under the given public key, with the H13 hint for the
+signature-mismatch/no-public-key case); the CLI `evidence
+checkpoint|hold|release` branches call `requireVerifiableChain()` before
+appending/signing (`src/cli.ts`); DEPLOYMENT.md's H11 runbook gained the
+shared-chain precondition bullet and the witness protocol field was aligned.
+Regression tests: `tests/h11-tamper-evident-evidence.test.ts` — "chain-key
+precondition" describe (2) + the signed-eventCount/hold-cap cases; the
+in-memory smoke path still records holds (verified via CLI).
 
 ## What's wrong
 

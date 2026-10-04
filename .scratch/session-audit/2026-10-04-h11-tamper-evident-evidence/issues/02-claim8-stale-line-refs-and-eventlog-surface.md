@@ -1,7 +1,15 @@
 # Ticket 02 — Docs drift: stale `src/events.ts` line refs in Claims 8/19; CURRENT_STATE "exposes only" enumeration omits `flushAnchors`
 
-Status: open
+Status: resolved (3f71244)
 Source: session-audit b3e345b..HEAD (H11, ADR-031)
+
+## Resolution
+
+Claim 8 and Claim 19 mechanism refs are de-numbered (symbol names:
+`eventBody`/`eventHash`, `signEventBody`/`verifyEventSignature`,
+`appendAnchorLine`, `eventSigningKeyPair`, `eventPublicKey` — no line numbers
+to drift); `CURRENT_STATE.md` now lists `flushAnchors` in the EventLog
+surface enumeration.
 
 ## What's wrong
 

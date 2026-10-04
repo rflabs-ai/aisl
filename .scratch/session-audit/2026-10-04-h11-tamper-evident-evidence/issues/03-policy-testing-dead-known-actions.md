@@ -1,7 +1,13 @@
 # Ticket 03 — Dead `KNOWN_ACTIONS` hand-copy in `policy-testing.ts` has drifted from `KnownAction`
 
-Status: open
+Status: resolved (3f71244)
 Source: session-audit b3e345b..HEAD (H11, ADR-031)
+
+## Resolution
+
+Deleted the dead set; `KNOWN_CLASSIFICATIONS`/`RESOURCE_TYPES`/`PRINCIPAL_KINDS`
+remain (all used by the validator). `git grep -n "KNOWN_ACTIONS" HEAD -- src`
+now returns no hits; the validator still shape-checks actions via `asAction`.
 
 ## What's wrong
 

@@ -64,11 +64,22 @@ was left, and what the next session should pick up.
   21 Postgres-mode skips (baseline 653/634/19; +23: 21 live + 2 skips). No
   new runtime dependencies; no `as any`/`as never`; no secrets in events or
   errors.
+- **Audit follow-up (2026-10-04):** the session audit returned a ship verdict
+  (no must-fix or should-fix) and five tracked nits, all resolved in
+  `f61817e`: the `capability-request` docstring audience, the probe's
+  `log-scan` exposure class (code labels now match ADR-030's three assertion
+  classes), the reverse-direction session-row assertion, the `revealEvidence`
+  ordering rationale, and the Claim 38 `deny`-guard note. Suite unchanged
+  (676 / 655 / 0 / 21). Audit record:
+  `.scratch/session-audit/2026-10-04-h8-cross-tenant-isolation/`; the
+  implementation scratch evidence (red/green/full-gate/benchmark/demo outputs
+  + the pre-probe hypotheses script) is committed under `.scratch/h8/`.
 
 **Left:**
-- Merge to `main` pending (operator instruction: do not merge).
-- `benchmarks/results.json` remains modified in the working tree (not
-  committed, per the milestone-boundary convention).
+- Merge to `main`: performed as instructed (fast-forward) on 2026-10-04; the
+  feature branch is deleted and its commits are on `main`.
+- `benchmarks/results.json` committed with the audit record (milestone
+  boundary).
 - The Postgres-gated probe cases were not run live in this session (no
   `DATABASE_URL`); they follow the M12 scratch-database convention and skip
   cleanly. The physical-isolation residual (per-tenant processes/microVM,
@@ -126,7 +137,8 @@ was left, and what the next session should pick up.
   by test).
 
 **Left:**
-- Merge to `main` pending (operator instruction: do not merge).
+- Merge to `main`: performed after this session (fast-forward; H2 commits are
+  on `main`; branch deleted).
 - `benchmarks/results.json` remains modified in the working tree (not
   committed, per the milestone-boundary convention).
 - Named H2 skip-list items (ADR-028): SPIFFE/SPIRE attestation,

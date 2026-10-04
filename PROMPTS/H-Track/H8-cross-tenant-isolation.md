@@ -61,5 +61,22 @@ At kickoff: Phase 0 ADR first; tests first (red), gate before commit.
 - **Residuals:** shared process (both modes); SQLite app-level only; hardware
   side channels / hypervisor bugs; principal-id collisions in non-tenant-facing
   helpers; one service root per tenant for capability requests.
-- **Branch:** `feat/h8-cross-tenant-isolation` (ADR commit `5a86157` +
-  implementation/docs commit); merge to `main` pending.
+- **Branch:** `feat/h8-cross-tenant-isolation` (ADR commit `5a86157`,
+  implementation/docs commit `a477ec7`, audit follow-up `f61817e`); merge to
+  `main` performed as instructed (fast-forward).
+
+## Audit follow-up (2026-10-04)
+
+Session audit verdict: ship - no must-fix or should-fix items; five nits
+ticketed and resolved in `f61817e`:
+
+- 01 `capability-request` docstring audience (the escalation lane submits;
+  `deny` has no REST route).
+- 02 probe exposure taxonomy: the `log-scan` class added; healthz/page and
+  log-scan rows relabelled.
+- 03 session-manager row: reverse-direction assertion added (same row count).
+- 04 `revealEvidence` ordering rationale documented.
+- 05 Claim 38: the `deny`-no-REST-route note.
+
+Audit record: `.scratch/session-audit/2026-10-04-h8-cross-tenant-isolation/`;
+implementation scratch evidence committed under `.scratch/h8/`.

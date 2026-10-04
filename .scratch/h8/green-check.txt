@@ -1,0 +1,51 @@
+(node:10668) Warning: EVENT_SIGNING_*_PEM unset: using ephemeral Ed25519 event signing key (not durable across restarts)
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10668) Warning: EVIDENCE_SEALING_KEY unset: using an ephemeral key; sealed evidence cannot be decrypted after restart
+Γû╢ evidence sealing
+  Γ£ö content is sealed: plaintext never reaches the store (854.9741ms)
+  Γ£ö the digest is verifiable without any clearance (663.2252ms)
+  Γ£ö an unauthorized principal gets nothing, and the attempt is audited (687.5671ms)
+  Γ£ö a reviewer cleared for the level decrypts the exact content (769.2165ms)
+  Γ£ö clearance for one level does not open another (713.008ms)
+  Γ£ö clearance minted for another tenant's v2 key does not decrypt ours (727.9877ms)
+  Γ£ö a clearance for the sealed key's tenant cannot decrypt another tenant's event (H8/ADR-030) (95.7713ms)
+  Γ£ö tampered ciphertext yields nothing (0.3913ms)
+Γ£ö evidence sealing (4513.1613ms)
+(node:44104) Warning: EVENT_SIGNING_*_PEM unset: using ephemeral Ed25519 event signing key (not durable across restarts)
+(Use `node --trace-warnings ...` to show where the warning was created)
+Γû╢ H8 probe: REST routes
+  Γ£ö rest-authorize-cross-tenant ΓÇö POST /v1/authorize [enforced] (19.4019ms)
+  Γ£ö rest-sessions-cross-tenant ΓÇö POST /v1/sessions + DELETE /v1/sessions/:id [enforced] (5.2319ms)
+  Γ£ö rest-audit-own-tenant-only ΓÇö GET /v1/audit [enforced] (2.7841ms)
+  Γ£ö rest-audit-cross-tenant ΓÇö GET /v1/audit?tenantId=<other> [enforced] (3.4269ms)
+  Γ£ö rest-capability-requests-cross-tenant ΓÇö POST/GET /v1/capability-requests + GET/:id + POST/:id/approvals [enforced] (7.1248ms)
+  Γ£ö rest-anchors-cross-tenant ΓÇö POST /v1/anchors [enforced] (2.7794ms)
+  Γ£ö rest-tasks-principal-tenant ΓÇö POST /v1/tasks [enforced] (1.5057ms)
+  Γ£ö rest-healthz-and-static-page ΓÇö GET /healthz + GET /ui [enforced] (1.6928ms)
+Γ£ö H8 probe: REST routes (95.1489ms)
+Γû╢ H8 probe: in-process query surfaces
+  Γ£ö audit-query-isolation ΓÇö AuditQueryService.query [enforced] (0.4713ms)
+  Γ£ö audit-query-cross-tenant ΓÇö AuditQueryService.query (cross-tenant filters) [enforced] (0.3089ms)
+  Γ£ö audit-export-cross-tenant ΓÇö AuditQueryService.exportFor [enforced] (0.6054ms)
+  Γ£ö event-store-reads ΓÇö EventStore.query/forTenant/exportFor [enforced] (0.2066ms)
+  Γ£ö event-store-global-chain ΓÇö EventStore.all/bundle/verify (operator chain view) [global-by-design] (0.644ms)
+  Γ£ö registry-isolation ΓÇö ResourceRegistry.list/get + PDP tenant guard [enforced] (0.2971ms)
+  Γ£ö session-manager-tenant-scoped-bulk ΓÇö SessionManager tenant-wide revocation [enforced] (0.1189ms)
+  Γ£ö capability-request-service-tenancy ΓÇö CapabilityRequestService.approve/deny [enforced] (0.8467ms)
+  Γ£ö evidence-key-binding ΓÇö AuthorizationService.revealEvidence (v2 key tenant binding) [enforced] (0.5903ms)
+  Γ£ö incident-global-view ΓÇö IncidentService.reconstruct (tenantId: *) [enforced] (4.0748ms)
+  Γ£ö incident-preserve-global ΓÇö IncidentService.preserve (tenantId: *) [enforced] (11.5772ms)
+  Γ£ö log-scan ΓÇö tenant A's visible records and exports [enforced] (1.0232ms)
+Γ£ö H8 probe: in-process query surfaces (21.183ms)
+Γû╢ H8 probe: Postgres-gated storage surfaces
+  ∩╣ú probe-pg-persistence ΓÇö tenant-bound reads and lists over Postgres (0.0434ms) # DATABASE_URL is not set (ADR-018: Postgres tests skip cleanly)
+  ∩╣ú probe-pg-event-store ΓÇö the port reads stay tenant-scoped over Postgres (0.0288ms) # DATABASE_URL is not set (ADR-018: Postgres tests skip cleanly)
+Γ£ö H8 probe: Postgres-gated storage surfaces (0.1651ms)
+Γä╣ tests 30
+Γä╣ suites 4
+Γä╣ pass 28
+Γä╣ fail 0
+Γä╣ cancelled 0
+Γä╣ skipped 2
+Γä╣ todo 0
+Γä╣ duration_ms 4685.8391

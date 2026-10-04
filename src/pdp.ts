@@ -689,7 +689,9 @@ export class AuthorizationService {
     // tenant, the caller's own capability (resource ids are opaque strings)
     // would match, and the keyId-derived key would decrypt the content. Fail
     // closed, and record the refusal in the caller's own evidence without
-    // naming the foreign key.
+    // naming the foreign key. The check precedes the auth check by design: the
+    // key binding must hold before any registration or authorization, so an
+    // unauthorized caller can only ever produce a deny event.
     const keyTenant = tenantFromKeyId(sealed.keyId);
     if (keyTenant !== undefined && keyTenant !== principal.tenantId) {
       try {

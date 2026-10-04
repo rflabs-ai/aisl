@@ -1230,6 +1230,14 @@ physical isolation is Stage 3), SQLite app-level-only checks, hardware side
 channels, principal-id collisions on non-tenant-facing helpers, one
 `CapabilityRequestService` per root, and the probe's marker-scope limitation.
 
+**Audit follow-up (2026-10-04):** the session audit returned a ship verdict -
+no must-fix or should-fix items - and five tracked nits, all resolved in the
+follow-up: the `capability-request` docstring audience, the probe's `log-scan`
+exposure class (code labels now match ADR-030's three assertion classes), the
+reverse direction in the session-manager row, the `revealEvidence` ordering
+rationale, and the Claim 38 `deny`-guard note. Suite unchanged: 676 / 655
+pass / 0 fail / 21 Postgres-mode skips.
+
 ## Watch-items from the M9 audit
 
 Not vulnerabilities — deliberate ceilings with named upgrade paths (details in

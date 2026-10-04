@@ -2003,7 +2003,8 @@ return another tenant's rows.
 the lazy key registration, `openFor(principal.tenantId, …)` as a second
 binding, one clean `tenant-mismatch` deny event in the caller's own tenant
 without naming the foreign key); `src/seal.ts` (`tenantFromKeyId`);
-`src/capability-request.ts` (`requireSameTenant` in `approve`/`deny`). The
+`src/capability-request.ts` (`requireSameTenant` in `approve`/`deny`; `deny`
+has no REST route, so the decision-surface check is its only tenant guard). The
 existing guards are unchanged: PDP `resource.tenantId` check, `queryAudit`
 `filters.tenantId` check, REST route tenant checks, Postgres `FORCE RLS`.
 ADR-030.

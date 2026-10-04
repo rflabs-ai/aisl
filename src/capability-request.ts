@@ -209,8 +209,8 @@ export class CapabilityRequestService {
   /**
    * H8 (ADR-030): a reviewer may only decide a request from their own tenant.
    * The REST boundary checks this too; the service is the decision surface and
-   * must hold on its own (embedders and the guard's escalation lane call it
-   * directly).
+   * must hold on its own (embedders call it directly; the guard's escalation
+   * lane submits through it; no REST route calls `deny`).
    */
   private requireSameTenant(request: CapabilityRequest, reviewer: Principal): void {
     if (reviewer.tenantId !== request.tenantId) {

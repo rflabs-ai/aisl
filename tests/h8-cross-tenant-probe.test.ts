@@ -10,6 +10,8 @@
  * Each row asserts exactly one of:
  * - `enforced`: isolation in both directions — the foreign read/action is
  *   refused and the caller's visible records carry no foreign marker/content;
+ * - `log-scan`: no foreign tenant marker or content appears in the caller's
+ *   visible records or responses (a no-leak property; no refusal to assert);
  * - `global-by-design`: a named operator/chain surface that is deliberately
  *   cross-tenant and has no tenant-facing route.
  *
@@ -84,7 +86,7 @@ interface ProbeRig {
 interface ProbeCase {
   readonly id: string;
   readonly surface: string;
-  readonly exposure: 'enforced' | 'global-by-design';
+  readonly exposure: 'enforced' | 'log-scan' | 'global-by-design';
   readonly run: (rig: ProbeRig) => Promise<void> | void;
 }
 
@@ -400,7 +402,7 @@ const REST_CASES: readonly ProbeCase[] = [
   {
     id: 'rest-healthz-and-static-page',
     surface: 'GET /healthz + GET /ui',
-    exposure: 'enforced',
+    exposure: 'log-scan',
     run: async (rig) => {
       const health = await call(rig, 'GET', '/healthz');
       assert.equal(health.status, 200);
@@ -516,14 +518,26 @@ const IN_PROCESS_CASES: readonly ProbeCase[] = [
     surface: 'SessionManager tenant-wide revocation',
     exposure: 'enforced',
     run: (rig) => {
-      const session = rig.world.sessions.create(rig.bob, rig.bob.auth!);
+      const bSession = rig.world.sessions.create(rig.bob, rig.bob.auth!);
+      const aSession = rig.world.sessions.create(rig.alice, rig.alice.auth!);
       rig.world.sessions.revokeAllForTenant(TENANT_A);
       assert.notEqual(
-        rig.world.sessions.get(session.id),
+        rig.world.sessions.get(bSession.id),
         undefined,
         'a tenant-wide revocation must not cross tenants',
       );
-      rig.world.sessions.revoke(session.id);
+      assert.equal(rig.world.sessions.get(aSession.id), undefined, 'the bulk revoke hits its own tenant');
+
+      const aSession2 = rig.world.sessions.create(rig.alice, rig.alice.auth!);
+      rig.world.sessions.revokeAllForTenant(TENANT_B);
+      assert.notEqual(
+        rig.world.sessions.get(aSession2.id),
+        undefined,
+        'the reverse direction must not cross tenants either',
+      );
+
+      rig.world.sessions.revoke(bSession.id);
+      rig.world.sessions.revoke(aSession2.id);
     },
   },
   {
@@ -622,7 +636,7 @@ const IN_PROCESS_CASES: readonly ProbeCase[] = [
   {
     id: 'log-scan',
     surface: "tenant A's visible records and exports",
-    exposure: 'enforced',
+    exposure: 'log-scan',
     run: (rig) => {
       const corpora = [
         JSON.stringify(rig.world.audit.query(rig.alice, { tenantId: TENANT_A, limit: 1000 }).events),

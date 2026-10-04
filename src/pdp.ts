@@ -93,6 +93,13 @@ const REASON_PRIORITY: readonly DenyReason[] = [
  * action set is entirely evidence-read, so the responder's export ability
  * survives the kill switch and `lift` restores no authority — it only lifts
  * the freeze.
+ *
+ * H11 note (audit nit 06): `evidence.hold`/`evidence.release` are deliberately
+ * NOT here — they are write actions, and `RetentionLedger` appends them
+ * through the operator/embedder seam, not a PDP-routed capability. If a
+ * future surface routes holds through the PDP, decide the freeze interaction
+ * explicitly (a hold during an incident is arguably desirable, but `issue`
+ * refuses while frozen).
  */
 const EVIDENCE_READ_ACTIONS: ReadonlySet<string> = new Set(['query.audit', 'audit.export', 'evidence.decrypt']);
 

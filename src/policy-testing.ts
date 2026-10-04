@@ -76,22 +76,6 @@ const RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
   'audit-log',
 ]);
 
-const KNOWN_ACTIONS: ReadonlySet<string> = new Set<string>([
-  'read',
-  'write',
-  'delete',
-  'execute',
-  'invoke',
-  'export',
-  'network.egress',
-  'secret.use',
-  'capability.issue',
-  'task.approve',
-  'evidence.decrypt',
-  'query.audit',
-  'audit.export',
-]);
-
 const KNOWN_CLASSIFICATIONS: ReadonlySet<string> = new Set<string>([
   'public',
   'internal',

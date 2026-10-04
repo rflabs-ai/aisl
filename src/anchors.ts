@@ -19,7 +19,7 @@
  *   external witness: a rewritten or truncated chain fails against it even
  *   when the attacker holds the signing key.
  *
- * Trust boundary: the witness receives `{ seq, headHash, eventCount, sentAt }`
+ * Trust boundary: the witness receives `{ seq, headHash, eventCount, eventAt }`
  * only — no event content, no tenant data, no signing key. The optional bearer
  * token lives in config and is never logged or echoed into status/errors.
  */
@@ -33,6 +33,7 @@ import {
   eventSigningKeyPair,
   verifyBundle,
   type AuditExport,
+  type EventStore,
   type SecurityEvent,
   type VerificationResult,
 } from './events.ts';
@@ -188,7 +189,7 @@ export class HttpAnchorSink implements AnchorSink {
             seq: point.seq,
             headHash: point.headHash,
             eventCount: point.eventCount,
-            sentAt: point.at,
+            eventAt: point.at,
           }),
         });
       } catch {
@@ -425,9 +426,6 @@ export function verifyAnchoredEvidence(
       if (boundHash !== undefined && boundHash !== line.headHash) {
         sourceErrors.push(`seq ${line.seq}: anchor hash does not match the event at that seq`);
       }
-      if (head !== undefined && line.seq > head.seq) {
-        sourceErrors.push(`seq ${line.seq}: anchor is ahead of the bundle head (${head.seq})`);
-      }
     }
 
     const last = parsed.lines.at(-1);
@@ -495,6 +493,32 @@ export function verifyAnchoredEvidence(
     ...(checkpoint !== undefined ? { checkpoint } : {}),
     errors,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Shared-chain append precondition (H11 audit ticket 01)
+// ---------------------------------------------------------------------------
+
+/**
+ * A process that appends to or signs the shared chain must first be able to
+ * verify it under its own event public key. When it cannot — most commonly
+ * because the process generated an ephemeral key while the chain was signed by
+ * the deployment key — appending would produce records the deployment can
+ * never verify. Returns the refusal message, or undefined when the chain
+ * verifies (or is empty). H13 parity: `incident preserve` refuses the same
+ * case with the same hint.
+ */
+export function chainKeyRefusal(
+  store: Pick<EventStore, 'verify'>,
+  options: { publicKey?: KeyObject; publicKeyConfigured?: boolean } = {},
+): string | undefined {
+  const check = store.verify(options.publicKey !== undefined ? { publicKey: options.publicKey } : {});
+  if (check.valid) return undefined;
+  const hint =
+    check.detail === 'signature mismatch' && options.publicKeyConfigured !== true
+      ? ' (event-signing key mismatch: set EVENT_SIGNING_PRIVATE_KEY_PEM + EVENT_SIGNING_PUBLIC_KEY_PEM on the signing node and in this process)'
+      : '';
+  return `refusing to append to an evidence chain this process cannot verify: ${check.detail ?? 'invalid chain'}${hint}`;
 }
 
 // ---------------------------------------------------------------------------

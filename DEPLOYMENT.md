@@ -118,7 +118,7 @@ witnesses that make a host-level rewrite detectable.
 
 - **Anchor witness (automated):** set `EVENT_ANCHOR_WITNESS_URL` to an
   operator-hosted endpoint that accepts `POST` with
-  `{ version, kind: 'asl-anchor-head', seq, headHash, eventCount, sentAt }`
+  `{ version, kind: 'asl-anchor-head', seq, headHash, eventCount, eventAt }`
   and answers `GET` with `{ version, heads: [{ seq, headHash, receivedAt }] }`.
   `EVENT_ANCHOR_WITNESS_TOKEN` (optional) is sent as a bearer header — it is a
   secret; keep it in the secret broker/env, never in logs (status and errors
@@ -156,6 +156,12 @@ witnesses that make a host-level rewrite detectable.
   **structural** — there is no update/delete path at any layer (API, SQLite
   triggers, Postgres privileges) — so the hold ledger is the contract any
   future prune/archive tool must consult; do not build one that does not.
+- **Shared-chain precondition (checkpoint/hold/release):** on a Postgres chain
+  these commands refuse fail-closed unless the operator process can verify the
+  chain under its own event public key — set `EVENT_SIGNING_PRIVATE_KEY_PEM` +
+  `EVENT_SIGNING_PUBLIC_KEY_PEM` on the signing node and here (same
+  precondition as `incident preserve`; without them the process generates an
+  ephemeral key and the refusal names the env vars).
 - **Postgres note:** `DATABASE_URL` mode anchors the live chain; the default
   in-process world is empty and the commands print that caveat. The anchor
   file and checkpoints are NOT part of `pg_dump` — back them up separately.

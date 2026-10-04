@@ -248,16 +248,19 @@ signed with an Ed25519 key separate from the HMAC capability signing key, and
 the verifier works offline against the exported bundle.
 
 **Mechanism:** SHA-256 hash chain over canonical JSON of each event including
-the previous event's hash (`src/events.ts:83`); Ed25519 signature per event
-covering the same body (`src/events.ts:147`); the hashed body normalizes
+the previous event's hash (`eventBody`/`eventHash`, `src/events.ts`); Ed25519
+signature per event
+covering the same body (`signEventBody`/`verifyEventSignature`, `src/events.ts`);
+the hashed body normalizes
 `metadata` through a JSON round trip so explicit `undefined` values (which
 persistence drops) cannot make a stored event irreproducible after reload
 (audit ticket 19, live PG); append-only SQLite with
 `BEFORE UPDATE/DELETE` triggers that raise `security_events is append-only`
-(`src/events.ts:204`); head-hash anchor file (`<seq>:<eventHash>\n`,
-`src/events.ts:269`); standalone `verifyBundle()` verifier that operates
+(`src/events.ts`); head-hash anchor file (`<seq>:<eventHash>\n`,
+`appendAnchorLine`, `src/events.ts`); standalone `verifyBundle()` verifier
+that operates
 entirely on an exported bundle plus optional public key and anchor content
-(`src/events.ts:357`). **H11 (ADR-031):** external anchor sinks
+(`src/events.ts`). **H11 (ADR-031):** external anchor sinks
 (`src/anchors.ts`) publish every head to operator-configured witnesses
 (`HttpAnchorSink`, a second `FileAnchorSink`) without blocking an append;
 `verifyAnchoredEvidence` reconciles any number of anchor sources — line/event
@@ -706,11 +709,11 @@ the event body (every field except `eventHash` and `signature`). `EventLog.verif
 checks the signature when a public key is supplied, and the standalone
 `verifyBundle()` does the same offline.
 
-**Mechanism:** `node:crypto` `generateKeyPairSync('ed25519')` (`src/events.ts:122`);
-`sign` / `verify` over the canonical body (`src/events.ts:147`, `src/events.ts:154`);
-the signing key is independent of the HMAC capability signing key (ADR-002,
-ADR-004); the public key is exported via `eventPublicKey()`
-(`src/events.ts:141`) for distribution.
+**Mechanism:** `node:crypto` `generateKeyPairSync('ed25519')`
+(`eventSigningKeyPair`); `signEventBody` / `verifyEventSignature` over the
+canonical body (`src/events.ts`); the signing key is independent of the HMAC
+capability signing key (ADR-002, ADR-004); the public key is exported via
+`eventPublicKey()` (`src/events.ts`) for distribution.
 
 **Threat model:** TM-004 (repudiation).
 
@@ -2045,7 +2048,7 @@ cross-tenant review was accepted — is captured at `.scratch/h8/red.txt`.
 
 **Test:** `tests/h8-cross-tenant-probe.test.ts`; `tests/evidence.test.ts`
 (seal extension); `tests/tenant-rls.test.ts` (live-DB RLS proofs); the full
-gate (`npm run typecheck && npm test` — 712 tests / 691 pass / 0 fail / 21
+gate (`npm run typecheck && npm test` — 716 tests / 695 pass / 0 fail / 21
 Postgres-mode skips).
 
 **Known limitations:** the probe proves isolation in the directions and with
@@ -2091,7 +2094,10 @@ configured sinks (a throwing sink is wrapped) and reports timestamp
 regressions in `VerificationResult.timestampAnomalies`.
 `src/rest-anchors.ts` rehydrates accepted federation heads from
 `anchor.register` events. `src/retention.ts` (`RetentionLedger`, rehydrated
-from the log; `evidence.hold`/`evidence.release` in `KnownAction`). ADR-031.
+from the log; `evidence.hold`/`evidence.release` in `KnownAction`). The
+CLI checkpoint/hold/release commands refuse fail-closed when the process key
+cannot verify the chain (`chainKeyRefusal`, H13 parity — an ephemeral-key
+process cannot append unverifiable records to the shared chain). ADR-031.
 
 **Threat model:** TM-004 (evidence store as a target: whole-log rewrite,
 anchor collusion, clock manipulation, selective deletion).
@@ -2101,13 +2107,16 @@ runtime's trust domain (filesystem ACLs/WORM mount, an operator-held file, or
 a witness host); the witness token, when configured, is secret; the witness
 operator does not collude with the attacker.
 
-**Evidence:** `tests/h11-tamper-evident-evidence.test.ts` (35: sink fan-out +
+**Evidence:** `tests/h11-tamper-evident-evidence.test.ts` (39: sink fan-out +
 failure isolation + queue bound + token-redaction + memory-world env exclusion
-9; witness protocol 4;
+9; witness protocol 5;
 anchor reconciliation — binding, truncation, gap, fork, unanchored tail,
 timestamp anomalies 10; checkpoints — round trip, truncation, full re-signed
-rewrite, tamper/wrong key, chaining/fork 6; federation head rehydration 1;
-holds — record, release, rebuild, cross-tenant refusal, structural no-delete 5).
+rewrite, tamper/wrong key, chaining/fork, signed eventCount mismatch 7;
+federation head rehydration 1;
+holds — record, release, rebuild, cross-tenant refusal, structural no-delete 5;
+chain-key precondition — verifiable chain passes, foreign-key chain refuses
+with the shared-key hint 2).
 Plus the H8 probe's `retention-ledger-tenancy` row. The red run —
 `ERR_MODULE_NOT_FOUND` before the module existed — is captured at
 `.scratch/h11/red.txt`. Demo section 24 shows two anchor sources + a checkpoint
@@ -2115,8 +2124,8 @@ verifying, a re-signed truncation detected, a fork detected, and a hold
 surviving a ledger rebuild (demo exits 0).
 
 **Test:** `tests/h11-tamper-evident-evidence.test.ts`;
-`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 712 tests
-/ 691 pass / 0 fail / 21 Postgres-mode skips.
+`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 716 tests
+/ 695 pass / 0 fail / 21 Postgres-mode skips.
 
 **Known limitations:** a bundle with no source/checkpoint presented verifies
 internally but is reported `unanchored` — external corroboration is only as

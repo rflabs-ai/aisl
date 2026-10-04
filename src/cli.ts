@@ -72,6 +72,7 @@ import { InMemoryRevocationChannel, verifyIncidentBundle, type IncidentBundle } 
 import { ClockGuard } from './health.ts';
 import {
   HttpAnchorSink,
+  chainKeyRefusal,
   checkpointDigest,
   createCheckpoint,
   fetchWitnessHeads,
@@ -1781,6 +1782,21 @@ async function evidenceCommand(): Promise<void> {
   const sub = process.argv[3] ?? 'status';
   const world = await buildWorldAsync({ bootstrap: false });
 
+  /**
+   * H13 parity (H11 audit ticket 01): checkpoint/hold/release append to or
+   * sign the SHARED chain. If this process cannot verify that chain under its
+   * own event public key — the ephemeral-key case — the new record would be
+   * unverifiable under the deployment key. Refuse fail-closed with the same
+   * actionable hint `incident preserve` uses.
+   */
+  const requireVerifiableChain = (): void => {
+    const refusal = chainKeyRefusal(world.eventLog, {
+      publicKey: eventPublicKey(),
+      publicKeyConfigured: process.env.EVENT_SIGNING_PUBLIC_KEY_PEM !== undefined,
+    });
+    if (refusal) throw new Error(refusal);
+  };
+
   const usage = (): void => {
     console.error('  usage: evidence status');
     console.error('         evidence checkpoint [outPath] [previousCheckpointPath]');
@@ -1827,6 +1843,7 @@ async function evidenceCommand(): Promise<void> {
       const previous: EvidenceCheckpoint | undefined = previousPath
         ? (JSON.parse(readFileSync(previousPath, 'utf8')) as EvidenceCheckpoint)
         : undefined;
+      requireVerifiableChain();
       const checkpoint = createCheckpoint(events, previous ? { previous } : {});
       const verified = verifyCheckpoint(checkpoint, events, {
         publicKey: eventPublicKey(),
@@ -1904,6 +1921,9 @@ async function evidenceCommand(): Promise<void> {
       if (result.fork) line('anchor fork', 'DETECTED', `seq ${result.fork.seq}`);
       line('result', result.valid ? 'CONSISTENT' : 'REFUSED', result.errors.join('; ') || 'the witness corroborates the local chain');
       if (!result.valid) process.exitCode = 1;
+      if (process.env.EVENT_STORE !== 'postgres') {
+        console.log("  note: this process has an in-memory world — set EVENT_STORE=postgres + DATABASE_URL to reconcile a running node's evidence.");
+      }
       return;
     }
 
@@ -1913,6 +1933,7 @@ async function evidenceCommand(): Promise<void> {
       const toSeq = Number(process.argv[6]);
       const reason = process.argv.slice(7).join(' ').trim();
       if (!tenantId || !Number.isInteger(fromSeq) || !Number.isInteger(toSeq) || !reason) return usage();
+      requireVerifiableChain();
       const ledger = new RetentionLedger(world.eventLog);
       const hold = ledger.hold(world.user, { tenantId, fromSeq, toSeq, reason });
       line('legal hold recorded', 'HELD', `tenant ${tenantId} seq ${fromSeq}..${toSeq} — event #${hold.eventSeq} (${reason})`);
@@ -1926,6 +1947,7 @@ async function evidenceCommand(): Promise<void> {
       const holdSeq = Number(process.argv[4]);
       const reason = process.argv.slice(5).join(' ').trim();
       if (!Number.isInteger(holdSeq) || !reason) return usage();
+      requireVerifiableChain();
       const ledger = new RetentionLedger(world.eventLog);
       const released = ledger.release(world.user, { holdSeq, reason });
       line('legal hold released', 'RELEASED', `hold event #${released.eventSeq} — ${reason} (the hold stays in the log)`);

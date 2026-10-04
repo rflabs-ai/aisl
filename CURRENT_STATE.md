@@ -27,12 +27,12 @@ H3–H7/H9 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~13,962 lines of source across 48 modules
+TypeScript foundation on Node 24, ~14,000 lines of source across 48 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
-`retention.ts`, and `incident-store-pg.ts` are the latest additions), 712 tests
-(`tests/`, `security-tests/`; 691 pass, 21 Postgres-mode tests skip cleanly
+`retention.ts`, and `incident-store-pg.ts` are the latest additions), 716 tests
+(`tests/`, `security-tests/`; 695 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -67,8 +67,8 @@ Dev dependencies: `typescript`, `@types/node`.
   file, append-only SQLite enforcement (`BEFORE UPDATE/DELETE` triggers),
   offline `verifyBundle()` that operates on the exported bundle without
   database access. The EventLog class exposes only `append`, `all`,
-  `forTenant`, `verify`, `bundle`, `anchor`, and `close` — no update or
-  delete methods. (`src/events.ts`.)
+  `forTenant`, `verify`, `bundle`, `anchor`, `flushAnchors`, and `close` — no
+  update or delete methods. (`src/events.ts`.)
 - **Capability revocation (M4):** `AuthorizationService.revoke(capabilityId, reason)`
   adds the id to an in-memory revocation set; the next `authorize()` call returns
   `deny` with `denyReason: 'capability-revoked'`. In-process propagation is
@@ -413,7 +413,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 712 tests pass (691 green; 21 Postgres-mode tests skip without
+All 716 tests pass (695 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1
@@ -441,7 +441,7 @@ lifecycle (13)** | **M5 hierarchical matching (19)** | **M6 audit query + export
 | **H15 fail-closed availability (24: 19 acceptance — per-dependency fault matrix, recovery, false-denial pin, degraded mode, safety ordering, `/healthz` shape + structural no-secrets — plus 5 audit-follow-up regressions)**.
 | **H2 short-lived credentials (31: admission contract + 2000-case fuzz 8, end-to-end jose verification 6, workload derivation 6, revocation propagation 8, credential-in-log scanning 3)**.
 | **H8 cross-tenant isolation (24: probe 23 — 8 REST + 13 in-process + 2 Postgres-gated; plus 1 evidence-seal extension)**.
-| **H11 tamper-evident evidence (35: sinks 9 — fan-out, failure isolation, queue bound, token redaction, memory-world env exclusion; witness protocol 4, anchor reconciliation 10, checkpoints 6, federation rehydration 1, retention/holds 5)**.
+| **H11 tamper-evident evidence (39: sinks 9 — fan-out, failure isolation, queue bound, token redaction, memory-world env exclusion; witness protocol 5, anchor reconciliation 10, checkpoints 7, federation rehydration 1, retention/holds 5; chain-key precondition 2 — audit follow-up)**.
 
 Plus: policy semantics (10), capability integrity (5), evidence sealing (8),
 model output parsing (2), full attack corpus (12 + 3 aggregate), legitimate
@@ -1312,7 +1312,8 @@ plane durable against a host attacker who holds the signing key.
    new `retention-ledger-tenancy` row). Retention is structural — no
    update/delete path exists at any layer, and storage DELETE still aborts.
 
-Tests: `tests/h11-tamper-evident-evidence.test.ts` (35, red-confirmed before
+Tests: `tests/h11-tamper-evident-evidence.test.ts` (39 — 35 at the milestone
+plus 4 audit-follow-up cases; red-confirmed before
 the module existed — `ERR_MODULE_NOT_FOUND` captured at `.scratch/h11/red.txt`)
 + the H8 probe row (23 cases now). Residuals (ADR-031): a host attacker who
 controls the store *and* every witness/checkpoint; witness-operator collusion

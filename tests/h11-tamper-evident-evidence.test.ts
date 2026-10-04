@@ -15,13 +15,15 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { generateKeyPairSync } from 'node:crypto';
+import { sign as cryptoSign, generateKeyPairSync } from 'node:crypto';
+import { canonicalJson } from '../src/domain.ts';
 import {
   EventLog,
   GENESIS_HASH,
   bundleFromEvents,
   eventHash,
   eventPublicKey,
+  eventSigningKeyPair,
   signEventBody,
   verifyBundle,
   type SecurityEvent,
@@ -29,7 +31,9 @@ import {
 import {
   FileAnchorSink,
   HttpAnchorSink,
+  MAX_WITNESS_HEADS,
   WitnessProtocolError,
+  chainKeyRefusal,
   checkpointDigest,
   createCheckpoint,
   fetchWitnessHeads,
@@ -203,7 +207,7 @@ describe('H11: anchor sinks', () => {
       seq: 4,
       headHash: 'c'.repeat(64),
       eventCount: 5,
-      sentAt: 1700,
+      eventAt: 1700,
     });
     const status = sink.status();
     assert.equal(status.published, 1);
@@ -320,6 +324,21 @@ describe('H11: witness head protocol', () => {
     await assert.rejects(
       fetchWitnessHeads('https://witness.example.com/heads', { fetchFn }),
       (error: unknown) => error instanceof WitnessProtocolError,
+    );
+  });
+
+  test('a witness response beyond the head cap is refused (no paging)', async () => {
+    const heads = Array.from({ length: MAX_WITNESS_HEADS + 1 }, (_, i) => ({
+      seq: i,
+      headHash: 'a'.repeat(64),
+      receivedAt: 1,
+    }));
+    const fetchFn: typeof globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: 1, heads }), { status: 200 });
+    await assert.rejects(
+      fetchWitnessHeads('https://witness.example.com/heads', { fetchFn }),
+      (error: unknown) =>
+        error instanceof WitnessProtocolError && /too many heads/.test((error as Error).message),
     );
   });
 
@@ -529,6 +548,27 @@ describe('H11: operator-held checkpoints', () => {
     assert.match(wrongKey.errors.join('; '), /signature/i);
   });
 
+  test('a signed checkpoint whose eventCount disagrees with its seq is refused', () => {
+    const log = new EventLog();
+    const events = Array.from({ length: 3 }, () => appendEvent(log));
+    const head = events.at(-1)!;
+    // Hand-signed (the key is this process's): only the count check can catch
+    // an internally consistent signature over a wrong eventCount.
+    const body = {
+      type: 'asl-anchor-checkpoint' as const,
+      version: 1 as const,
+      seq: head.seq,
+      headHash: head.eventHash,
+      eventCount: 1,
+      createdAt: 42,
+      previousCheckpointDigest: null,
+    };
+    const signature = cryptoSign(null, Buffer.from(canonicalJson(body), 'utf8'), eventSigningKeyPair().privateKey).toString('base64');
+    const result = verifyCheckpoint({ ...body, signature }, events, { publicKey: eventPublicKey() });
+    assert.equal(result.valid, false);
+    assert.match(result.errors.join('; '), /eventCount/);
+  });
+
   test('checkpoint chaining refuses a broken link and a same-seq fork', () => {
     const log = new EventLog();
     const events = Array.from({ length: 3 }, () => appendEvent(log));
@@ -662,5 +702,31 @@ describe('H11: retention and legal holds', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('H11: chain-key precondition (audit ticket 01)', () => {
+  test('a chain this process key can verify (or an empty chain) passes the precondition', () => {
+    const empty = new EventLog();
+    assert.equal(
+      chainKeyRefusal(empty, { publicKey: eventPublicKey(), publicKeyConfigured: true }),
+      undefined,
+    );
+    const log = new EventLog();
+    appendEvent(log);
+    appendEvent(log);
+    assert.equal(
+      chainKeyRefusal(log, { publicKey: eventPublicKey(), publicKeyConfigured: true }),
+      undefined,
+    );
+  });
+
+  test('a chain signed by another key is refused with the shared-key hint', () => {
+    const log = new EventLog();
+    appendEvent(log);
+    const other = generateKeyPairSync('ed25519');
+    const refusal = chainKeyRefusal(log, { publicKey: other.publicKey, publicKeyConfigured: false });
+    assert.match(refusal ?? '', /cannot verify/);
+    assert.match(refusal ?? '', /EVENT_SIGNING_PRIVATE_KEY_PEM/);
   });
 });

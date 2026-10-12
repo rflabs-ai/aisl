@@ -607,7 +607,11 @@ boundary — what it will grow (device/service principals, a read-only
 status/evidence feed, tailnet service auth) and what it will not do
 (orchestrate, store knowledge, decide truth, delete data) — is recorded in
 **ADR-032**. The vehicle seams land as their own milestones only when a LAS
-caller needs them; nothing here is built speculatively.
+caller needs them; nothing here is built speculatively. **ASL's `LAS-I` rows**
+(index: `local-ai-system/docs/architecture/assembly-map.md` §5): **I5**
+ctxd/kgp ledger-head and digest anchoring into ASL (M17 pattern — consume-only),
+**I6** purge certificates as ASL evidence beside H11 holds, **I8** the vehicle
+seams themselves (ADR-032).
 
 ---
 

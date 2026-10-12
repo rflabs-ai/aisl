@@ -585,6 +585,18 @@ H8 must close or its residual be explicitly accepted per deployment — H8 is
 closed with ADR-030's named residuals (the shared process / Stage-3 physical
 isolation is the one a deployment must accept explicitly).
 
+**LAS portfolio (personal stack).** A second, personal portfolio —
+`local-ai-system` assembling ctxd, kgp, eyewright, orbit + supervisor,
+creative-OS, engineering-OS, project-raven, and home-agent — treats ASL as a
+**cross-cutting** safety/evidence layer rather than one more client row (LAS
+ADR-0006; assembly index in
+`local-ai-system/docs/architecture/assembly-map.md`). ASL's side of that
+boundary — what it will grow (device/service principals, a read-only
+status/evidence feed, tailnet service auth) and what it will not do
+(orchestrate, store knowledge, decide truth, delete data) — is recorded in
+**ADR-032**. The vehicle seams land as their own milestones only when a LAS
+caller needs them; nothing here is built speculatively.
+
 ---
 
 ## IMPOSSIBLE+

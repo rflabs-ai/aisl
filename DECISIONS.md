@@ -2459,3 +2459,102 @@ if volume grows; a hosted witness service is a separate deployment artifact;
 prune/archive tooling (if ever built) must consume `RetentionLedger.isHeld`
 and add its own structural tests; checkpoint chaining is the seed for
 publication to third-party logs.
+
+---
+
+## ADR-032: LAS vehicle seams — device/service principals, a status/evidence feed, tailnet service auth (scope note)
+
+**Context:** The `local-ai-system` (LAS) program assembles ASL, ctxd, kgp,
+eyewright, orbit + supervisor, control-plane, creative-OS, engineering-OS,
+project-raven, and home-agent into one system (LAS ADR-0006: LAS is the
+assembly; ASL is **cross-cutting**, not a layer). ADR-022's federation model
+defines how ASL serves state-plane clients over the M14 REST seam; it does not
+name the seams the *assembled* vehicle exposes — one place, one identity, local
+services reached over a tailnet, and a cockpit that reads state from every
+piece. This ADR is a **scope note**: it records what ASL will grow when the car
+needs it, so no LAS-motivated ASL feature is built speculatively, and so the
+boundary is written down before the code exists.
+
+**Decision:**
+
+1. **Boundary rule from ASL's side (mirrors ADR-0006).** ASL owns **authority,
+   keys, gates, evidence, and incident response** outright, and holds **final
+   say — veto + notary** — wherever another piece's decision could violate
+   those. ASL **never orchestrates**; it does not schedule, budget, route,
+   store knowledge, decide truth, or delete data. One accountable boss per
+   concern at the point of action; joint custody is normal. Deletion is the
+   worked example: the data owner deletes (kgp corpus, ctxd ledger); ASL vetoes
+   via a legal hold and notarizes the purge certificate.
+2. **Vehicle seams (build each only when the car exposes it; each lands as its
+   own milestone/ADR with tests — nothing here is a commitment to code now):**
+   - **Device/service principals.** A local machine/service identity — the Pi 5
+     node, supervisor-launched services (eyewright, `laya-serve`), and tailnet
+     clients — derived the way ADR-028 derives workload identity (capped,
+     claim-minimal, short-lived), extending ADR-029's device-principal seed.
+     Every service caller authenticates; no ambient authority.
+   - **Unified status/evidence feed.** One read-only projection for the cockpit:
+     health across pieces (`/healthz` + eyewright's `/health/deep` + the
+     supervisor + ctxd/kgp), the evidence head, active holds, and incidents. It
+     is a **projection over existing** health/audit/anchor surfaces, not a new
+     store and not a second evidence plane.
+   - **Tailnet service auth.** LAS surfaces bind locally and are exposed over
+     Tailscale (the control-plane/home-agent pattern). Services validate
+     ASL-issued short-lived credentials; TLS terminates at the tailnet. ASL is
+     the **verifier**, never the transport.
+3. **Non-goals (explicit).** ASL does not become the orchestrator (ctxd/orbit
+   do), the knowledge store (kgp), the truth gate (eyewright), or the service
+   manager (the supervisor). Anchoring stays the integration primitive: ctxd
+   ledger heads and eyewright verdicts are attested via the M17 anchor pattern
+   / H11 checkpoints, not copied into a shared store. No new runtime dependency
+   is implied by this ADR.
+
+**Alternatives:**
+- **Make ASL the hub/orchestrator.** Rejected: violates one-enforcement-plane
+  (ADR-022), couples system availability to the security plane, and duplicates
+  ctxd/orbit scheduling.
+- **Absorb ctxd's ledger into ASL's EventLog.** Rejected: different volume,
+  tiering, and lifecycle; the ledger is an operational trace and a training
+  set, not the canonical attestation chain. Anchor heads instead (M17/M20
+  pattern).
+- **Per-piece bespoke identity.** Rejected: N trust stories; M2/ADR-016/ADR-028
+  already centralize verification, and H8's probe already covers the surfaces.
+- **A new LAS service manager beside the supervisor.** Rejected: orbit's
+  `services.json`/`svcwatch` already exist and are generic; extend, don't fork.
+
+**Reasoning:** The car needs a safety system that is everywhere and in charge
+of nothing but safety. Writing the seams down now (a) keeps ASL's roadmap
+honest — it grows device principals/auth/status only when a real caller needs
+them, and (b) prevents the failure mode the federation model was built to
+avoid: two pieces inventing two identity or evidence stories. Anchoring rather
+than merging keeps the single-writer evidence chain intact while letting a
+high-volume, tiered, eventually-forgetful operational ledger live where it
+belongs.
+
+**Security implications:** adds no authority path and no new store; it makes the
+existing verification seam (ADR-016/ADR-028) reach local services and tailnet
+clients, and makes ASL's evidence the cockpit's source of truth. It does **not**
+close the shared-process residual (H8/Stage 3), key custody (ADR-008), or the
+witness-collusion residual (ADR-031) — a LAS deployment inherits all three and
+must accept them explicitly (per ADR-022's gate, H8 is closed with named
+residuals).
+
+**Tradeoffs:** tailnet exposure widens the reachable surface (mitigated by
+short-lived credentials, loopback-by-default, TLS at the tailnet); a device
+principal for a personal stack is single-user-shaped and will need review
+before any multi-user use; the status feed must be a projection (cheap) or it
+becomes a second source of truth (rejected).
+
+**Residual risk (named):** shared process and SQLite app-level-only checks
+(H8/ADR-030, Stage 3 physical isolation); key custody in env/ADR-008; a
+compromised local device holding a valid device credential is a legitimate
+principal until its `jti` is revoked (H2); the cockpit's status feed can be
+stale without an alerting story (LAS owns alerting).
+
+**Future migration path:** each seam becomes its own H/M item when LAS exposes
+it (device principals → an ADR-029/028 extension with tests; status feed →
+read-only routes over existing health/audit; tailnet auth → the ADR-028
+verification contract applied to service callers). Cross-repo progress is
+tracked as `LAS-I<n>` milestones in each related repo, indexed in
+`local-ai-system/docs/architecture/assembly-map.md`; the first real drive
+(Phase A) keeps ASL out of the loop, and the fully-wired drive is rehearsed as
+a simulation before it is real.

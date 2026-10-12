@@ -167,8 +167,20 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   blocking an append), multi-source reconciliation (binding, truncation, fork
   detection), operator-held signed checkpoints, durable federation anchor
   history, and recorded legal holds. Next: H14 (continuous adversarial
-  evaluation) or any remaining H3–H7/H9 item. The remaining seven (H3–H7, H9,
+  evaluation) or any remaining H3-H7/H9 item. The remaining seven (H3-H7, H9,
   H14) stay open [ ] until prioritized after it clears.
+
+  **Working order (agreed 2026-10-12).** **H14** (continuous adversarial
+  evaluation) and **H3** (policy adversarial) run first and in parallel —
+  H14's corpus feeds every later track, H3 is file-disjoint (policy + fixtures).
+  **M18 Phase 1** proceeds in the raven repo (ASL consume-only). A
+  **control-plane gap pass** ("to a good place") runs alongside. Then the
+  runtime track: **H4 → H7** (H4 is the shared dependency of kgp's clean-room,
+  home-agent's M19, and H9), with **H5/H6/H9 serialized behind H4** on
+  `src/runtime.ts`. LAS (personal stack) is tracked separately — see the
+  LAS-portfolio paragraph below, **ADR-032**, and
+  `local-ai-system/docs/architecture/assembly-map.md`; its first real drive
+  (Phase A: ctxd M0–M2 + kgp P0) deliberately keeps ASL out of the loop.
 
 ### H1 — Robust capability issuance (root of trust) **[DONE]** (ADR-023)
 

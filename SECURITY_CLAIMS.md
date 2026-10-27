@@ -2299,3 +2299,42 @@ undeclared tool output under-states provenance (`ponytail:` marker in
 `src/runtime.ts`; a declaration becomes mandatory at H6's protocol boundary). A
 tool that declares a *lower* label than the data it fetched is believed; the
 label can still only raise.
+
+---
+
+## Claim 43 - A canary cannot leave in any cheap encoding, and a refusal never repeats what it caught (H7)
+
+**Claim:** Every egress path inspects the bytes it is about to send. A payload
+whose classification exceeds the destination ceiling is refused (this check runs
+first and is authoritative), a payload carrying a planted canary value is
+refused in the raw, base64 (standard and url-safe), hex, or url-encoded forms,
+including when the whole body is base64/hex-encoded, and a payload over the byte
+cap is refused. No refusal reason or finding detail contains the value it
+caught — the verdict is safe to log, which matters because the alternative makes
+the error message the leak.
+
+**Mechanism:** `src/dlp.ts` (`scanForCanaries`, `tokenEncodings`, `inspectEgress`;
+fixed-label reasons). `src/model-http.ts` inspects `prompt + context` before any
+fetch and records `denyReason: dlp-refused` (a distinct reason, per H15).
+`src/egress-proxy.ts` buffers request bodies up to the cap and inspects them
+before forwarding.
+
+**Threat model:** TM-002 (data injection) — the allowlisted-channel leak: the
+destination is permitted, the PDP says yes, and the bytes are the attack.
+
+**Assumptions:** the canary list is maintained, and the destination ceiling is
+the operator's intended policy; both are configuration, not mechanism.
+
+**Evidence:** `tests/h7-egress-dlp.test.ts` (14). Encoding coverage is
+enumerated rather than sampled; the no-echo property is asserted by rendering
+the whole verdict and searching it for every encoding of the token; the model
+adapter test proves `fetch` is never called; the proxy test proves an allowlisted
+host is still refused a canary body.
+
+**Residual risk:** human-approved exfiltration (an operator clicking send is the
+authorisation); steganography; semantic paraphrase and arithmetic encodings
+beyond one decode pass; slow drip across many requests, because the cap is
+per-request (`ponytail:` marker in `src/egress-proxy.ts`); a compressed body is
+opaque to a byte scan; and a canary list that is not maintained stops being
+evidence of anything. The proxy path is tested through `inspectBody`, not over a
+live socket.

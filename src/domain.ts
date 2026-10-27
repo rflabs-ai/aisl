@@ -202,6 +202,8 @@ export type DenyReason =
   | 'capability-signature-invalid'
   | 'capability-tenant-mismatch'
   | 'classification-ceiling'
+  /** H7: content-level egress DLP refused the payload (canary, volume). */
+  | 'dlp-refused'
   | 'policy-deny'
   | 'tenant-mismatch'
   | 'evaluation-error'

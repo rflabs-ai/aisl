@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H4 - data-flow enforcement / taint (ADR-036).
+Honest snapshot. Updated after H7 - content-level egress DLP (ADR-037).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -35,24 +35,27 @@ H4 landed the same day (ADR-036): `src/taint.ts` carries a one-directional data
 label across session steps, so a read stays labelled after the capability that
 justified it is revoked — the write target is raised rather than laundered —
 and every execution event records the label's classification, sources and
-`untrusted` flag, never content.
+`untrusted` flag, never content. H7 followed the same day (ADR-037): `src/dlp.ts`
+inspects outbound bytes — classification first, then canaries in raw, base64,
+hex and url-encoded form (plus one decode pass), then a byte cap — and a refusal
+records a fixed label rather than the value it caught. Wired into the model
+egress before any fetch and into the HTTP proxy's buffered body.
 M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H7 (data-flow enforcement continued into egress DLP) or H5, with
-H6/H9 serialized behind them on `src/runtime.ts`.
+Next frontier: H5 (malicious tool handling), then H6/H9 on `src/runtime.ts`.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~14,700 lines of source across 52 modules
+TypeScript foundation on Node 24, ~14,700 lines of source across 53 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
 `retention.ts`, `adversarial.ts`, `policy-analysis.ts`, and
-`incident-store-pg.ts` are the latest additions), 776 tests
-(`tests/`, `security-tests/`; 755 pass, 21 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 790 tests
+(`tests/`, `security-tests/`; 769 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -434,7 +437,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 776 tests pass (755 green; 21 Postgres-mode tests skip without
+All 790 tests pass (769 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1

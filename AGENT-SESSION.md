@@ -24,6 +24,42 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 42 - 2026-10-27 - opencode/h7-egress-dlp
+
+**Did:**
+- H7 (data-flow enforcement / egress DLP, ADR-037) on branch
+  `feat/h7-egress-dlp`. Marked [DONE].
+- **The gap was already written down in the code:** `src/model-http.ts` said
+  text absent from the content map is "free text ... that is H7's content-level
+  DLP". Everything was gated on *where* bytes go; nothing looked at *what*.
+- **`src/dlp.ts`:** `scanForCanaries` (raw, base64 standard + url-safe, hex,
+  url-encoded, plus one decode pass over a base64/hex body),
+  `inspectEgress({ payload, label, ceiling, canaries, maxBytes })` with the
+  classification check first and authoritative, and fixed-label reasons so a
+  refusal never repeats the value it caught.
+- **Wired:** `HttpModelAdapter` inspects `prompt + context` before any fetch and
+  records `denyReason: dlp-refused` (new `DenyReason`, per H15's distinct-reason
+  contract). `EgressProxy` buffers a body up to the cap and refuses it before
+  forwarding, so an allowlisted host still cannot receive a canary.
+- **Tests:** `tests/h7-egress-dlp.test.ts` (14) — every encoding enumerated, the
+  no-echo property asserted by rendering the verdict and searching it for every
+  encoding of the token, `fetch` proven never called, and the proxy refusing a
+  canary body to a host the PDP allows.
+- **Docs:** ROADMAP (H7 [DONE] + closed block), SECURITY_CLAIMS Claim 43,
+  CURRENT_STATE, PROJECT_CONTEXT, this entry.
+- **Gate:** typecheck clean; 790 tests / 769 pass / 0 fail / 21 skipped.
+
+**Left:**
+- Slow drip across requests: the cap is per-request (`ponytail:` marker in
+  `src/egress-proxy.ts`); a windowed budget needs a session object to hang it on.
+- Compressed bodies are opaque to a byte scan; steganography and paraphrase are
+  ADR-037's named residuals.
+- The proxy path is tested through `inspectBody`, not over a live socket.
+
+**Next session should:**
+- H5 (malicious tool handling): quotas, parameter smuggling, output that lies
+  about what it did. Then H6/H9 on `src/runtime.ts`.
+
 ### SESSION 41 - 2026-10-27 - opencode/h4-dataflow
 
 **Did:**

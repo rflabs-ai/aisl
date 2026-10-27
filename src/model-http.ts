@@ -25,6 +25,7 @@ import { ModelOutputError, type ModelInput, type ModelOutput, type ModelPort, pa
 import { type AuthorizationService } from './pdp.ts';
 import { type ResourceRegistry } from './registry.ts';
 import { deriveClassification } from './runtime.ts';
+import { inspectEgress, type Canary } from './dlp.ts';
 
 export class ModelEgressDeniedError extends Error {
   constructor(message: string) {
@@ -67,6 +68,13 @@ export interface HttpModelConfig {
    * refused as unclassifiable (default-deny).
    */
   readonly content?: ReadonlyMap<string, string>;
+  /**
+   * H7 (ADR-037): planted values that must not leave, in any of the cheap
+   * encodings. Checked against the outbound payload before any fetch.
+   */
+  readonly canaries?: readonly Canary[];
+  /** Byte cap for one outbound payload; above it the egress is refused. */
+  readonly dlpMaxBytes?: number;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
   readonly maxRetries?: number;
@@ -79,7 +87,7 @@ const SYSTEM_INSTRUCTION =
   + '{"text":string,"requests":[{"action":string,"resourceId":string,"justification"?:string}]}. '
   + 'No prose, no markdown fences, no extra fields.';
 
-type Egress = 'allow' | 'refused-above-ceiling' | 'refused-unclassifiable' | 'pdp-denied' | 'provider-error' | 'parse-error';
+type Egress = 'allow' | 'refused-above-ceiling' | 'refused-unclassifiable' | 'refused-dlp' | 'pdp-denied' | 'provider-error' | 'parse-error';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -168,6 +176,29 @@ export class HttpModelAdapter implements ModelPort {
       throw new ModelEgressDeniedError(
         `model egress refused: derived classification '${derived}' exceeds ceiling '${this.cfg.ceiling}'`,
       );
+    }
+
+    // 2b. Content-level DLP (H7, ADR-037): the model call IS an egress, so the
+    // exact bytes about to be sent are inspected. A canary here means the
+    // payload is being used as an exfiltration channel through an allowlisted
+    // provider. A refusal never repeats the value it caught.
+    const outbound = JSON.stringify({ task: input.prompt, context: input.context });
+    const dlp = inspectEgress({
+      payload: outbound,
+      label: { sources: [], classification: derived, untrusted: true },
+      ceiling: this.cfg.ceiling,
+      canaries: this.cfg.canaries ?? [],
+      ...(this.cfg.dlpMaxBytes !== undefined ? { maxBytes: this.cfg.dlpMaxBytes } : {}),
+    });
+    if (!dlp.allow) {
+      this.record({
+        startedAt,
+        decision: 'deny',
+        denyReason: 'dlp-refused',
+        egress: 'refused-dlp',
+        classification: derived,
+      });
+      throw new ModelEgressDeniedError(`model egress refused: ${dlp.reason}`);
     }
 
     // 3. PDP consult: no capability for the provider resource = no egress.

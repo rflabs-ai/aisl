@@ -330,7 +330,7 @@ semantic deviation inside granted scope is out of reach.
 - **Residual risk:** tool implementations that ignore the protocol.
 - **Class:** P/E.
 
-### H7 — Data-flow enforcement and egress DLP
+### H7 — Data-flow enforcement and egress DLP **[DONE]** (ADR-037)
 
 - **Attack surface:** outbound bytes: network, files, artifacts, logs, model calls.
 - **Failure modes:** encoding/compression bypass; slow drip below thresholds;
@@ -341,6 +341,26 @@ semantic deviation inside granted scope is out of reach.
   anomaly detection.
 - **Residual risk:** human-approved exfiltration; steganography.
 - **Class:** E/HA.
+
+**Closed (ADR-037, 2026-10-27):** `src/dlp.ts` is the one content-level
+mediator: `inspectEgress({ payload, label, ceiling, canaries, maxBytes })`
+returns a verdict whose classification check runs first and stays
+authoritative. Canary matching covers the token raw, base64 (standard and
+url-safe), hex, and url-encoded, and decodes the payload once (base64 or hex)
+before matching — the cheap evasions. **A refusal never repeats what it
+caught**: reasons and details are fixed labels (`canary:phi`,
+`payload:restricted`, `volume:4096>1024`), because an error that quotes the
+value is the exfiltration channel. Wired where bytes actually leave:
+`HttpModelAdapter` inspects the outbound prompt+context before any fetch (the
+model call *is* an egress — the gap its own comment named), and `EgressProxy`
+buffers a body up to the cap and refuses it, so an allowlisted destination
+still cannot receive a canary. `dlp-refused` is a distinct `DenyReason`. 14
+tests (`tests/h7-egress-dlp.test.ts`), including the structural property that
+no verdict contains the token in any encoding. Residual per ADR-037:
+human-approved exfiltration; steganography and semantic paraphrase; slow drip
+across requests (the cap is per-request — `ponytail:` marker in
+`src/egress-proxy.ts`); compressed bodies are opaque to a byte scan; an
+unmaintained canary list proves nothing.
 
 ### H8 — Cross-tenant isolation (cryptographic and physical) — *structurally necessary at federation (ADR-022)* **[DONE]** (ADR-030)
 

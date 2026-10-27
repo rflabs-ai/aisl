@@ -14,8 +14,9 @@ import { resolve as dnsResolve } from 'node:dns';
 import type { AuthorizationService } from './pdp.ts';
 import type { ResourceRegistry } from './registry.ts';
 import type { EventStore } from './events.ts';
-import type { Principal } from './domain.ts';
+import type { Classification, Principal } from './domain.ts';
 import { defineResource } from './registry.ts';
+import { inspectEgress, type Canary, type DlpVerdict } from './dlp.ts';
 
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, '');
@@ -62,18 +63,42 @@ export class EgressProxy {
   private server: Server | undefined;
   private port: number | undefined;
 
+  private readonly dlp: { canaries?: readonly Canary[]; maxBytes: number; ceiling: Classification };
+
   constructor(
     principal: Principal,
     authorization: AuthorizationService,
     registry: ResourceRegistry,
     eventLog: EventStore,
-    opts: { dnsPin?: boolean } = {},
+    opts: { dnsPin?: boolean; canaries?: readonly Canary[]; maxBytes?: number; ceiling?: Classification } = {},
   ) {
     this.principal = principal;
     this.authorization = authorization;
     this.registry = registry;
     this.eventLog = eventLog;
     this.dnsPin = opts.dnsPin ?? true;
+    this.dlp = {
+      ...(opts.canaries !== undefined ? { canaries: opts.canaries } : {}),
+      // ponytail: per-request cap, not a windowed budget (slow drip is ADR-037's
+      // named residual). Ceiling: a patient attacker under the cap.
+      maxBytes: opts.maxBytes ?? 1_048_576,
+      ceiling: opts.ceiling ?? 'restricted',
+    };
+  }
+
+  /**
+   * H7 (ADR-037): inspect the bytes a request would forward. The handler calls
+   * this after buffering the body; it is public so the policy is testable
+   * without opening a socket.
+   */
+  inspectBody(payload: string): DlpVerdict {
+    return inspectEgress({
+      payload,
+      label: { sources: [], classification: this.dlp.ceiling, untrusted: true },
+      ceiling: this.dlp.ceiling,
+      ...(this.dlp.canaries !== undefined ? { canaries: this.dlp.canaries } : {}),
+      maxBytes: this.dlp.maxBytes,
+    });
   }
 
   async start(): Promise<number> {
@@ -165,7 +190,38 @@ export class EgressProxy {
         res.end('upstream unreachable');
       });
 
-      req.pipe(proxyReq);
+      // H7 (ADR-037): buffer up to the cap, inspect, then forward. A body that
+      // cannot be inspected is not forwarded - the size cap makes the buffer
+      // bounded, and an oversized body is refused rather than streamed.
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size <= this.dlp.maxBytes) chunks.push(chunk);
+      });
+      req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        const verdict = this.inspectBody(body);
+        if (!verdict.allow) {
+          this.eventLog.append({
+            tenantId: this.principal.tenantId,
+            principal: this.principal.id,
+            actor: this.principal.id,
+            actorKind: this.principal.kind,
+            action: 'network.egress',
+            resourceId: `net:${host}`,
+            decision: 'deny',
+            denyReason: 'dlp-refused',
+            result: 'denied',
+            // Fixed label only - never the payload or the value caught.
+            metadata: { phase: 'egress-proxy-dlp', host, reason: verdict.reason, bytes: verdict.bytes },
+          });
+          res.writeHead(403);
+          res.end(`denied: ${verdict.reason}`);
+          return;
+        }
+        proxyReq.end(body);
+      });
     });
   }
 

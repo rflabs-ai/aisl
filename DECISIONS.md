@@ -2874,3 +2874,76 @@ reach.
 destination's ceiling refuses the egress rather than raising the target); H9
 threads it through artifact provenance; H6 can require a declaration at the tool
 protocol boundary once tools run out of process.
+
+---
+
+## ADR-037: Content-level egress DLP - canaries, encodings, and a refusal that never repeats itself (H7)
+
+**Context:** the PDP gates *where* bytes may go (`network.egress`,
+`model.invoke`), and the classification gate refuses egress above a ceiling.
+Both are structural and both work. What neither can do is look at the bytes.
+`src/model-http.ts` says so in a comment: text absent from the content map is
+"free text, same class as `prompt` - that is H7's content-level DLP". That is
+the gap: a prompt can carry an API key, a patient row, or a canary value to a
+provider that is perfectly allowlisted, and every check passes.
+
+Three of H7's failure modes follow from that:
+- **encoding/compression bypass** - the value is base64, hex, or url-encoded;
+- **exfiltration via model prompt** - the model call *is* an egress;
+- **exfiltration via error messages** - a refusal that quotes what it caught
+  turns the denial into the leak.
+
+Volume anomaly is the fourth, and the honest version of it for a
+request-scoped mediator is a byte cap, not a statistical detector.
+
+**Decision:**
+
+1. **One mediator, `inspectEgress`.** `src/dlp.ts` takes a payload, the session's
+   `TaintLabel`, a destination ceiling, and a canary list, and returns a verdict.
+   The classification check runs first and stays authoritative; a clean canary
+   scan cannot argue with it. Every egress path calls this one function rather
+   than growing its own scan.
+
+2. **Canaries are planted values, and encodings are checked.** A canary is
+   `{ token, classification }`. Matching covers the token raw, base64 (standard
+   and url-safe), hex, and url-encoded, and the payload is decoded once (base64
+   or hex) before matching - the cheap evasions are the common ones. Tokens
+   shorter than four characters are ignored so a config mistake cannot turn
+   every egress into a denial.
+
+3. **A refusal never echoes the value it caught.** `reason` and every finding
+   detail are fixed labels (`canary:phi`, `payload:restricted`,
+   `volume:4096>1024`). Quoting the match would make the error message the
+   exfiltration channel, which is the exact failure mode this milestone names.
+
+4. **Volume is a per-egress byte cap.** `maxBytes` refuses an oversized payload
+   outright. Counting bytes across a window (slow drip) needs session state the
+   mediator deliberately does not hold - named as a residual, not faked.
+
+5. **Wired where bytes actually leave.** `HttpModelAdapter` scans the outbound
+   `prompt + context` payload for canaries before any fetch (the model call is
+   an egress). `EgressProxy` buffers a request body up to the cap and inspects
+   it before forwarding, so an allowlisted destination still cannot receive a
+   canary.
+
+**Security implications:** this is the first control that inspects payload
+content rather than metadata. It closes the allowlisted-but-leaking channel and
+makes a planted canary a tripwire across every egress. It cannot see a
+paraphrase, an arithmetic encoding, or a steganographic channel.
+
+**Tradeoffs:** the proxy buffers bodies up to the cap instead of streaming them
+(the cap bounds the memory, the latency change is one copy); canary scanning is
+O(canaries x encodings x payload) and is meant for a small planted list, not for
+a corpus of every secret in the tenant.
+
+**Residual risk (named):** human-approved exfiltration (an operator who clicks
+"send" is the authorisation); steganography and semantic paraphrase; slow drip
+across many requests; compression carried end-to-end (a `.zip` body is opaque -
+the canary check runs on bytes, not on decoded archives); and a canary list that
+is not maintained stops being evidence of anything.
+
+**Future migration path:** H9 threads the same mediator through artifact
+storage (an artifact is egress to disk); H6 can require the tool protocol to
+declare a payload so inspection happens before serialization; a session-level
+byte budget turns the cap into an actual slow-drip detector once there is a
+session object to hang it on.

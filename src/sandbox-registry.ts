@@ -159,6 +159,7 @@ export class SandboxRegistry {
       capabilityId: decision.capabilityId,
       resourceId: id,
       resourceType: 'system',
+      resourceClassification: this.deps.registry.get(id)?.classification ?? 'x-unknown-resource',
       action: SANDBOX_EXECUTE_ACTION,
       params: input.params ?? {},
       content: undefined,

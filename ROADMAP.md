@@ -166,10 +166,11 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   tamper-evident evidence: external anchor sinks (file + HTTP witness, never
   blocking an append), multi-source reconciliation (binding, truncation, fork
   detection), operator-held signed checkpoints, durable federation anchor
-  history, and recorded legal holds. Next: the runtime track — **H4** (prompt-
-  injection-resistant data flow), then **H7**, with **H5/H6/H9** serialized
-  behind H4 on `src/runtime.ts`. H14 closed on 2026-10-27 (ADR-035); H4-H7 and
-  H9 remain the open Stage 2 items.
+  history, and recorded legal holds. H14 closed on 2026-10-27 (ADR-035) and H4
+  the same day (ADR-036), which unblocks the rest of the runtime track: next is
+  **H7** (data-flow continued into egress DLP) or **H5**, with **H6/H9**
+  serialized behind them on `src/runtime.ts`. H5-H7 and H9 remain the open
+  Stage 2 items.
 
   **Working order (agreed 2026-10-12).** **H14** (continuous adversarial
   evaluation) and **H3** (policy adversarial) run first and in parallel —
@@ -177,6 +178,8 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   As executed, H14's runner + drift + differential lanes landed first
   (ADR-033, 2026-10-27), H3 followed the same day (ADR-034), and H14's mutation
   lane closed against H3's goldens (ADR-035) - both milestones are now [DONE].
+  H4 (data-flow taint) followed on the same day (ADR-036), unblocking the
+  runtime track.
   **M18 Phase 1** proceeds in the raven repo (ASL consume-only). A
   **control-plane gap pass** ("to a good place") runs alongside. Then the
   runtime track: **H4 → H7** (H4 is the shared dependency of kgp's clean-room,
@@ -274,7 +277,7 @@ oracle H14's mutation lane was waiting for. 21 tests
 samples a rule-derived domain — it can miss a conflict at a point it never
 generates and can never prove absence; attribution order-dependence remains.
 
-### H4 — Prompt-injection-resistant architecture (data-flow enforcement)
+### H4 — Prompt-injection-resistant architecture (data-flow enforcement) **[DONE]** (ADR-036)
 
 - **Attack surface:** every place untrusted text crosses into a decision.
 - **Failure modes:** implicit trust of tool output; taint lost through
@@ -284,6 +287,26 @@ generates and can never prove absence; attribution order-dependence remains.
   runs where the expected outcome is denial or in-scope action only.
 - **Residual risk:** semantic deviation inside granted scope (unavoidable).
 - **Class:** MVP/HA.
+
+**Closed (ADR-036, 2026-10-27):** `src/taint.ts` is a one-directional label
+(`combine` takes the max classification, the union of sources, OR of
+`untrusted`; there is no lowering operation). `AgentSession` carries a label
+across steps and folds it into the existing coarse derivation, which stays as a
+floor — so the write path can only be raised, never lowered. `ToolResult.taint`
+lets a tool declare provenance (raise-only); `ExecutionContext` gains
+`resourceClassification` so a declaration can be accurate. Every execution event
+records `taint: { classification, sources, untrusted }` — ids and labels, never
+content — and a canary test asserts the plaintext cannot reach it. The closed
+hole: **revocation does not un-see data.** A session reads phi through a tool,
+the capability is revoked, and a later write under only a public capability now
+still raises the target to phi, because the label rode the session rather than
+the grant. The end-to-end half is proven on all four corpus documents: every
+step is denied, executed false, and marked `untrusted` with the source named.
+9 tests (`tests/h4-dataflow.test.ts`). Residual per ADR-036: the model's
+reasoning is unobservable — only the step's inputs are labelled, never "this
+request was caused by that document"; an undeclared tool output is trusted to be
+the target's data (`ponytail:` marker in `src/runtime.ts`, mandatory at H6);
+semantic deviation inside granted scope is out of reach.
 
 ### H5 — Malicious tool handling
 
@@ -851,8 +874,8 @@ federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
 H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE], H3 [DONE] — ADR-034;
-H14 [DONE] — ADR-033 + ADR-035; the remaining items are H4–H7 and H9, all with
-the runtime track H4 → H7 first).
+H14 [DONE] - ADR-033 + ADR-035; H4 [DONE] - ADR-036; the remaining items are
+H5-H7 and H9).
 
 ### M0 — Architectural foundation (done)
 

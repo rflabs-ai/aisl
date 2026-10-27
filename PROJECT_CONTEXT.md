@@ -98,6 +98,7 @@ src/
   adversarial.ts      H14 lanes: corpus/drift/differential + digest baseline (H14, ADR-033)
   policy-analysis.ts  policy conflict/dead-rule analysis + on-load refusal (H3, ADR-034)
   mutation.ts         policy mutation lane against the golden set (H14, ADR-035)
+  taint.ts            one-directional data-flow labels carried across session steps (H4, ADR-036)
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)
   cli.ts              demo | attack | benchmark | build | update | incident | evidence
   testing.ts          test wiring only

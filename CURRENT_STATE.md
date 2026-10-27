@@ -1,7 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H14 — adversarial evaluation harness complete,
-including the mutation lane (ADR-035).
+Honest snapshot. Updated after H4 - data-flow enforcement / taint (ADR-036).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -32,23 +31,28 @@ golden set kills every one; the first run found 5 survivors that were real
 coverage holes, closed by adding 5 scenarios (15 total) rather than allowlisting
 them. Four lanes now run under `npm run adversarial`, and weakening an expected
 value to match a bad engine lets a mutant survive, so the oracle is guarded too.
+H4 landed the same day (ADR-036): `src/taint.ts` carries a one-directional data
+label across session steps, so a read stays labelled after the capability that
+justified it is revoked — the write target is raised rather than laundered —
+and every execution event records the label's classification, sources and
+`untrusted` flag, never content.
 M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: the runtime track — H4 (prompt-injection-resistant data flow),
-then H7, with H5/H6/H9 serialized behind H4 on `src/runtime.ts`.
+Next frontier: H7 (data-flow enforcement continued into egress DLP) or H5, with
+H6/H9 serialized behind them on `src/runtime.ts`.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~14,700 lines of source across 51 modules
+TypeScript foundation on Node 24, ~14,700 lines of source across 52 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
 `retention.ts`, `adversarial.ts`, `policy-analysis.ts`, and
-`incident-store-pg.ts` are the latest additions), 767 tests
-(`tests/`, `security-tests/`; 746 pass, 21 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 776 tests
+(`tests/`, `security-tests/`; 755 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -430,7 +434,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 767 tests pass (746 green; 21 Postgres-mode tests skip without
+All 776 tests pass (755 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1

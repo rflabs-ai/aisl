@@ -2791,3 +2791,86 @@ analyzer, not the mutant lane, unless they commit a golden of their own.
 their own golden file unchanged; adding a mutation kind is a one-line addition
 plus the mutant it produces. If survivors become routine, raise the bar to a
 score (percentage killed) rather than a binary - not before.
+
+---
+
+## ADR-036: Data-flow enforcement - taint as a first-class label that survives tool execution (H4)
+
+**Context:** the enforcement boundary is already sound: the model emits
+*requests*, the PDP decides, and no data can mint authority (invariants 1-4).
+An injected instruction therefore cannot grant scope - it can only ask for scope
+that policy and capabilities already allow, and the attack corpus proves that
+end to end. What is missing is the *data* half of that story. Three of H4's
+failure modes are live:
+
+1. **Implicit trust of tool output.** `ToolResult` has `output` and `changed`,
+   nothing else. A tool that fetches a document itself - an HTTP or database
+   tool, the normal case in a real deployment - returns text with no label at
+   all. If a session then writes it somewhere, nothing in the runtime knows it
+   came from a higher-classification source.
+2. **Classification lost across steps.** `deriveClassification` is called per
+   step over the session's *current* capabilities. Capabilities are consumed
+   (`authorization.consume`), so a phi read capability used in step 1 is gone by
+   step 3: the write in step 3 derives from a public capability, the content map
+   (which does not contain tool-fetched text), and the requested id. The
+   classification that justified the read does not survive to the write.
+3. **Taint lost through serialization.** Output reaches evidence as
+   `outputDigest` plus a sealed blob. The evidence says what the bytes were, not
+   where they came from or what they were allowed to touch.
+
+**Decision:**
+
+1. **A taint label, not a boolean.** `src/taint.ts` defines
+   `TaintLabel { sources: string[]; classification: Classification; untrusted: boolean }`.
+   `combine()` takes the maximum classification, the union of sources, and the
+   logical OR of `untrusted` - labels only ever raise, never lower. `sources` is
+   capped and sorted so the label is deterministic and safe to record.
+
+2. **The session carries taint across steps.** `AgentSession` keeps a
+   session-level label that accumulates every step's output. A step's input
+   taint is `combine(target resource label, carried taint, the tool's declared
+   taint)`. This is the fix for failure modes 1 and 2: the phi that step 1 read
+   is still phi when step 3 writes.
+
+3. **A tool may declare, and only raise.** `ToolResult.taint` lets a tool name
+   the provenance of what it returns. It can raise the label, never lower it -
+   `combine` has no lowering operation, and the runtime never substitutes a tool
+   declaration for the inherited label. **An output with no declaration inherits
+   the target resource's label**, which is correct for the common case (a tool
+   returns the resource it was given) and is why a tool that fetches something
+   else must declare it. Silence cannot lower the label, but it can under-state
+   provenance for data the tool fetched itself; making a declaration mandatory
+   belongs at H6's protocol boundary, once tools run out of process.
+
+4. **Classification raising takes the maximum of both derivations.** The coarse
+   session derivation stays as a floor (it is conservative by construction and
+   documented as such) and the taint label is folded in. This can only raise a
+   target, never lower one, so no existing guarantee is weakened.
+
+5. **Evidence records the label, never the content.** Each step's metadata gains
+   `taint: { classification, sources, untrusted }` alongside the existing
+   `outputDigest` and sealed payload. Source ids are resource ids, already
+   present in the event log; the label carries no plaintext.
+
+**Security implications:** the new control is *provenance continuity*. It closes
+the case where a tool fetches high-classification data itself and the session
+writes it onward after the justifying capability has been consumed. It does not
+and cannot inspect the model's reasoning: the model is a black box, and a
+semantic deviation *inside* granted scope stays the ROADMAP's named residual.
+
+**Tradeoffs:** `untrusted` on undeclared tool output means a careless tool
+raises every subsequent write to the ceiling - noisy, and deliberately so: the
+fix is for the tool to declare, which is one line and reviewable. The label
+costs a map lookup plus a small sort per step.
+
+**Residual risk (named):** the model's internal reasoning is unobservable, so
+"this request was influenced by that document" is never provable - only "this
+step's inputs were tainted"; a tool that lies about its taint is believed (it
+can only be raised, but a *low* declaration on high data is silent
+misattribution); and semantic deviation inside granted scope remains out of
+reach.
+
+**Future migration path:** H7 folds the label into egress DLP (a label above the
+destination's ceiling refuses the egress rather than raising the target); H9
+threads it through artifact provenance; H6 can require a declaration at the tool
+protocol boundary once tools run out of process.

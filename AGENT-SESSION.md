@@ -24,6 +24,61 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 41 - 2026-10-27 - opencode/h4-dataflow
+
+**Did:**
+- H4 (prompt-injection-resistant architecture / data-flow enforcement, ADR-036)
+  on branch `feat/h4-dataflow`. The last of the "unblocked by H3/H14" items.
+- **Recon first, and it changed the design.** Grepping every place untrusted
+  text crosses into a decision found: (a) no taint concept existed at all;
+  (b) `deriveClassification` is *already* maximally conservative (max over all
+  capabilities + the whole content map + requested ids), so the "classification
+  is lost" failure mode is not reachable through the current world's global
+  content map — the coarse derivation masks it in tests; (c) the genuinely
+  reachable hole is *provenance continuity across steps*: a capability can be
+  revoked after a read, and `capabilitiesFor` then drops it, so the coarse
+  derivation forgets the classification that justified the read. ADR-036 was
+  written for the real hole, not the first one I guessed at.
+- **Design:** `src/taint.ts` — `TaintLabel { sources, classification, untrusted }`
+  with a one-directional `combine` (max, union, OR; no lowering op).
+  `AgentSession.carried` seeded from ingested data in `run()` and folded per
+  step in `attempt()`; a write's target is raised to `max(coarse, label)` so the
+  existing guarantee is a floor, never replaced. `ToolResult.taint` is a
+  raise-only declaration; `ExecutionContext.resourceClassification` was added so
+  a declaration can be accurate (this also caught `sandbox-registry.ts`, which
+  constructs an `ExecutionContext` by hand).
+- **Evidence:** every execution event now records
+  `taint: { classification, sources, untrusted }` — ids and labels, no content.
+  Canary test asserts the plaintext cannot reach the metadata.
+- **Tests:** `tests/h4-dataflow.test.ts` (9). The laundering case is built
+  explicitly with a scoped session (empty content map), a phi read through a
+  tool, `authorization.revoke`, then a write under only a public capability —
+  the target ends at `phi`. Plus the algebra, declared-tool provenance,
+  unknown-resource ceiling, and an end-to-end run of all four corpus documents
+  where every step is denied, executed false, marked `untrusted`, source named.
+- **Deliberate simplification, marked:** an undeclared tool output is trusted to
+  be the target resource's own data, so a tool that fetched something else and
+  did not say so under-states provenance. `ponytail:` marker in
+  `src/runtime.ts` names the ceiling; a mandatory declaration is H6's boundary.
+- **Docs:** ROADMAP (H4 [DONE] + closed block + working order + milestone list),
+  SECURITY_CLAIMS Claim 42, CURRENT_STATE, PROJECT_CONTEXT, this entry.
+- **Gate:** typecheck clean; 776 tests / 755 pass / 0 fail / 21 skipped.
+  `npm run adversarial` four lanes green — the differential lane independently
+  confirms H4 changed no policy decision.
+
+**Left:**
+- H4's structural half only: the model's reasoning is unobservable, so a step
+  can say "my inputs were tainted", never "this request was caused by that
+  document". Semantic deviation inside granted scope remains the ROADMAP
+  residual.
+- Missing declaration on a foreign-data tool under-states provenance (marker).
+
+**Next session should:**
+- H7 (egress DLP) is the natural continuation: the taint label already carries
+  classification + sources, so egress can refuse a label above the destination
+  rather than raising it. Otherwise H5 (malicious tool handling); H6/H9
+  serialize behind on `src/runtime.ts`.
+
 ### SESSION 40 - 2026-10-27 - opencode/h14-mutation-lane
 
 **Did:**

@@ -29,12 +29,22 @@ import { type GuardedResponse, type ResponseGuard, GroundedResponseGuard } from 
 import { type CapabilityRequestService } from './capability-request.ts';
 import { denyReasonCounts } from './telemetry.ts';
 import { type TelemetryPort } from './telemetry.ts';
+import {
+  CLEAN_TAINT,
+  UNKNOWN_TAINT,
+  combine,
+  taintFor,
+  taintMetadata,
+  type TaintLabel,
+} from './taint.ts';
 
 export interface ExecutionContext {
   readonly sessionId: string;
   readonly capabilityId: string;
   readonly resourceId: string;
   readonly resourceType: ResourceType;
+  /** The target's registry label, so a tool can declare accurate provenance. */
+  readonly resourceClassification: Classification;
   readonly action: Action;
   readonly params: Readonly<Record<string, unknown>>;
   readonly content: string | undefined;
@@ -44,6 +54,14 @@ export interface ExecutionContext {
 export interface ToolResult {
   readonly output?: unknown;
   readonly changed?: boolean;
+  /**
+   * Provenance of `output` (H4). Declaring can only raise the label — the
+   * runtime combines it with what the session has already seen and with the
+   * target resource, and never substitutes it. Omitted means "same as the
+   * resource I was given", which is wrong for a tool that fetched something
+   * else; declaring is required at H6's protocol boundary.
+   */
+  readonly taint?: TaintLabel;
 }
 
 export interface Tool {
@@ -123,6 +141,8 @@ export interface StepRecord {
   readonly output?: unknown;
   readonly error?: string;
   readonly verifications: readonly Verification[];
+  /** What this step's inputs and outputs had seen (H4, ADR-036). */
+  readonly taint: TaintLabel;
 }
 
 export interface SessionTrace {
@@ -167,6 +187,8 @@ export class AgentSession {
   readonly sessionId: string;
   private readonly cfg: SessionConfig;
   private readonly clock: () => number;
+  /** What this session has seen so far, across steps (H4, ADR-036). */
+  private carried: TaintLabel = CLEAN_TAINT;
 
   constructor(cfg: SessionConfig) {
     this.cfg = cfg;
@@ -189,16 +211,23 @@ export class AgentSession {
       approvals: this.cfg.approvals,
     });
 
+    // H4: the taint of acting on this target, before it does anything. An
+    // unknown resource ranks at the ceiling (fail closed), matching `record()`.
+    const resource = this.cfg.registry.get(request.resourceId);
+    const targetTaint = resource === undefined
+      ? UNKNOWN_TAINT
+      : taintFor(resource.id, resource.classification, false);
+    const inputTaint = combine(this.carried, targetTaint);
+
     if (decision.decision === 'deny' || !decision.capabilityId) {
-      return { request, decision, executed: false, verifications: [] };
+      return { request, decision, executed: false, verifications: [], taint: inputTaint };
     }
 
-    const resource = this.cfg.registry.get(request.resourceId);
     const tool = this.cfg.tools.get(request.action);
     if (!tool) {
       const error = `no tool registered for action '${request.action}'`;
-      this.record('error', request, decision, error);
-      return { request, decision, executed: false, error, verifications: [] };
+      this.record('error', request, decision, error, {}, undefined, undefined, inputTaint);
+      return { request, decision, executed: false, error, verifications: [], taint: inputTaint };
     }
 
     const ctx: ExecutionContext = {
@@ -206,6 +235,7 @@ export class AgentSession {
       capabilityId: decision.capabilityId,
       resourceId: request.resourceId,
       resourceType: resource?.type ?? 'system',
+      resourceClassification: resource?.classification ?? 'x-unknown-resource',
       action: request.action,
       params: request.params ?? {},
       content: this.cfg.content?.get(request.resourceId),
@@ -219,21 +249,39 @@ export class AgentSession {
       output = toolResult.output;
     } catch (error) {
       const message = (error as Error).message;
-      this.record('error', request, decision, message);
-      return { request, decision, executed: false, error: message, verifications: [] };
+      this.record('error', request, decision, message, {}, undefined, undefined, inputTaint);
+      return { request, decision, executed: false, error: message, verifications: [], taint: inputTaint };
     }
+
+    // A declared label joins the inherited one; it can only raise. No
+    // declaration means "the resource I was given" - the common case.
+    // ponytail: an undeclared output is trusted to be the target resource's
+    // data, so a tool that fetched something else without declaring under-states
+    // provenance. Ceiling: silent under-attribution, never over-grant (the
+    // label still cannot lower). Upgrade path: make `taint` mandatory at H6's
+    // tool-protocol boundary, where the runtime can refuse an undeclared result.
+    const outputTaint = combine(inputTaint, toolResult.taint ?? targetTaint);
+    const stepTaint = combine(outputTaint, targetTaint);
+    // Carried across steps: what this session has seen stays seen, even after
+    // the capability that justified seeing it has been consumed or revoked.
+    this.carried = combine(this.carried, stepTaint);
 
     // M11 propagation: a mutating write lifts the target's label to the max of
     // everything the session can see. Clearance ceilings are not data labels,
     // so derivation uses data sources only. Labels only raise, never lower.
+    // H4 folds the taint label in: the coarse floor stays, taint can only add.
     let derived: Classification | undefined;
     if (toolResult.changed === true && resource) {
-      derived = deriveClassification({
+      const coarse = deriveClassification({
         capabilities: [],
         content: this.cfg.content,
         registry: this.cfg.registry,
         requestedResourceIds: [request.resourceId],
       });
+      derived =
+        classificationRank(stepTaint.classification) > classificationRank(coarse)
+          ? stepTaint.classification
+          : coarse;
       this.cfg.registry.raiseClassification(request.resourceId, derived);
     }
 
@@ -245,11 +293,20 @@ export class AgentSession {
     );
 
     const failed = verifications.filter((v) => v.result !== 'pass');
-    this.record(failed.length > 0 ? 'error' : 'success', request, decision, undefined, { verifications }, output, derived);
+    this.record(
+      failed.length > 0 ? 'error' : 'success',
+      request,
+      decision,
+      undefined,
+      { verifications },
+      output,
+      derived,
+      stepTaint,
+    );
 
     this.cfg.authorization.consume(decision.capabilityId);
 
-    return { request, decision, executed: true, output, verifications };
+    return { request, decision, executed: true, output, verifications, taint: stepTaint };
   }
 
   /** One turn: give the model the task and untrusted context, then enforce its requests. */
@@ -265,6 +322,17 @@ export class AgentSession {
       result: 'success',
       metadata: { phase: 'session', sessionId: this.sessionId, model: this.cfg.model.id, task: this.cfg.task },
     });
+
+    // H4: everything this turn read is now part of what the session has seen.
+    // Untrusted by default — a document is attacker-influenceable, the operator's
+    // task prompt is not.
+    for (const d of data) {
+      const source = this.cfg.registry.get(d.resourceId);
+      this.carried = combine(
+        this.carried,
+        taintFor(d.resourceId, source?.classification ?? 'x-unknown-resource'),
+      );
+    }
 
     const injectionSignals = data.map((d) => ({
       resourceId: d.resourceId,
@@ -420,6 +488,7 @@ export class AgentSession {
     extra: Record<string, unknown> = {},
     output?: unknown,
     derivedClassification?: Classification,
+    taint: TaintLabel = CLEAN_TAINT,
   ): void {
     const rendered = output === undefined ? null : typeof output === 'string' ? output : canonicalJson(output);
     const digest = rendered === null ? null : createHash('sha256').update(rendered).digest('hex');
@@ -444,6 +513,8 @@ export class AgentSession {
         error: error ?? null,
         outputDigest: digest,
         sealed,
+        // H4: ids and labels only — never content.
+        taint: taintMetadata(taint),
         ...(derivedClassification !== undefined ? { derivedClassification } : {}),
         ...extra,
       },

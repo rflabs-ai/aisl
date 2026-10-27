@@ -2253,3 +2253,49 @@ declaration order (`ambiguous-allow` is a warning, not an error). Changing that
 is an audit-visible semantic change and needs its own ADR. Policy authored
 incorrectly remains a human error the analyzer only partly catches; semantics
 too clever is untouched.
+
+---
+
+## Claim 42 - A session's data-flow label survives across steps, and revocation does not un-see data (H4)
+
+**Claim:** Every step of a session carries a `TaintLabel` — the maximum
+classification of everything it has touched, the resource ids that contributed,
+and whether any contributor was attacker-influenceable. The label is carried
+across steps within the session, so data read in step 1 is still labelled in
+step 3 **even if the capability that justified the read has been revoked or
+consumed by then**. A mutating write raises its target to at least this label
+(the coarse session derivation remains a floor), so a session cannot launder
+high-classification data into a public resource by losing the grant that exposed
+it. Evidence records `{ classification, sources, untrusted }` per execution
+event and never the content.
+
+**Mechanism:** `src/taint.ts` (`combine` — max classification, union of sources,
+OR of `untrusted`; no lowering operation; `taintFor`, `taintMetadata`).
+`src/runtime.ts` (`AgentSession.carried`, seeded from ingested data in `run()`
+and folded per step in `attempt()`; `ExecutionContext.resourceClassification`;
+`ToolResult.taint` as a raise-only declaration; the raised classification is
+`max(coarse derivation, label)`; `record()` writes the label into event
+metadata). `src/sandbox-registry.ts` passes the sandbox resource label through.
+
+**Threat model:** TM-002 (data injection). The PDP already stops injected
+instructions from minting authority; this claim covers the other direction —
+injected or merely sensitive *data* moving to a place it should not reach.
+
+**Assumptions:** the target resource's registry classification is correct; a
+tool that fetches foreign data declares it (undeclared output is trusted to be
+the target's own data — see the residual).
+
+**Evidence:** `tests/h4-dataflow.test.ts` (9). The laundering case is
+constructed explicitly: a scoped session (empty content map), a phi read through
+a tool, `authorization.revoke` of the justifying capability, then a write under
+only a public capability — the target ends at `phi`. The end-to-end half runs
+all four corpus documents through a hostile model: every step is denied,
+executed false, marked `untrusted`, with the source id named.
+
+**Residual risk:** the model's reasoning is unobservable, so the claim is about
+a step's *inputs*, never "this request was caused by that document" — a
+semantic deviation inside granted scope is the ROADMAP's named residual. An
+undeclared tool output under-states provenance (`ponytail:` marker in
+`src/runtime.ts`; a declaration becomes mandatory at H6's protocol boundary). A
+tool that declares a *lower* label than the data it fetched is believed; the
+label can still only raise.

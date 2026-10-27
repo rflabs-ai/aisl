@@ -24,6 +24,60 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 40 - 2026-10-27 - opencode/h14-mutation-lane
+
+**Did:**
+- H14's mutation lane (ADR-035) on branch `feat/h14-mutation-lane` — the part
+  ADR-033 deferred and ADR-034 unblocked by landing the oracle. H14 is now
+  [DONE].
+- **Phase 0:** ADR-035. Mutants are rule-level and deterministic; a mutant is
+  killed when the golden set disagrees anywhere (effect, ruleId, or reason);
+  the bar is zero survivors with an allowlist for provable equivalents; the
+  default is to strengthen the golden set instead.
+- **Tests first:** `tests/h14-mutation.test.ts` (14) — mutant generation and
+  no-op suppression, kill semantics on a complete tiny oracle, and the two
+  weakened-oracle cases proving the lane notices when coverage disappears.
+- **Implementation:** `src/mutation.ts` — `mutateRules` (drop-rule,
+  flip-effect, widen-actions, drop-ceiling, widen-ceiling, drop-approval,
+  drop-condition, widen-principals; a mutation that changes nothing is never
+  emitted), `evaluateMutants`, `summarize` with an allowlist split.
+  `src/adversarial.ts` — `mutationLane` (fails closed when zero mutants are
+  generated); **the `ponytail:` marker deleted**, per its own upgrade path.
+  `src/policy-testing.ts` — optional `mutationAllowlist` on the golden
+  (`{id, reason}`, validated), `GoldenVerification.lengthMatches`, and
+  `loadFixtureFile(file, allowLengthMismatch)` so a golden can be re-blessed
+  after adding scenarios (the strict fixture invariant is unchanged).
+  `src/cli.ts` — fourth lane in `npm run adversarial`.
+- **First run: 17 mutants, 12 killed, 5 survivors — and all five were real
+  coverage holes, not equivalents.** They were closed by adding five scenarios
+  to the golden set (10 → 15), not by allowlisting:
+  an approval widening the *action* (approved agent could delete); an approval
+  widening the *principal* (a human reading through an agent rule); a human with
+  no read grant at all; a model export (pinned as *default* deny, since the
+  export deny names three kinds); and an agent recording a task approval.
+  After: 17/17 killed, allowlist empty.
+- **Side property worth keeping:** weakening an expected value to match a bad
+  engine lets a mutant survive, so the mutation lane also guards the oracle.
+- **Docs:** ROADMAP (H14 [DONE], mutation block, working order, milestone
+  list), SECURITY_CLAIMS Claim 40 (four lanes, mutation evidence, operator-
+  completeness residual), CURRENT_STATE, PROJECT_CONTEXT, this entry.
+- **Gate:** typecheck clean; 767 tests / 746 pass / 0 fail / 21 skipped;
+  `npm run adversarial` — 4 lanes green.
+
+**Left:**
+- External red team at defined intervals — operator obligation, never an
+  acceptance criterion.
+- The nightly schedule is still unregistered on this machine (operator's call:
+  `pwsh -File scripts/schedule-adversarial.ps1`).
+- Mutation-operator completeness: the lane is only as good as the operators
+  written. Adding a kind is a one-line change plus the mutant it produces.
+
+**Next session should:**
+- Start H4 (prompt-injection-resistant architecture / data-flow enforcement):
+  grep every place untrusted text crosses into a decision, then make taint
+  propagation explicit. H4 is the shared dependency of kgp's clean-room,
+  home-agent's M19, and H9; H5/H6/H9 serialize behind it on `src/runtime.ts`.
+
 ### SESSION 39 - 2026-10-27 - opencode/h3-policy-adversarial
 
 **Did:**

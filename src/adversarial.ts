@@ -34,7 +34,7 @@ export interface Baseline {
   readonly digests: Digests;
 }
 
-export type LaneName = 'corpus' | 'drift' | 'differential';
+export type LaneName = 'corpus' | 'drift' | 'differential' | 'mutation';
 
 export interface Lane {
   readonly lane: LaneName;
@@ -115,6 +115,32 @@ export function differentialLane(current: Digests, baseline: Baseline | null): L
   };
 }
 
+/**
+ * ADR-035: a surviving mutant means the golden set cannot tell a mutated policy
+ * from the real one. Passing requires *all* mutants killed, and requires at
+ * least one mutant to have been generated — a lane that runs nothing is not a
+ * pass, it is a silent no-op.
+ */
+export function mutationLane(
+  total: number,
+  killed: number,
+  unexpected: readonly string[],
+  allowlisted = 0,
+): Lane {
+  if (total === 0) {
+    return { lane: 'mutation', passed: false, detail: 'no mutants were generated — the policy has no rules to mutate' };
+  }
+  const ok = unexpected.length === 0;
+  const suffix = allowlisted > 0 ? `, ${allowlisted} allowlisted equivalent(s)` : '';
+  return {
+    lane: 'mutation',
+    passed: ok,
+    detail: ok
+      ? `${killed}/${total} mutants killed${suffix}`
+      : `${killed}/${total} killed; survivors: ${unexpected.join(', ')}${suffix}`,
+  };
+}
+
 export function corpusLane(passed: number, total: number, failed: readonly string[] = []): Lane {
   const ok = total > 0 && passed === total;
   return {
@@ -140,10 +166,3 @@ export function buildReport(input: {
   };
 }
 
-// ponytail: no mutation lane yet. The oracle it was waiting on now exists (H3,
-// ADR-034: tests/fixtures/policy/goldens/baseline-decisions.json, itself
-// mutation-tested so it cannot silently go toothless), so this is wiring, not
-// research. Ceiling: a policy mutant that survives every lane is invisible to
-// `npm run adversarial`. Upgrade path: mutate BASELINE_POLICY against the
-// golden set, require every mutant to be caught, report survivors in the
-// lanes, and delete this marker in that change.

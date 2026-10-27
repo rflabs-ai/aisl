@@ -317,8 +317,13 @@ export function loadFixtures(dir: string): Fixture[] {
   return out;
 }
 
-/** One fixture file, validated. Shared by `loadFixtures` and `loadGolden`. */
-export function loadFixtureFile(file: string): Fixture {
+/**
+ * One fixture file, validated. Shared by `loadFixtures` and `loadGolden`.
+ * `allowLengthMismatch` exists for goldens being re-blessed: adding a scenario
+ * before recomputing the expectations is a legitimate intermediate state, and
+ * the mismatch is reported by `verifyGolden` rather than hidden.
+ */
+export function loadFixtureFile(file: string, allowLengthMismatch = false): Fixture {
   {
     let raw: unknown;
     // indentation kept from the loop this was extracted out of
@@ -343,7 +348,7 @@ export function loadFixtureFile(file: string): Fixture {
     if (!Array.isArray(f.expected)) {
       throw new Error(`${file}: "expected" must be an array`);
     }
-    if (f.scenarios.length !== f.expected.length) {
+    if (!allowLengthMismatch && f.scenarios.length !== f.expected.length) {
       throw new Error(`${file}: scenarios.length (${f.scenarios.length}) != expected.length (${f.expected.length})`);
     }
     const rules = (f.rules as readonly unknown[]).map((r, i) => validateRule(r, file, i));
@@ -365,10 +370,22 @@ export function loadFixtureFile(file: string): Fixture {
  * at least one entry here disagree, or the golden set is too weak to mean
  * anything.
  */
+/**
+ * A mutant the golden set provably cannot kill, with the reason. The escape
+ * hatch exists so a future equivalent mutant cannot turn the lane into a gate
+ * somebody deletes: adding an entry is a reviewable diff that names its
+ * justification, and the default remains "strengthen the golden set".
+ */
+export interface MutationAllowance {
+  readonly id: string;
+  readonly reason: string;
+}
+
 export interface Golden extends Fixture {
   readonly version: number;
   readonly policyId: string;
   readonly policyHash: string;
+  readonly mutationAllowlist?: readonly MutationAllowance[];
 }
 
 export interface GoldenMismatch {
@@ -379,6 +396,8 @@ export interface GoldenMismatch {
 
 export interface GoldenVerification {
   readonly hashMatches: boolean;
+  /** Scenario and expectation counts agree — a golden mid-edit does not. */
+  readonly lengthMatches: boolean;
   readonly mismatches: readonly GoldenMismatch[];
 }
 
@@ -387,7 +406,7 @@ export function goldenHash(rules: readonly PolicyRule[]): string {
 }
 
 export function loadGolden(file: string): Golden {
-  const fixture = loadFixtureFile(file);
+  const fixture = loadFixtureFile(file, true);
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -404,7 +423,23 @@ export function loadGolden(file: string): Golden {
   if (typeof g.policyHash !== 'string' || g.policyHash === '') {
     throw new Error(`${file}: golden "policyHash" must be a non-empty string`);
   }
-  return { ...fixture, version: g.version, policyId: g.policyId, policyHash: g.policyHash };
+  if (g.mutationAllowlist !== undefined) {
+    if (!Array.isArray(g.mutationAllowlist)) {
+      throw new Error(`${file}: golden "mutationAllowlist" must be an array`);
+    }
+    for (const [i, entry] of g.mutationAllowlist.entries()) {
+      if (typeof entry?.id !== 'string' || entry.id === '' || typeof entry.reason !== 'string' || entry.reason === '') {
+        throw new Error(`${file}: mutationAllowlist[${i}] needs a non-empty "id" and "reason"`);
+      }
+    }
+  }
+  return {
+    ...fixture,
+    version: g.version,
+    policyId: g.policyId,
+    policyHash: g.policyHash,
+    ...(g.mutationAllowlist !== undefined ? { mutationAllowlist: g.mutationAllowlist } : {}),
+  };
 }
 
 /** Compare the committed expectations against what the engine actually decides. */
@@ -421,5 +456,9 @@ export function verifyGolden(g: Golden, engine?: PolicyEngine): GoldenVerificati
       (exp.reason !== undefined && got.reason !== exp.reason);
     if (bad) mismatches.push({ index: i, expected: exp, actual: got });
   }
-  return { hashMatches: goldenHash(g.rules) === g.policyHash, mismatches };
+  return {
+    hashMatches: goldenHash(g.rules) === g.policyHash,
+    lengthMatches: g.scenarios.length === g.expected.length,
+    mismatches,
+  };
 }

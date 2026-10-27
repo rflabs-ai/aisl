@@ -2151,12 +2151,14 @@ rotation remain ADR-008-family residuals.
 
 ## Claim 40 - Adversarial evaluation is reproducible, and corpus or decision drift fails loudly (H14)
 
-**Claim:** `npm run adversarial` runs every enumerated lane — the 12-case
+**Claim:** `npm run adversarial` runs every enumerated lane - the 12-case
 attack corpus plus the legitimate-task fixtures, each required to behave as
-specified; a corpus+fixture digest comparing against a committed baseline; and
-a digest of the policy decision vector across every policy fixture scenario.
-Adding, removing, renaming, or editing a case, or any change to the decisions
-the baseline policy produces, fails the run with a non-zero exit until the
+specified; a corpus+fixture digest comparing against a committed baseline; a
+digest of the policy decision vector across every policy fixture scenario; and
+a policy mutation lane, where every mutant of the baseline policy must be
+killed by the golden decision set. Adding, removing, renaming, or editing a
+case, any change to the decisions the baseline policy produces, or a mutant the
+goldens cannot distinguish, fails the run with a non-zero exit until the
 baseline is re-blessed by an explicit `--bless`. The run is reproducible: the
 same tree digests identically across processes, and two engines built from the
 same policy produce the same decision-vector digest.
@@ -2164,8 +2166,11 @@ same policy produce the same decision-vector digest.
 **Mechanism:** `src/adversarial.ts` (`digestDirectory` — sorted names plus NUL
 separators, so renames and re-concatenations cannot collide; `decidedVector` /
 `digestDecisionVector`; `driftLane`, `differentialLane`, `corpusLane`,
-`buildReport`). `src/cli.ts` `adversarial` command composes the existing
-`runAttackCorpus`, `loadFixtures`, and `simulate` primitives. Baseline at
+`mutationLane`, `buildReport`). `src/mutation.ts` (`mutateRules`,
+`evaluateMutants`, `summarize`) mutates each rule in the ways review misses and
+kills a mutant when the golden set disagrees anywhere. `src/cli.ts`
+`adversarial` command composes the existing `runAttackCorpus`, `loadFixtures`,
+`simulate`, and `verifyGolden` primitives. Baseline at
 `artifacts/adversarial-baseline.json` (committed, diffable); report at
 `artifacts/adversarial-report.json` (per-run, gitignored).
 `scripts/schedule-adversarial.ps1` registers an operator-local nightly run.
@@ -2178,17 +2183,23 @@ it was written to prove.
 operator schedules the run (nothing in the repo enforces cadence); the corpus is
 implementer-authored.
 
-**Evidence:** `tests/h14-adversarial.test.ts` (16). Determinism and drift
-sensitivity are proven on temp dirs; the no-plaintext property is proven with a
-canary token. End-to-end, a cloned corpus case passes every case while failing
-the drift lane (recorded in AGENT-SESSION.md SESSION 38).
+**Evidence:** `tests/h14-adversarial.test.ts` (16) and
+`tests/h14-mutation.test.ts` (14). Determinism and drift sensitivity are proven
+on temp dirs; the no-plaintext property is proven with a canary token.
+End-to-end, a cloned corpus case passes every case while failing the drift lane
+(SESSION 38); the first mutation run found 5 survivors, all real coverage holes
+in the golden set, which were closed by adding scenarios rather than
+allowlisting (SESSION 40), and weakening the oracle now lets a mutant survive so
+the lane catches it.
 
 **Residual risk:** this is evidence that *enumerated* attacks
-still behave as specified — **not** evidence of safety. The corpus is written by
-the implementer, so unknown-unknown attacks remain open. There is no mutation
-lane (deferred behind H3's golden decision sets; `ponytail:` marker in
-`src/adversarial.ts`), no external red team (operator obligation, never an
-acceptance criterion), and no claim of *continuous* evaluation — this repository
+still behave as specified - **not** evidence of safety. The corpus is written by
+the implementer, so unknown-unknown attacks remain open. The mutation lane is
+only as strong as the mutation operators written: a mutant we never generate is
+a mutant we never catch, and a proven-equivalent allowlist entry is a judgement
+call made by a human in a hurry. There is no external red team (operator
+obligation, never an acceptance criterion), and no claim of *continuous*
+evaluation - this repository
 has no scheduler and its only remote is a local bare repo, so the schedule is
 the operator's and a missed night is invisible except via
 `scripts/schedule-adversarial.ps1 -Status`.

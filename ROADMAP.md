@@ -166,17 +166,17 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   tamper-evident evidence: external anchor sinks (file + HTTP witness, never
   blocking an append), multi-source reconciliation (binding, truncation, fork
   detection), operator-held signed checkpoints, durable federation anchor
-  history, and recorded legal holds. Next: H14's remaining mutation lane (H3
-  has now landed the oracle it was gated on) or any remaining H4-H7/H9 item.
-  H14 stays open [ ] only for the mutation lane; H4-H7 and H9 stay open [ ].
+  history, and recorded legal holds. Next: the runtime track — **H4** (prompt-
+  injection-resistant data flow), then **H7**, with **H5/H6/H9** serialized
+  behind H4 on `src/runtime.ts`. H14 closed on 2026-10-27 (ADR-035); H4-H7 and
+  H9 remain the open Stage 2 items.
 
   **Working order (agreed 2026-10-12).** **H14** (continuous adversarial
   evaluation) and **H3** (policy adversarial) run first and in parallel —
   H14's corpus feeds every later track, H3 is file-disjoint (policy + fixtures).
   As executed, H14's runner + drift + differential lanes landed first
-  (ADR-033, 2026-10-27) and H3 followed the same day (ADR-034), landing the
-  versioned golden decision sets that were H14's stated gate. H14's mutation
-  lane is now unblocked and is the only open part of either milestone.
+  (ADR-033, 2026-10-27), H3 followed the same day (ADR-034), and H14's mutation
+  lane closed against H3's goldens (ADR-035) - both milestones are now [DONE].
   **M18 Phase 1** proceeds in the raven repo (ASL consume-only). A
   **control-plane gap pass** ("to a good place") runs alongside. Then the
   runtime track: **H4 → H7** (H4 is the shared dependency of kgp's clean-room,
@@ -507,7 +507,7 @@ single-node freeze state is in-memory (durability is the Postgres channel's),
 and the ROADMAP residual — incident response slower than the attack — is
 unchanged.
 
-### H14 — Adversarial evaluation harness (continuous)
+### H14 - Adversarial evaluation harness (continuous) **[DONE]** (ADR-033, ADR-035)
 
 - **Attack surface:** the platform as a whole, tested continuously.
 - **Failure modes:** corpus drift; tests that assert the wrong thing; coverage
@@ -535,14 +535,34 @@ clone of a corpus case makes every case pass while the drift lane fails — the
 "coverage change mistaken for safety" failure mode, closed. `scripts/
 schedule-adversarial.ps1` registers an operator-local nightly run (verified
 register/status/unregister, then unregistered) and is documented as
-convenience, never a security control. **Not closed:** the mutation lane is
-deferred behind H3 (a mutant score is only as meaningful as its oracle, and the
-corpus asserts allow/deny rather than per-rule expectations) — debt marker in
-`src/adversarial.ts`; external red team remains an operator obligation and is
-never an acceptance criterion; and "continuous" is not claimed — this repo has
-no scheduler and its only remote is a local bare repo, so the claim is
-*scheduled* adversarial evaluation. 16 tests
-(`tests/h14-adversarial.test.ts`).
+convenience, never a security control.
+
+**Closed (ADR-035, 2026-10-27):** the **mutation** lane, the part ADR-033
+deferred pending an oracle. `src/mutation.ts` derives mutants from the policy -
+`drop-rule`, `flip-effect`, `widen-actions`, `drop-ceiling`, `widen-ceiling`,
+`drop-approval`, `drop-condition`, `widen-principals` - and a mutation that
+changes nothing is never emitted. A mutant is killed when the golden decision
+set disagrees with it anywhere (effect, `ruleId`, or reason), which is exactly
+why ADR-034 pinned all three. The lane passes only if **every** mutant is
+killed, and fails closed if no mutants are generated at all. First run:
+17 mutants, **5 survivors - and all five were real coverage holes**, not
+equivalents: an approval widening the *action* (an approved agent could
+delete), an approval widening the *principal* (a human reading through an agent
+rule), a wildcard allow on a user rule, and a widened deny. They were closed by
+adding five scenarios to the golden set (15 total), not by allowlisting; the
+allowlist mechanism exists for future provable equivalents and is currently
+empty. This also guards the oracle itself: weakening an expectation to match a
+bad engine lets a mutant survive, so the lane fails. Four lanes now:
+corpus, drift, differential, mutation. 16 + 14 tests
+(`tests/h14-adversarial.test.ts`, `tests/h14-mutation.test.ts`).
+
+**Not closed (operator obligations, not code):** external red team at defined
+intervals - recorded as an operator obligation and never an acceptance
+criterion; "continuous" is not claimed - this repo has no scheduler and its only
+remote is a local bare repo, so the claim is *scheduled* adversarial evaluation,
+and a missed night is invisible except via
+`scripts/schedule-adversarial.ps1 -Status`. Residual: unknown-unknown attacks,
+and the mutation lane is only as good as the mutation operators written.
 
 ### H15 — Fail-closed availability engineering **[DONE]** (ADR-027)
 
@@ -831,9 +851,8 @@ federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
 H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE], H3 [DONE] — ADR-034;
-H14 landed its runner, drift baseline and differential lane (ADR-033) and
-remains open only for its now-unblocked mutation lane; the remaining items are
-H4–H7 and H9).
+H14 [DONE] — ADR-033 + ADR-035; the remaining items are H4–H7 and H9, all with
+the runtime track H4 → H7 first).
 
 ### M0 — Architectural foundation (done)
 

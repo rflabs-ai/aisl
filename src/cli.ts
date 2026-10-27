@@ -20,6 +20,7 @@ import {
   buildReport,
   corpusLane,
   decidedVector,
+  mutationLane,
   differentialLane,
   digestDecisionVector,
   digestDirectory,
@@ -50,6 +51,7 @@ import {
 } from './events.ts';
 import { diffDecisions, goldenHash, loadFixtures, loadGolden, simulate, verifyGolden, type Scenario } from './policy-testing.ts';
 import { analyzePolicy, formatFindings } from './policy-analysis.ts';
+import { evaluateMutants, mutateRules, summarize } from './mutation.ts';
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
 import { ScriptedModel } from './model.ts';
@@ -2041,10 +2043,25 @@ async function adversarialCommand(): Promise<void> {
       writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
     }
 
+    // ADR-035: mutate the policy and require the golden set to disagree with
+    // every mutant. This also guards the oracle itself: weakening an expected
+    // value to match a bad engine lets a mutant survive.
+    const golden = loadGolden(join(ROOT, 'tests', 'fixtures', 'policy', 'goldens', 'baseline-decisions.json'));
+    const mutation = summarize(
+      evaluateMutants(mutateRules(golden.rules), golden),
+      golden.mutationAllowlist ?? [],
+    );
+
     const lanes = [
       corpusLane(results.length - failedIds.length, results.length, failedIds),
       driftLane(digests, baseline),
       differentialLane(digests, baseline),
+      mutationLane(
+        mutation.total,
+        mutation.killed,
+        mutation.unexpected.map((r) => r.mutant.id),
+        mutation.allowlisted.length,
+      ),
     ];
     const report = buildReport({
       generatedAt,

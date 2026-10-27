@@ -2725,3 +2725,69 @@ lexicographically smallest matching allow id (or reject overlapping allows
 outright) in an ADR that updates Claim 1's evidence and the audit
 reconstruction; then `ambiguous-allow` becomes an error. H14's mutation lane
 consumes `baseline-decisions.json` unchanged.
+
+---
+
+## ADR-035: Mutation testing on policy, against the golden oracle (H14, completes ADR-033)
+
+**Context:** ADR-033 deferred H14's mutation lane because the corpus asserted
+allow/deny while a mutation score needs a per-rule oracle. ADR-034 landed that
+oracle: `tests/fixtures/policy/goldens/baseline-decisions.json` pins the full
+expected result (effect, `ruleId`, reason) against a `policyHash`, and its teeth
+are already tested - flipping or deleting any baseline rule is caught. What was
+still missing is the systematic part: mutating each rule in the ways real
+review misses (a flipped effect, a widened ceiling, a dropped approval
+requirement, a dropped condition) and reporting which of those the golden set
+does *not* notice.
+
+A surviving mutant means one of two things, and the lane must not conflate
+them: either the golden set has a coverage hole worth closing, or the mutant is
+semantically equivalent and no test could ever kill it.
+
+**Decision:**
+
+1. **Mutants are rule-level, deterministic, and derived from the policy.**
+   `src/mutation.ts` emits one mutant per (rule, applicable mutation kind):
+   `drop-rule`, `flip-effect`, `widen-actions` (to `*`), `drop-ceiling`,
+   `widen-ceiling` (one classification up), `drop-approval`, `drop-condition`
+   (each condition), and `widen-principals` (drop kind/id/role restrictions).
+   A mutation that produces a rule identical to the original is not emitted -
+   that is not a mutant, it is a no-op.
+
+2. **A mutant is killed when the golden set disagrees with it.** The measure is
+   `verifyGolden` on the mutated rule set: any mismatch (effect, `ruleId`, or
+   reason) kills. Attribution counts, which is exactly why ADR-034 pinned
+   `ruleId` and reason rather than effect alone.
+
+3. **The bar is zero survivors, with a committed allowlist for proven
+   equivalents.** An allowlist entry must name the mutant and the reason it is
+   unreachable-by-construction; the default is to strengthen the golden set
+   instead. When the lane first ran it produced survivors that were real
+   coverage holes, not equivalents - they were closed by adding scenarios, not
+   allowlisted (recorded in AGENT-SESSION.md).
+
+4. **The lane reports, the gate decides.** `npm run adversarial` gains a fourth
+   lane; survival fails the run. The mutant list is printed with the golden
+   indices that killed each one, so a survivor is actionable rather than a
+   number.
+
+**Security implications:** none at runtime. The lane is a test-time property of
+the policy oracle, and it cannot widen authority - it only makes a weak oracle
+visible.
+
+**Tradeoffs:** mutation testing costs time proportional to (rules × mutation
+kinds × scenarios); on this policy that is milliseconds, and the lane is
+bounded by construction because mutants are derived from a finite rule set. The
+measure is only as good as the mutation kinds we thought to write - a mutant we
+never generate cannot be caught, and that is the lane's real ceiling.
+
+**Residual risk (named):** mutation-operator completeness (unimaginative
+operators produce an over-confident score); equivalent mutants that are not
+provably equivalent get allowlisted by someone in a hurry; the golden set tests
+the baseline policy, not an operator's own policy - their policy gets the
+analyzer, not the mutant lane, unless they commit a golden of their own.
+
+**Future migration path:** per-tenant policies can reuse `mutateRules` against
+their own golden file unchanged; adding a mutation kind is a one-line addition
+plus the mutant it produces. If survivors become routine, raise the bar to a
+score (percentage killed) rather than a binary - not before.

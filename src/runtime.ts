@@ -51,6 +51,31 @@ export interface ExecutionContext {
   readonly now: number;
 }
 
+/**
+ * Per-invocation limits for a tool (H5, ADR-038). In-process code cannot be
+ * preempted, so the duration limit is *detected*, not enforced - the container
+ * sandbox owns real preemption (ADR-003, Stage 3). The byte limits are enforced
+ * before the tool runs (params) and after it returns (output).
+ */
+export interface ToolQuota {
+  readonly maxParamBytes: number;
+  readonly maxOutputBytes: number;
+  readonly maxDurationMs: number;
+}
+
+export const DEFAULT_TOOL_QUOTA: ToolQuota = {
+  maxParamBytes: 65_536,
+  maxOutputBytes: 1_048_576,
+  maxDurationMs: 30_000,
+};
+
+/**
+ * Params keys that name authority. A tool acting on them would be taking scope
+ * from the request instead of from the decision (H5: scope expansion at
+ * runtime), so their presence is refused rather than ignored.
+ */
+const AUTHORITY_PARAM_KEYS = ['resourceId', 'tenantId', 'capabilityId', 'principal', 'approvals'] as const;
+
 export interface ToolResult {
   readonly output?: unknown;
   readonly changed?: boolean;
@@ -134,6 +159,19 @@ export function deriveClassification(input: {
   return best;
 }
 
+/** A quota breach is evidence, not a log line: it rides the verification plane. */
+function quotaVerification(request: ActionRequest, _bytes: number, detail: string, at: number): Verification {
+  return {
+    id: `tool-quota:${request.action}`,
+    subject: request.resourceId,
+    test: 'tool-quota',
+    command: 'session',
+    result: 'fail',
+    evidence: detail,
+    timestamp: at,
+  };
+}
+
 export interface StepRecord {
   readonly request: ActionRequest;
   readonly decision: AuthorizationDecision;
@@ -173,6 +211,8 @@ export interface SessionConfig {
   readonly content?: ReadonlyMap<string, string>;
   readonly checks?: readonly Check[];
   readonly approvals?: readonly Approval[];
+  /** H5 (ADR-038): per-invocation tool limits. */
+  readonly quota?: ToolQuota;
   readonly now?: () => number;
   readonly sessionId?: string;
   /** Output reliability guard. `undefined` (default) = `new GroundedResponseGuard()`; `null` = guard disabled (tests only). */
@@ -223,6 +263,23 @@ export class AgentSession {
       return { request, decision, executed: false, verifications: [], taint: inputTaint };
     }
 
+    // H5: the request cannot carry authority in its params. A tool that reads
+    // `ctx.params.resourceId` would be acting on a scope the decision never
+    // granted, so the key is refused outright rather than silently ignored.
+    const quota = this.cfg.quota ?? DEFAULT_TOOL_QUOTA;
+    const smuggled = AUTHORITY_PARAM_KEYS.filter((key) => request.params !== undefined && key in request.params);
+    if (smuggled.length > 0) {
+      const error = `params carry authority keys: ${smuggled.join(', ')}`;
+      this.record('error', request, decision, error, {}, undefined, undefined, inputTaint);
+      return { request, decision, executed: false, error, verifications: [], taint: inputTaint };
+    }
+    const paramBytes = request.params === undefined ? 0 : Buffer.byteLength(canonicalJson(request.params), 'utf8');
+    if (paramBytes > quota.maxParamBytes) {
+      const error = `params exceed ${quota.maxParamBytes} bytes (${paramBytes})`;
+      this.record('error', request, decision, error, {}, undefined, undefined, inputTaint);
+      return { request, decision, executed: false, error, verifications: [], taint: inputTaint };
+    }
+
     const tool = this.cfg.tools.get(request.action);
     if (!tool) {
       const error = `no tool registered for action '${request.action}'`;
@@ -251,6 +308,21 @@ export class AgentSession {
       const message = (error as Error).message;
       this.record('error', request, decision, message, {}, undefined, undefined, inputTaint);
       return { request, decision, executed: false, error: message, verifications: [], taint: inputTaint };
+    }
+
+    // H5: the tool already ran, so this is detection, not prevention - the
+    // result is recorded as a failed verification rather than a silent success.
+    const durationMs = this.clock() - at;
+    const outputBytes =
+      output === undefined
+        ? 0
+        : Buffer.byteLength(typeof output === 'string' ? output : canonicalJson(output), 'utf8');
+    const quotaFindings: Verification[] = [];
+    if (outputBytes > quota.maxOutputBytes) {
+      quotaFindings.push(quotaVerification(request, outputBytes, `output ${outputBytes} bytes > ${quota.maxOutputBytes}`, at));
+    }
+    if (durationMs > quota.maxDurationMs) {
+      quotaFindings.push(quotaVerification(request, outputBytes, `duration ${durationMs}ms > ${quota.maxDurationMs}ms`, at));
     }
 
     // A declared label joins the inherited one; it can only raise. No
@@ -285,12 +357,15 @@ export class AgentSession {
       this.cfg.registry.raiseClassification(request.resourceId, derived);
     }
 
-    const verifications = runVerifications(
-      request.resourceId,
-      this.cfg.checks ?? [],
-      { resourceId: request.resourceId, action: request.action, params: ctx.params, output },
-      at,
-    );
+    const verifications = [
+      ...quotaFindings,
+      ...runVerifications(
+        request.resourceId,
+        this.cfg.checks ?? [],
+        { resourceId: request.resourceId, action: request.action, params: ctx.params, output },
+        at,
+      ),
+    ];
 
     const failed = verifications.filter((v) => v.result !== 'pass');
     this.record(

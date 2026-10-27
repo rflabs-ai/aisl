@@ -2947,3 +2947,67 @@ storage (an artifact is egress to disk); H6 can require the tool protocol to
 declare a payload so inspection happens before serialization; a session-level
 byte budget turns the cap into an actual slow-drip detector once there is a
 session object to hang it on.
+
+---
+
+## ADR-038: Malicious tool handling - scope cannot ride in params, and quotas are evidence (H5)
+
+**Context:** the sandbox is honest about what it is: `LocalSandbox` is
+"in-process/no-isolation" and ADR-003 defers containment to a container or
+microVM. So H5's first failure mode - sandbox escape - cannot be *closed* here;
+it is Stage 3, stated rather than pretended. The other three are addressable
+today and were not:
+
+1. **A tool requesting more scope at runtime.** `ActionRequest.params` flowed
+   into `ExecutionContext.params` untouched. The PDP authorises the action on
+   `request.resourceId`; a tool that then reads `ctx.params.resourceId` acts on
+   a different resource under a decision that never named it. The decision was
+   right and the tool ignored it.
+2. **Resource exhaustion.** There was no limit on params size, output size, or
+   duration. A tool could return a gigabyte, and the session would seal it,
+   digest it, and hand it to the guard.
+3. **Output that lies about what it did.** Partly covered by the verification
+   plane (`runVerifications`), which is where a post-execution check belongs -
+   this ADR does not duplicate it.
+
+**Decision:**
+
+1. **Authority keys in params are refused, not ignored.** `resourceId`,
+   `tenantId`, `capabilityId`, `principal`, `approvals` are refused before the
+   tool is invoked. Ignoring them would leave a tool free to read them; refusing
+   is one line and makes the intent explicit. Ordinary params are untouched.
+2. **A `ToolQuota` bounds params, output, and duration.** Params and output are
+   byte-capped (65 KiB / 1 MiB defaults); duration has a budget (30 s). Params
+   are checked **before** invocation, so an oversized request never reaches
+   tool code. Output and duration are checked **after**, because in-process code
+   cannot be preempted - so they are *detected*, not prevented, and the
+   detection rides the verification plane as a `tool-quota` failure rather than
+   hiding in a log line.
+3. **Preemption is the container's job.** `container-sandbox.ts` already exists
+   for that; wiring timeouts and memory limits into it belongs to the runtime
+   hardening track, not to a synchronous call in the session.
+4. **A tool still cannot mint authority.** Invariant 4 is unchanged and
+   re-asserted: `ExecutionContext` holds no issuance handle, no
+   `AuthorizationService`, and no principal object beyond what the action names.
+
+**Security implications:** closes parameter smuggling (scope taken from the
+request instead of the decision) and bounds the blast radius of a runaway tool
+within the session, without claiming containment. A tool that escapes the
+process is ADR-003's residual and stays named.
+
+**Tradeoffs:** the authority-key refusal is blunt - a legitimate tool that wants
+a caller-supplied resource id must take it from `ctx.resourceId` instead. Byte
+caps are per invocation; cumulative session budgets would need session state and
+are not built. Duration detection is honest but late: the damage a slow tool
+does in-process is already done by the time it is measured.
+
+**Residual risk (named):** sandbox escape and kernel vulnerabilities (ADR-003,
+Stage 3 microVM); a tool that lies about what it did is only caught by whatever
+verification checks the operator configured; duration and memory are detected,
+not enforced, in-process; a tool that ignores `ctx` and reaches the filesystem
+directly is out of scope until containment is real.
+
+**Future migration path:** `container-sandbox.ts` enforces wall-clock,
+memory, and output limits at the kernel/cgroup boundary, at which point the
+`tool-quota` verification becomes a backstop rather than the only signal. H6
+makes the declaration boundary explicit once tools run out of process.

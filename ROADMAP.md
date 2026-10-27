@@ -308,7 +308,7 @@ request was caused by that document"; an undeclared tool output is trusted to be
 the target's data (`ponytail:` marker in `src/runtime.ts`, mandatory at H6);
 semantic deviation inside granted scope is out of reach.
 
-### H5 — Malicious tool handling
+### H5 — Malicious tool handling **[DONE]** (ADR-038)
 
 - **Attack surface:** tool code, tool output, tool-declared capabilities.
 - **Failure modes:** sandbox escape; resource exhaustion; output that lies about
@@ -318,6 +318,15 @@ semantic deviation inside granted scope is out of reach.
   inconsistency checks (verification plane); scope-expansion tests.
 - **Residual risk:** kernel vulnerabilities; side channels.
 - **Class:** MVP.
+
+**Closed (ADR-038, 2026-10-27):** authority keys in `params` (`resourceId`,
+`tenantId`, `capabilityId`, `principal`, `approvals`) are refused before
+invocation - a tool cannot take scope from the request instead of the decision.
+A `ToolQuota` bounds params (before) and output/duration (after, since in-process
+code cannot be preempted): breaches are detected and ride the verification plane
+as `tool-quota` failures rather than hiding in a log. Sandbox escape is
+ADR-003's residual and stays named - `LocalSandbox` has no isolation by design.
+5 tests (`tests/h5-malicious-tools.test.ts`).
 
 ### H6 — Secure agent-to-tool protocols
 

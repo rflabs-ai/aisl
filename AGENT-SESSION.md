@@ -24,6 +24,45 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 43 - 2026-10-27 - opencode/h5-malicious-tools
+
+**Did:**
+- H5 (malicious tool handling, ADR-038) on branch `feat/h5-malicious-tools`.
+  Marked [DONE].
+- **Scoped honestly before building.** Sandbox escape cannot be closed here:
+  `LocalSandbox` is "in-process/no-isolation" by design (ADR-003) and
+  containment is Stage 3. The other three failure modes were live and are now
+  addressed.
+- **Parameter smuggling (scope expansion at runtime):** `params` carrying
+  `resourceId` / `tenantId` / `capabilityId` / `principal` / `approvals` is
+  refused before the tool is invoked. Previously a tool could read
+  `ctx.params.resourceId` and act on a resource the decision never named — the
+  PDP was right and the tool ignored it.
+- **Resource exhaustion:** `ToolQuota` (65 KiB params, 1 MiB output, 30 s
+  duration; `DEFAULT_TOOL_QUOTA`). Params are checked *before* invocation;
+  output and duration *after*, because synchronous in-process code cannot be
+  preempted. A breach rides the verification plane as a `tool-quota` failure
+  and an error result, not a log line.
+- **Not duplicated:** "output that lies" stays the verification plane's job;
+  the ADR says so rather than inventing a second mechanism.
+- **Tests:** `tests/h5-malicious-tools.test.ts` (5) — the smuggling test asserts
+  the tool is never invoked; oversized params are refused pre-invocation;
+  output and duration breaches surface as `tool-quota` failures.
+- **Docs:** ROADMAP (H5 [DONE] + closed block), SECURITY_CLAIMS Claim 44,
+  CURRENT_STATE, this entry.
+- **Gate:** typecheck clean; 795 tests / 774 pass / 0 fail / 21 skipped.
+
+**Left:**
+- Sandbox escape / kernel / side channels: ADR-003 residual, Stage 3 microVM.
+- Duration and memory are detected, not enforced, in-process.
+- Cumulative session budgets are not built (per-invocation caps only).
+
+**Next session should:**
+- H6 (secure agent-to-tool protocols) or H9 (artifact handling) — both land on
+  `src/runtime.ts`, so run them serialized. H6 is also where the H4
+  `ponytail:` marker (mandatory taint declaration) and the H5 quota become a
+  protocol contract.
+
 ### SESSION 42 - 2026-10-27 - opencode/h7-egress-dlp
 
 **Did:**

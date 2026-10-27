@@ -2338,3 +2338,39 @@ per-request (`ponytail:` marker in `src/egress-proxy.ts`); a compressed body is
 opaque to a byte scan; and a canary list that is not maintained stops being
 evidence of anything. The proxy path is tested through `inspectBody`, not over a
 live socket.
+
+---
+
+## Claim 44 - A tool cannot take scope from the request, and its resource use is bounded and recorded (H5)
+
+**Claim:** A tool cannot act on authority that did not come from the decision:
+`params` carrying `resourceId`, `tenantId`, `capabilityId`, `principal`, or
+`approvals` is refused before the tool is invoked, so scope cannot ride in the
+request. Every invocation is bounded by a `ToolQuota` — params are byte-checked
+*before* the call, output and duration *after* — and a breach is recorded as a
+failing `tool-quota` verification and an error result, not a silent success.
+
+**Mechanism:** `src/runtime.ts` (`AUTHORITY_PARAM_KEYS`, `ToolQuota`,
+`DEFAULT_TOOL_QUOTA`, `quotaVerification`, checks inside `AgentSession.attempt`).
+`ExecutionContext` still holds no issuance handle, no `AuthorizationService`,
+and no principal beyond the action's own (invariant 4, unchanged).
+
+**Threat model:** TM-001 (compromised tool/model) — a tool that reads its
+authority out of the request, or that exhausts the session by returning an
+unbounded payload.
+
+**Assumptions:** the quota is configured sensibly; the operator's verification
+checks cover whatever the tool claims to have done.
+
+**Evidence:** `tests/h5-malicious-tools.test.ts` (5). The smuggling test asserts
+the tool is never invoked; the params test asserts an oversized request is
+refused pre-invocation; the output and duration tests assert the breach appears
+as a `tool-quota` failure in the step's verifications and as an error event.
+
+**Residual risk:** sandbox escape, kernel vulnerabilities, and side channels
+remain ADR-003's residual — `LocalSandbox` is explicitly in-process with no
+isolation, and containment is Stage 3 (microVM). Duration and memory are
+*detected*, not enforced, because synchronous in-process code cannot be
+preempted; by the time a slow tool is measured, the damage is done. A tool that
+lies about what it did is caught only by the verification checks the operator
+configured. Cumulative session budgets are not built.

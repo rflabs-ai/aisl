@@ -24,6 +24,71 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 39 - 2026-10-27 - opencode/h3-policy-adversarial
+
+**Did:**
+- H3 (ROADMAP Stage 2 — policy evaluation under adversarial conditions) on
+  branch `feat/h3-policy-adversarial`. Landed the day H14 was merged, because
+  H14's mutation lane was gated on exactly this.
+- **Phase 0:** ADR-034 in `DECISIONS.md`. Conflict detection sits where policy
+  actually enters (`loadPolicyBundle`), not on every `createPolicyEngine`
+  (construction is on the test hot path); attribution order-dependence is
+  detected and named, not silently changed; goldens are the oracle H14 waits on.
+- **Found and fixed a real bug while writing the tests:**
+  `matchesRule(rule, ctx)` with a default empty cache silently degraded every
+  `idPattern` to a *literal* (`compileOnCacheMiss` is deliberately fail-closed
+  so a bad rule cannot widen matches). The analyzer would have been reporting on
+  a policy nobody runs. Fix: the cache is now a **required** argument and
+  `compileRulePatterns()` is shared by the engine and the analyzer. The test
+  that caught it is kept as the analyzer/engine agreement check.
+- **Refactor, behaviour-preserving:** matching extracted from `evaluate` into
+  `matchesRule` + `RuleMatchInput` (structural subset, no casts); both
+  `matchesPrincipal`/`matchesResource` narrowed to it. `KNOWN_ACTIONS` /
+  `KNOWN_CLASSIFICATIONS` became the single source of truth in `domain.ts` with
+  the union types derived from them (`as const` + `(typeof X)[number]`), so the
+  analyzer's vocabulary cannot drift from the domain's.
+- **Implementation:** `src/policy-analysis.ts` (new) — `unreachable`, `shadowed`,
+  `ambiguous-allow`, `unknown-action` over a rule-derived point set (concrete
+  instances of each rule's patterns, its kinds/ids/roles, the classification at
+  and above its ceiling, a time satisfying its own window; 256/rule, 4096 total).
+  `src/policy-config.ts` — `assertRulesShape` + analysis inside
+  `loadPolicyBundle`, so a hash-verified bundle with a dead or shadowed rule is
+  refused before an engine exists. `src/policy-testing.ts` —
+  `loadFixtureFile` extracted, `Golden`/`loadGolden`/`verifyGolden`/`goldenHash`.
+  `src/cli.ts` — `policy analyze [file]`, `policy golden [--bless]`.
+- **Goldens:** `tests/fixtures/policy/goldens/baseline-decisions.json` (10
+  scenarios over BASELINE_POLICY, effect + ruleId + reason, bound by
+  `policyHash`).
+- **Tests first:** `tests/h3-policy-adversarial.test.ts` (21) — determinism fuzz
+  (500 seeded contexts, two engines), repeat-evaluation, no state leak,
+  permutation invariance of *effect* (200 contexts), attribution dependence
+  asserted as the named limitation, analyzer findings, bundle refusal on load,
+  malformed-rule refusal, hash-before-analysis, perf bounds (2000 rules × 2000
+  decisions in ~41ms; compile cache stable; 500-segment id bounded), golden
+  verification, and the mutation-coverage test: flipping **or** deleting any
+  baseline rule is caught.
+- **Docs:** ROADMAP (H3 closed block + working order + milestone list),
+  SECURITY_CLAIMS Claim 41, CURRENT_STATE, PROJECT_CONTEXT, this entry.
+- **Gate:** typecheck clean; 753 tests / 732 pass / 0 fail / 21 skipped
+  Postgres.
+
+**Left:**
+- H14's mutation lane — now unblocked, still not built. The oracle exists and
+  is proven to have teeth; wiring it into `npm run adversarial` is the work.
+- Attribution order-dependence when allow rules overlap — detected as a warning,
+  documented in Claim 41's residual, not changed (audit-visible).
+- The analyzer's sampled domain can miss conflicts it never generates; it can
+  never prove absence.
+
+**Next session should:**
+- Build H14's mutation lane against `baseline-decisions.json`: mutate each
+  baseline rule (flip effect, widen ceiling, drop `requiresApproval`, drop a
+  condition), require `verifyGolden` to report a mismatch for every mutant, and
+  add the surviving-mutant list to `npm run adversarial`'s report. Retire the
+  `ponytail:` marker in `src/adversarial.ts` in that same change.
+- Then the runtime track: H4 → H7, with H5/H6/H9 serialized behind H4 on
+  `src/runtime.ts`.
+
 ### SESSION 38 - 2026-10-27 - opencode/h14-adversarial-harness
 
 **Did:**

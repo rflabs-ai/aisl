@@ -1,26 +1,29 @@
 /**
  * Policy testing primitives.
  *
- * Three primitives only:
- *   - `simulate(engine, scenarios)`  — run scenarios through an engine.
- *   - `diffDecisions(before, after, scenarios)` — what changed between two engines.
- *   - `loadFixtures(dir)` — load JSON fixtures into a typed shape, with validation.
+ * Primitives only:
+ *   - `simulate(engine, scenarios)`  - run scenarios through an engine.
+ *   - `diffDecisions(before, after, scenarios)` - what changed between two engines.
+ *   - `loadFixtures(dir)` - load JSON fixtures into a typed shape, with validation.
+ *   - `loadGolden(file)` / `verifyGolden(g)` - the versioned decision oracle (H3).
  *
  * The harness is the test-time artifact M7 ships. The runtime path is unchanged.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type {
-  Action,
-  AuthContext,
-  Classification,
-  Principal,
-  PrincipalKind,
-  Resource,
-  ResourceType,
+import { createHash } from 'node:crypto';
+import {
+  canonicalJson,
+  type Action,
+  type AuthContext,
+  type Classification,
+  type Principal,
+  type PrincipalKind,
+  type Resource,
+  type ResourceType,
 } from './domain.ts';
-import type { Approval, EvaluationContext, PolicyEngine, PolicyResult, PolicyRule } from './policy.ts';
+import { createPolicyEngine, type Approval, type EvaluationContext, type PolicyEngine, type PolicyResult, type PolicyRule } from './policy.ts';
 
 export interface Scenario {
   readonly principal: Principal;
@@ -309,8 +312,17 @@ export function loadFixtures(dir: string): Fixture[] {
   const out: Fixture[] = [];
   for (const name of entries) {
     if (!name.endsWith('.json')) continue;
-    const file = join(dir, name);
+    out.push(loadFixtureFile(join(dir, name)));
+  }
+  return out;
+}
+
+/** One fixture file, validated. Shared by `loadFixtures` and `loadGolden`. */
+export function loadFixtureFile(file: string): Fixture {
+  {
     let raw: unknown;
+    // indentation kept from the loop this was extracted out of
+
     try {
       raw = JSON.parse(readFileSync(file, 'utf8'));
     } catch (e) {
@@ -337,7 +349,77 @@ export function loadFixtures(dir: string): Fixture[] {
     const rules = (f.rules as readonly unknown[]).map((r, i) => validateRule(r, file, i));
     const scenarios = (f.scenarios as readonly unknown[]).map((s, i) => validateScenario(s, file, i));
     const expected = (f.expected as readonly unknown[]).map((e, i) => validateExpected(e, file, i));
-    out.push({ id, name: nameF, rules, scenarios, expected });
+    return { id, name: nameF, rules, scenarios, expected };
   }
-  return out;
+}
+
+/**
+ * A versioned golden decision set (H3, ADR-034).
+ *
+ * A golden is a fixture whose `rules` are the policy under test and whose
+ * `expected` is the full result — effect, ruleId, and reason. `policyHash`
+ * binds it to that exact rule set, so a golden can never silently describe a
+ * different policy than the one being evaluated.
+ *
+ * This is the oracle H14's mutation lane consumes: a mutated rule set must make
+ * at least one entry here disagree, or the golden set is too weak to mean
+ * anything.
+ */
+export interface Golden extends Fixture {
+  readonly version: number;
+  readonly policyId: string;
+  readonly policyHash: string;
+}
+
+export interface GoldenMismatch {
+  readonly index: number;
+  readonly expected: Expected;
+  readonly actual: Decision;
+}
+
+export interface GoldenVerification {
+  readonly hashMatches: boolean;
+  readonly mismatches: readonly GoldenMismatch[];
+}
+
+export function goldenHash(rules: readonly PolicyRule[]): string {
+  return createHash('sha256').update(canonicalJson(rules)).digest('hex');
+}
+
+export function loadGolden(file: string): Golden {
+  const fixture = loadFixtureFile(file);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw new Error(`${file}: malformed JSON (${(e as Error).message})`);
+  }
+  const g = raw as Partial<Golden>;
+  if (typeof g.version !== 'number' || !Number.isInteger(g.version)) {
+    throw new Error(`${file}: golden "version" must be an integer`);
+  }
+  if (typeof g.policyId !== 'string' || g.policyId === '') {
+    throw new Error(`${file}: golden "policyId" must be a non-empty string`);
+  }
+  if (typeof g.policyHash !== 'string' || g.policyHash === '') {
+    throw new Error(`${file}: golden "policyHash" must be a non-empty string`);
+  }
+  return { ...fixture, version: g.version, policyId: g.policyId, policyHash: g.policyHash };
+}
+
+/** Compare the committed expectations against what the engine actually decides. */
+export function verifyGolden(g: Golden, engine?: PolicyEngine): GoldenVerification {
+  const actual = simulate(engine ?? createPolicyEngine(g.rules, g.policyId), g.scenarios);
+  const mismatches: GoldenMismatch[] = [];
+  for (let i = 0; i < g.expected.length; i++) {
+    const exp = g.expected[i]!;
+    const got = actual[i];
+    if (!got) continue;
+    const bad =
+      got.effect !== exp.effect ||
+      (exp.ruleId !== undefined && got.ruleId !== exp.ruleId) ||
+      (exp.reason !== undefined && got.reason !== exp.reason);
+    if (bad) mismatches.push({ index: i, expected: exp, actual: got });
+  }
+  return { hashMatches: goldenHash(g.rules) === g.policyHash, mismatches };
 }

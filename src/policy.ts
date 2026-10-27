@@ -209,14 +209,35 @@ export interface PolicyEngine {
   evaluate(ctx: EvaluationContext): PolicyResult;
 }
 
-function matchesPrincipal(m: PrincipalMatch, p: Principal): boolean {
+/**
+ * The subset of an evaluation context a rule matcher actually reads. `Principal`
+ * and `EvaluationContext` satisfy it structurally, so the runtime passes the
+ * full context and the analyzer passes a synthetic one - no casts, no second
+ * matcher, and therefore no way for the analyzer's notion of "matches" to
+ * diverge from the engine's.
+ */
+export interface RuleMatchInput {
+  readonly principal: Pick<Principal, 'id' | 'kind' | 'tenantId' | 'roles'>;
+  readonly resource: Pick<Resource, 'id' | 'type' | 'tenantId' | 'classification'>;
+  readonly action: Action;
+  readonly now: number;
+  readonly params?: Readonly<Record<string, unknown>>;
+  readonly approvals?: readonly Approval[];
+  readonly networkHost?: string;
+}
+
+function matchesPrincipal(m: PrincipalMatch, p: RuleMatchInput['principal']): boolean {
   if (m.kinds && !m.kinds.includes(p.kind)) return false;
   if (m.ids && !m.ids.includes(p.id)) return false;
   if (m.roles && !m.roles.some((r) => p.roles.includes(r))) return false;
   return true;
 }
 
-function matchesResource(m: ResourceMatch, r: Resource, cache: Map<string, IdPatternMatcher>): boolean {
+function matchesResource(
+  m: ResourceMatch,
+  r: RuleMatchInput['resource'],
+  cache: Map<string, IdPatternMatcher>,
+): boolean {
   if (m.types && !m.types.includes(r.type)) return false;
   if (m.ids !== undefined || m.idPatterns !== undefined) {
     let idMatch = false;
@@ -252,7 +273,7 @@ function matchesAction(rule: PolicyRule, action: Action): boolean {
   return rule.actions.includes('*') || rule.actions.includes(action);
 }
 
-function approvalApplies(approvals: readonly Approval[], ctx: EvaluationContext): boolean {
+function approvalApplies(approvals: readonly Approval[], ctx: RuleMatchInput): boolean {
   return approvals.some(
     (a) =>
       a.principalId === ctx.principal.id &&
@@ -262,7 +283,7 @@ function approvalApplies(approvals: readonly Approval[], ctx: EvaluationContext)
   );
 }
 
-function conditionHolds(c: Condition, ctx: EvaluationContext): boolean {
+function conditionHolds(c: Condition, ctx: RuleMatchInput): boolean {
   switch (c.kind) {
     case 'before':
       return ctx.now < Date.parse(c.iso);
@@ -282,6 +303,45 @@ const NO_MATCH: PolicyResult = {
   ruleId: undefined,
   reason: 'no matching allow rule; default deny',
 };
+
+/**
+ * Does this rule apply to this context? The single matcher used by both the
+ * engine's hot path and `analyzePolicy` (H3, ADR-034). Behaviour-preserving
+ * extraction: `evaluate` below applies the effect, this decides applicability.
+ */
+export function matchesRule(
+  rule: PolicyRule,
+  ctx: RuleMatchInput,
+  cache: Map<string, IdPatternMatcher>,
+): boolean {
+  if (!matchesPrincipal(rule.principals, ctx.principal)) return false;
+  if (!matchesAction(rule, ctx.action)) return false;
+  if (!matchesResource(rule.resources, ctx.resource, cache)) return false;
+  if (rule.requiresApproval && !approvalApplies(ctx.approvals ?? [], ctx)) return false;
+  if (rule.conditions && !rule.conditions.every((c) => conditionHolds(c, ctx))) return false;
+  if (rule.maxClassification !== undefined) {
+    // The resource must sit at or beneath the ceiling this rule grants.
+    if (classificationRank(ctx.resource.classification) > classificationRank(rule.maxClassification)) return false;
+  }
+  return true;
+}
+
+/**
+ * Compile every idPattern in a rule set, once. The cache is deliberately
+ * required by `matchesRule`: without one, a pattern silently degrades to a
+ * literal comparison (the `compileOnCacheMiss` fallback exists so a bad rule
+ * cannot *widen* matches), which would make analysis report on a policy nobody
+ * runs. Callers that evaluate rules must obtain their cache here.
+ */
+export function compileRulePatterns(rules: readonly PolicyRule[]): Map<string, IdPatternMatcher> {
+  const cache = new Map<string, IdPatternMatcher>();
+  for (const rule of rules) {
+    for (const p of rule.resources.idPatterns ?? []) {
+      if (!cache.has(p)) cache.set(p, compileIdPattern(p));
+    }
+  }
+  return cache;
+}
 
 /**
  * M11: allow rules that reference roles are cross-validated against the role
@@ -329,14 +389,7 @@ export function createPolicyEngine(
   id = 'in-process-rego-free-v1',
   roles: readonly Role[] = BASELINE_ROLES,
 ): PolicyEngine & { _compileCacheSize(): number } {
-  const cache = new Map<string, IdPatternMatcher>();
-  for (const rule of rules) {
-    const patterns = rule.resources.idPatterns;
-    if (!patterns) continue;
-    for (const p of patterns) {
-      if (!cache.has(p)) cache.set(p, compileIdPattern(p));
-    }
-  }
+  const cache = compileRulePatterns(rules);
   validateRulesAgainstRoles(rules, roles);
 
   return {
@@ -351,19 +404,7 @@ export function createPolicyEngine(
       let allowed: PolicyRule | undefined;
 
       for (const rule of rules) {
-        if (!matchesPrincipal(rule.principals, ctx.principal)) continue;
-        if (!matchesAction(rule, ctx.action)) continue;
-        if (!matchesResource(rule.resources, ctx.resource, cache)) continue;
-
-        if (rule.requiresApproval && !approvalApplies(ctx.approvals ?? [], ctx)) continue;
-        if (rule.conditions && !rule.conditions.every((c) => conditionHolds(c, ctx))) continue;
-        if (rule.maxClassification !== undefined) {
-          // The resource must sit at or beneath the ceiling this rule grants.
-          if (classificationRank(ctx.resource.classification) > classificationRank(rule.maxClassification)) {
-            continue;
-          }
-        }
-
+        if (!matchesRule(rule, ctx, cache)) continue;
         if (rule.effect === 'deny') {
           return { effect: 'deny', ruleId: rule.id, reason: `denied by rule ${rule.id}` };
         }

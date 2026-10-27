@@ -2192,3 +2192,53 @@ acceptance criterion), and no claim of *continuous* evaluation — this reposito
 has no scheduler and its only remote is a local bare repo, so the schedule is
 the operator's and a missed night is invisible except via
 `scripts/schedule-adversarial.ps1 -Status`.
+
+---
+
+## Claim 41 - Policy evaluation is deterministic and order-invariant in effect; dead or shadowed rules are refused at load (H3)
+
+**Claim:** Given the same rules and the same request, the engine returns the
+same decision, independent of evaluation history and of which process built the
+engine (500 seeded random contexts, two engines, identical results; repeat
+evaluation stable; a denial does not change the next answer). The decision's
+*effect* does not depend on rule declaration order under permutation (200
+contexts) — matching deny wins, otherwise any matching allow wins, otherwise
+default deny. A hash-verified policy bundle that carries a rule which can never
+fire, or an allow whose every matching point is also denied, is **refused at
+load**, before an engine exists. A committed versioned golden decision set binds
+the full expected result (effect, ruleId, reason) to a policy hash, so any
+semantic change fails until it is re-blessed deliberately.
+
+**Mechanism:** `src/policy.ts` (`matchesRule` — the single matcher shared by the
+engine's hot path and the analyzer; `compileRulePatterns` — the compiled cache,
+deliberately required so a pattern can never silently degrade to a literal
+comparison). `src/policy-analysis.ts` (`analyzePolicy`: `unreachable`,
+`shadowed`, `ambiguous-allow`, `unknown-action`, over a rule-derived,
+capped point set). `src/policy-config.ts` (`assertRulesShape` +
+analysis inside `loadPolicyBundle`). `src/policy-testing.ts`
+(`loadGolden`/`verifyGolden`/`goldenHash`). Goldens at
+`tests/fixtures/policy/goldens/baseline-decisions.json`;
+`npm run policy:analyze` / `npm run policy:golden`.
+
+**Threat model:** TM-001/TM-003-adjacent — the risk is a policy that reads
+correctly and grants nothing, or grants two things at once and credits whichever
+was written first.
+
+**Assumptions:** rules are finite and statically analysable (the ROADMAP's own
+assumption); the golden set is reviewed when re-blessed; the analyzer's sampled
+domain is representative of the traffic the policy actually sees.
+
+**Evidence:** `tests/h3-policy-adversarial.test.ts` (21) — determinism fuzz,
+permutation invariance, analyzer findings, bundle refusal on load, performance
+bounds (2000 rules × 2000 decisions; compile cache stable on the decision path;
+500-segment id bounded), golden verification, and the mutation-coverage test:
+flipping or deleting **any** baseline rule is caught by the golden set.
+
+**Residual risk:** the analyzer samples a rule-derived domain — it can miss a
+conflict that exists only at a point it never generates, and it can never prove
+absence of conflict. **Attribution** is order-dependent: when two allow rules
+match the same point, the `ruleId` and `reason` recorded in evidence follow
+declaration order (`ambiguous-allow` is a warning, not an error). Changing that
+is an audit-visible semantic change and needs its own ADR. Policy authored
+incorrectly remains a human error the analyzer only partly catches; semantics
+too clever is untouched.

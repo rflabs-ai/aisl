@@ -97,16 +97,20 @@ export interface Role {
   readonly maxClassification: Classification;
 }
 
-export type KnownClassification =
-  | 'public'
-  | 'internal'
-  | 'confidential'
-  | 'restricted'
-  | 'pii'
-  | 'phi'
-  | 'privileged-legal'
-  | 'financial'
-  | 'trade-secret';
+/** Single source of truth: the type is derived from the list, never duplicated. */
+export const KNOWN_CLASSIFICATIONS = [
+  'public',
+  'internal',
+  'confidential',
+  'restricted',
+  'pii',
+  'phi',
+  'privileged-legal',
+  'financial',
+  'trade-secret',
+] as const;
+
+export type KnownClassification = (typeof KNOWN_CLASSIFICATIONS)[number];
 
 /** Extensible: orgs may define `x-nato`, `x-customer-acme`, ... */
 export type Classification = KnownClassification | (string & {});
@@ -153,23 +157,27 @@ export interface Resource {
   readonly attributes: Readonly<Record<string, string | number | boolean>>;
 }
 
-export type KnownAction =
-  | 'read'
-  | 'write'
-  | 'delete'
-  | 'execute'
-  | 'invoke'
-  | 'export'
-  | 'network.egress'
-  | 'secret.use'
-  | 'capability.issue'
-  | 'task.approve'
-  | 'evidence.decrypt'
-  | 'query.audit'
-  | 'audit.export'
-  | 'anchor.register'
-  | 'evidence.hold'
-  | 'evidence.release';
+/** Single source of truth: the type is derived from the list, never duplicated. */
+export const KNOWN_ACTIONS = [
+  'read',
+  'write',
+  'delete',
+  'execute',
+  'invoke',
+  'export',
+  'network.egress',
+  'secret.use',
+  'capability.issue',
+  'task.approve',
+  'evidence.decrypt',
+  'query.audit',
+  'audit.export',
+  'anchor.register',
+  'evidence.hold',
+  'evidence.release',
+] as const;
+
+export type KnownAction = (typeof KNOWN_ACTIONS)[number];
 
 export type Action = KnownAction | (string & {});
 

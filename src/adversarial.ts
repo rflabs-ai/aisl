@@ -140,8 +140,10 @@ export function buildReport(input: {
   };
 }
 
-// ponytail: no mutation lane — a mutant score is only as meaningful as its
-// oracle, and today's corpus asserts allow/deny rather than per-rule
-// expectations. Ceiling: policy mutants that survive are invisible. Upgrade
-// path: H3's versioned golden decision sets become the oracle; turn the lane on
-// against those fixtures and retire this marker in the same change.
+// ponytail: no mutation lane yet. The oracle it was waiting on now exists (H3,
+// ADR-034: tests/fixtures/policy/goldens/baseline-decisions.json, itself
+// mutation-tested so it cannot silently go toothless), so this is wiring, not
+// research. Ceiling: a policy mutant that survives every lane is invisible to
+// `npm run adversarial`. Upgrade path: mutate BASELINE_POLICY against the
+// golden set, require every mutant to be caught, report survivors in the
+// lanes, and delete this marker in that change.

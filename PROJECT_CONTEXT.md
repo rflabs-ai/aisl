@@ -96,6 +96,7 @@ src/
   slo.ts              assurance-target catalog + gate (ADR-014, M10)
   attacks.ts          declarative adversarial harness
   adversarial.ts      H14 lanes: corpus/drift/differential + digest baseline (H14, ADR-033)
+  policy-analysis.ts  policy conflict/dead-rule analysis + on-load refusal (H3, ADR-034)
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)
   cli.ts              demo | attack | benchmark | build | update | incident | evidence
   testing.ts          test wiring only

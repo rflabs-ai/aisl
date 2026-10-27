@@ -48,7 +48,8 @@ import {
   type SecurityEvent,
   type EventStore,
 } from './events.ts';
-import { diffDecisions, loadFixtures, simulate, type Scenario } from './policy-testing.ts';
+import { diffDecisions, goldenHash, loadFixtures, loadGolden, simulate, verifyGolden, type Scenario } from './policy-testing.ts';
+import { analyzePolicy, formatFindings } from './policy-analysis.ts';
 import { GroundedResponseGuard } from './guard.ts';
 import { CapabilityRequestService } from './capability-request.ts';
 import { ScriptedModel } from './model.ts';
@@ -2076,6 +2077,66 @@ async function adversarialCommand(): Promise<void> {
   }
 }
 
+/**
+ * H3 (ADR-034): policy analysis and the versioned golden decision set.
+ *
+ *   node src/cli.ts policy analyze [rules.json]   # default: BASELINE_POLICY
+ *   node src/cli.ts policy golden [--bless]       # verify, or re-bless deliberately
+ */
+async function policyCommand(): Promise<void> {
+  const sub = process.argv[3] ?? 'analyze';
+  const goldenPath = join(ROOT, 'tests', 'fixtures', 'policy', 'goldens', 'baseline-decisions.json');
+
+  if (sub === 'analyze') {
+    const file = process.argv[4];
+    const rules: readonly PolicyRule[] = file
+      ? (JSON.parse(readFileSync(file, 'utf8')) as PolicyRule[])
+      : BASELINE_POLICY;
+    const analysis = analyzePolicy(rules);
+    heading('POLICY ANALYSIS (H3)');
+    for (const l of formatFindings(analysis, file ?? 'BASELINE_POLICY')) console.log(`  ${l}`);
+    if (analysis.errors > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (sub === 'golden') {
+    const bless = process.argv.slice(4).includes('--bless');
+    const golden = loadGolden(goldenPath);
+    heading('GOLDEN DECISION SET (H3)');
+    if (bless) {
+      const expected = simulate(createPolicyEngine(golden.rules, golden.policyId), golden.scenarios).map((d) => ({
+        effect: d.effect,
+        ruleId: d.ruleId,
+        reason: d.reason,
+      }));
+      const next = {
+        id: golden.id,
+        name: golden.name,
+        version: golden.version,
+        policyId: golden.policyId,
+        policyHash: goldenHash(golden.rules),
+        rules: golden.rules,
+        scenarios: golden.scenarios,
+        expected,
+      };
+      writeFileSync(goldenPath, `${JSON.stringify(next, null, 2)}\n`);
+      line('golden', 'BLESSED', goldenPath);
+      return;
+    }
+    const verification = verifyGolden(golden);
+    line('policy hash', verification.hashMatches ? 'MATCH' : 'MISMATCH', golden.policyHash);
+    line('expectations', verification.mismatches.length === 0 ? 'PASS' : 'FAIL', `${golden.expected.length - verification.mismatches.length}/${golden.expected.length} decisions match`);
+    for (const m of verification.mismatches) {
+      line(`  [${m.index}]`, 'CHANGED', `${m.expected.effect}/${m.expected.ruleId ?? '-'} -> ${m.actual.effect}/${m.actual.ruleId ?? '-'} (${m.actual.reason})`);
+    }
+    if (!verification.hashMatches || verification.mismatches.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  console.error('usage: policy analyze [rules.json] | policy golden [--bless]');
+  process.exitCode = 1;
+}
+
 const command = process.argv[2] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
@@ -2085,7 +2146,8 @@ else if (command === 'build') await buildCommand();
 else if (command === 'update') await updateCommand();
 else if (command === 'incident') await incidentCommand();
 else if (command === 'evidence') await evidenceCommand();
+else if (command === 'policy') await policyCommand();
 else {
-  console.error(`unknown command: ${command} (try demo | attack | adversarial | benchmark | build | update | incident | evidence)`);
+  console.error(`unknown command: ${command} (try demo | attack | adversarial | benchmark | build | update | incident | evidence | policy)`);
   process.exitCode = 1;
 }

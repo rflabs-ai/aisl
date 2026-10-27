@@ -1,6 +1,6 @@
 # H3 — Policy evaluation under adversarial conditions (ROADMAP Stage 2)
 
-Status: [ ] — queued behind the H10/H12/H13/H15 pick window.
+Status: [DONE] (2026-10-27, ADR-034) — see ROADMAP H3 for the closed block.
 
 Spec of record: ROADMAP.md "H3". This stub is the queue placeholder, not the
 spec.

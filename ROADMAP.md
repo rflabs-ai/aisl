@@ -166,18 +166,17 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   tamper-evident evidence: external anchor sinks (file + HTTP witness, never
   blocking an append), multi-source reconciliation (binding, truncation, fork
   detection), operator-held signed checkpoints, durable federation anchor
-  history, and recorded legal holds. Next: H14's remainder (the mutation lane,
-  gated on H3's oracle) or any remaining H3-H7/H9 item. H14 landed its runner,
-  drift baseline and differential lane (ADR-033) and stays open [ ] only for
-  the mutation lane; H3-H7 and H9 stay open [ ].
+  history, and recorded legal holds. Next: H14's remaining mutation lane (H3
+  has now landed the oracle it was gated on) or any remaining H4-H7/H9 item.
+  H14 stays open [ ] only for the mutation lane; H4-H7 and H9 stay open [ ].
 
   **Working order (agreed 2026-10-12).** **H14** (continuous adversarial
   evaluation) and **H3** (policy adversarial) run first and in parallel —
   H14's corpus feeds every later track, H3 is file-disjoint (policy + fixtures).
   As executed, H14's runner + drift + differential lanes landed first
-  (ADR-033, 2026-10-27); its mutation lane now waits on H3's versioned golden
-  decision sets, which reverses nothing — H3 simply becomes the oracle H14
-  needed.
+  (ADR-033, 2026-10-27) and H3 followed the same day (ADR-034), landing the
+  versioned golden decision sets that were H14's stated gate. H14's mutation
+  lane is now unblocked and is the only open part of either milestone.
   **M18 Phase 1** proceeds in the raven repo (ASL consume-only). A
   **control-plane gap pass** ("to a good place") runs alongside. Then the
   runtime track: **H4 → H7** (H4 is the shared dependency of kgp's clean-room,
@@ -246,6 +245,34 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   performance bounds as tests; versioned golden decision sets.
 - **Residual risk:** policy authored incorrectly; semantics too clever.
 - **Class:** MVP.
+
+**Closed (ADR-034, 2026-10-27):** `src/policy-analysis.ts` +
+`npm run policy:analyze`, wired into `loadPolicyBundle` so a hash-verified
+bundle carrying a dead or shadowed rule is refused **before an engine exists**.
+Four findings: `unreachable` (rule matches no representative point),
+`shadowed` (every point an allow matches is also denied — an entombed grant),
+`ambiguous-allow` (two allows match the same point), `unknown-action` (action
+outside the vocabulary). Points are derived from each rule's own declarations —
+concrete instances of its patterns, its principal kinds/ids/roles, the
+classification at and above its ceiling, and a time satisfying its own
+`before`/`after` window — capped at 256 per rule / 4096 total. `matchesRule` was
+extracted from `evaluate` and is now the **only** matcher, so the analyzer
+cannot report on a policy nobody runs; making its pattern cache required closed
+a real footgun found while testing (a bare call silently degraded every
+idPattern to a literal). Determinism: 500 seeded random contexts across two
+engines, plus repeat-evaluation and no-state-leak checks. Order: the *effect* is
+permutation-invariant (200 contexts); the *attribution* is not when allows
+overlap, and that is detected and stated rather than changed. Performance:
+2000 rules × 2000 decisions inside a generous bound, compile cache proven not
+to grow on the decision path, 500-segment id evaluated in bounded time.
+**Goldens:** `tests/fixtures/policy/goldens/baseline-decisions.json` — version,
+`policyHash`, scenarios, and full expected results (effect + ruleId + reason),
+verified by `npm run policy:golden`, re-blessable only deliberately. Its teeth
+are tested: flipping or deleting **any** baseline rule is caught. That is the
+oracle H14's mutation lane was waiting for. 21 tests
+(`tests/h3-policy-adversarial.test.ts`). Residual per ADR-034: the analyzer
+samples a rule-derived domain — it can miss a conflict at a point it never
+generates and can never prove absence; attribution order-dependence remains.
 
 ### H4 — Prompt-injection-resistant architecture (data-flow enforcement)
 
@@ -803,9 +830,10 @@ Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
-H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE]; H14 landed its
-runner, drift baseline and differential lane (ADR-033) and remains open for the
-H3-gated mutation lane; the remaining items are H3–H7 and H9).
+H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE], H3 [DONE] — ADR-034;
+H14 landed its runner, drift baseline and differential lane (ADR-033) and
+remains open only for its now-unblocked mutation lane; the remaining items are
+H4–H7 and H9).
 
 ### M0 — Architectural foundation (done)
 

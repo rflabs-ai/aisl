@@ -1,6 +1,7 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H14 — adversarial evaluation harness (ADR-033).
+Honest snapshot. Updated after H3 — policy evaluation under adversarial
+conditions (ADR-034).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -22,23 +23,27 @@ adversarial` runs three lanes — corpus, committed-input drift, and policy
 decision-vector differential — and fails closed on corpus or semantic change
 until `--bless` is run deliberately; its mutation lane is deferred behind H3's
 golden decision sets, and no *continuous* claim is made (no scheduler, local
-remote only). M17 closed both
+remote only). H3 landed the same day (ADR-034): a single matcher shared by the
+engine and the analyzer, conflict detection wired into `loadPolicyBundle`
+(dead and shadowed rules refused before an engine exists), determinism and
+order-invariance fuzzing, performance bounds as tests, and the versioned golden
+decision set that unblocks H14's mutation lane. M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H3 (policy evaluation under adversarial conditions) — which
-also unblocks H14's mutation lane — or any remaining H4–H7/H9 item.
+Next frontier: H14's mutation lane (now unblocked by H3's golden decision set)
+or any remaining H4–H7/H9 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~14,000 lines of source across 49 modules
+TypeScript foundation on Node 24, ~14,700 lines of source across 50 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
-`retention.ts`, `adversarial.ts`, and `incident-store-pg.ts` are the latest
-additions), 732 tests
-(`tests/`, `security-tests/`; 711 pass, 21 Postgres-mode tests skip cleanly
+`retention.ts`, `adversarial.ts`, `policy-analysis.ts`, and
+`incident-store-pg.ts` are the latest additions), 753 tests
+(`tests/`, `security-tests/`; 732 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -420,7 +425,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 732 tests pass (711 green; 21 Postgres-mode tests skip without
+All 753 tests pass (732 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1

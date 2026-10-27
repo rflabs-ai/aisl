@@ -2641,3 +2641,87 @@ mutation lane turns on against that oracle and the `ponytail:` marker in
 nightly task moves from the operator script to the runner unchanged, and the
 claim upgrades from "scheduled" to "continuous" in the same commit that proves
 it ran.
+
+---
+
+## ADR-034: Policy evaluation under adversarial conditions - analysis on load, goldens as the oracle (H3)
+
+**Context:** the engine (`src/policy.ts`) is pure and in-process: default deny,
+deny-overrides, cross-tenant denial as a hard boundary independent of any rule,
+`idPatterns` compiled once at construction with pathological-pattern refusal
+(M5), and deterministic evaluation for a fixed rule list. Four of the ROADMAP's
+five failure modes are therefore already absent by construction. What was
+missing was any way to *prove* that on every change: no determinism fuzzing, no
+conflict detection on load, no performance bound as a test, and no versioned
+golden decision set. The last one matters beyond H3 - H14's mutation lane was
+deferred explicitly pending an oracle, and the corpus's allow/deny assertions
+are not one.
+
+One failure mode is real today and was not written down anywhere: the engine's
+*effect* is order-invariant (any matching deny wins; any matching allow wins;
+otherwise default deny), but its *attribution* is not. `allowed ??= rule` keeps
+the first matching allow in declaration order, so reordering the same rule set
+leaves every decision unchanged while changing the `ruleId` and `reason` that
+reach the evidence log. With overlapping allow rules, "which rule granted this"
+is a property of list order.
+
+**Decision:**
+
+1. **Conflict detection runs where policy actually enters: `loadPolicyBundle`.**
+   `src/policy-analysis.ts` computes findings over a bounded, rule-derived
+   point set and `loadPolicyBundle` refuses a hash-verified bundle that carries
+   an `error`-severity finding, before any engine exists. Plain
+   `createPolicyEngine(rules, ...)` stays analysis-free because construction is
+   on the test hot path (measured: analysis is quadratic in rule count) - the
+   gate covers the baseline set instead.
+
+2. **Findings are bounded and rule-derived, not a decision procedure.**
+   `unreachable` (a rule matches no representative point) and `shadowed` (an
+   allow rule's every match is also denied) are errors; `ambiguous-allow` (two
+   allow rules match the same point) is a warning. Representative points are
+   generated from each rule's own declarations - concrete instances of its
+   patterns, its principal kinds/ids/roles, the classification at and above its
+   ceiling, and a time that satisfies its own `before`/`after` conditions - so
+   a rule cannot be reported unreachable merely because the sampler picked a
+   bad instant. Caps: 256 points per rule, 4096 total.
+
+3. **Attribution order-dependence is named, not silently changed.** Detection
+   is `ambiguous-allow`; the semantics stay as they are. Changing `ruleId`
+   attribution is an audit-visible change and belongs in its own ADR with the
+   claims it touches, not as a side effect of a test milestone.
+
+4. **Versioned golden decision sets are the oracle.** A committed
+   `baseline-decisions.json` carries a version, the policy hash, the scenarios,
+   and the full expected result (effect, `ruleId`, reason). Any semantic change
+   fails until the file is re-blessed deliberately. This is what H14's mutation
+   lane was waiting for.
+
+5. **Performance bounds are tests, with generous ceilings.** The point is to
+   catch an order-of-magnitude regression or an accidental per-decision
+   allocation, not to police microseconds; a tight bound on shared CI is a
+   flaky test that gets deleted.
+
+**Security implications:** H3 changes no decision path except to refuse a
+policy bundle that was previously accepted and is provably dead or shadowed.
+`matchesRule` is extracted from `evaluate` so analysis uses the *same* matcher
+as the runtime - a divergence between the analyzer and the engine would make
+every finding a lie, so the extraction is behavior-preserving and the existing
+suite is the proof.
+
+**Tradeoffs:** the analyzer samples a domain it derives from the rules; it can
+miss a conflict that only exists at a point the sampler never generates, and it
+can never prove absence of conflict. That is stated in the claim. Refusing a
+bundle on an `error` finding could block an operator whose policy is merely
+unusual - the escape hatch is to fix or delete the rule, which is the intended
+pressure.
+
+**Residual risk (named):** sampled-domain incompleteness; attribution follows
+declaration order when allows overlap; policy authored incorrectly remains a
+human error the analyzer can only partially catch; semantics too clever is
+unaffected by any of this.
+
+**Future migration path:** if attribution stability is wanted, pick the
+lexicographically smallest matching allow id (or reject overlapping allows
+outright) in an ADR that updates Claim 1's evidence and the audit
+reconstruction; then `ambiguous-allow` becomes an error. H14's mutation lane
+consumes `baseline-decisions.json` unchanged.

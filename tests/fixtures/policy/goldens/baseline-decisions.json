@@ -1,0 +1,351 @@
+{
+  "id": "baseline-decisions",
+  "name": "BASELINE_POLICY golden decision set (H3)",
+  "version": 1,
+  "policyId": "baseline",
+  "policyHash": "f7f4bafc7ad783f6a59dcf04de336007ddcb1afb2ee33015a70a86bd4a67b9e5",
+  "rules": [
+    {
+      "id": "allow-agent-read-low",
+      "description": "Agents may read internal-and-below resources they hold a capability for.",
+      "effect": "allow",
+      "principals": {
+        "kinds": [
+          "agent"
+        ]
+      },
+      "actions": [
+        "read"
+      ],
+      "resources": {
+        "maxClassification": "internal"
+      }
+    },
+    {
+      "id": "allow-agent-read-sensitive-with-approval",
+      "description": "Reads above internal require a separate human approval record.",
+      "effect": "allow",
+      "principals": {
+        "kinds": [
+          "agent"
+        ]
+      },
+      "actions": [
+        "read"
+      ],
+      "resources": {},
+      "requiresApproval": true
+    },
+    {
+      "id": "deny-export-restricted",
+      "description": "Export of restricted material is never permitted by policy alone.",
+      "effect": "deny",
+      "principals": {
+        "kinds": [
+          "agent",
+          "user",
+          "service"
+        ]
+      },
+      "actions": [
+        "export"
+      ],
+      "resources": {
+        "maxClassification": "restricted"
+      }
+    },
+    {
+      "id": "allow-user-approve",
+      "description": "Humans may record approvals; approval is not execution.",
+      "effect": "allow",
+      "principals": {
+        "kinds": [
+          "user"
+        ]
+      },
+      "actions": [
+        "task.approve"
+      ],
+      "resources": {}
+    }
+  ],
+  "scenarios": [
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:internal",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "internal",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:public",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "public",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:phi",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "phi",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:phi",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "phi",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000,
+      "approvals": [
+        {
+          "id": "approval-agent:a-read-doc:phi",
+          "approvedBy": "user:reviewer",
+          "reviewerAuth": {
+            "issuer": "https://idp.test.example.com",
+            "subject": "user:reviewer",
+            "audience": "test-audience",
+            "expiresAt": 1748739600000,
+            "issuedAt": 1748736000000,
+            "tokenId": "tok_golden_reviewer",
+            "authTime": 1748736000000,
+            "amr": [
+              "pwd",
+              "mfa"
+            ],
+            "claims": {},
+            "verifiedAt": 1748736000000
+          },
+          "principalId": "agent:a",
+          "action": "read",
+          "resourceId": "doc:phi",
+          "expiresAt": 1748736600000
+        }
+      ]
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:restricted",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "restricted",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000,
+      "approvals": [
+        {
+          "id": "approval-agent:a-read-doc:phi",
+          "approvedBy": "user:reviewer",
+          "reviewerAuth": {
+            "issuer": "https://idp.test.example.com",
+            "subject": "user:reviewer",
+            "audience": "test-audience",
+            "expiresAt": 1748739600000,
+            "issuedAt": 1748736000000,
+            "tokenId": "tok_golden_reviewer",
+            "authTime": 1748736000000,
+            "amr": [
+              "pwd",
+              "mfa"
+            ],
+            "claims": {},
+            "verifiedAt": 1748736000000
+          },
+          "principalId": "agent:a",
+          "action": "read",
+          "resourceId": "doc:phi",
+          "expiresAt": 1748736600000
+        }
+      ]
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:restricted",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "restricted",
+        "attributes": {}
+      },
+      "action": "export",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:internal",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "internal",
+        "attributes": {}
+      },
+      "action": "delete",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "user:alice",
+        "kind": "user",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "task:t1",
+        "type": "task",
+        "tenantId": "acme",
+        "classification": "internal",
+        "attributes": {}
+      },
+      "action": "task.approve",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "service:worker",
+        "kind": "service",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "doc:internal",
+        "type": "document",
+        "tenantId": "acme",
+        "classification": "internal",
+        "attributes": {}
+      },
+      "action": "read",
+      "now": 1748736000000
+    },
+    {
+      "principal": {
+        "id": "agent:a",
+        "kind": "agent",
+        "tenantId": "acme",
+        "roles": [],
+        "attributes": {}
+      },
+      "resource": {
+        "id": "net:example.com",
+        "type": "network-host",
+        "tenantId": "acme",
+        "classification": "public",
+        "attributes": {}
+      },
+      "action": "network.egress",
+      "now": 1748736000000
+    }
+  ],
+  "expected": [
+    {
+      "effect": "allow",
+      "ruleId": "allow-agent-read-low",
+      "reason": "allowed by rule allow-agent-read-low"
+    },
+    {
+      "effect": "allow",
+      "ruleId": "allow-agent-read-low",
+      "reason": "allowed by rule allow-agent-read-low"
+    },
+    {
+      "effect": "deny",
+      "reason": "no matching allow rule; default deny"
+    },
+    {
+      "effect": "allow",
+      "ruleId": "allow-agent-read-sensitive-with-approval",
+      "reason": "allowed by rule allow-agent-read-sensitive-with-approval"
+    },
+    {
+      "effect": "deny",
+      "reason": "no matching allow rule; default deny"
+    },
+    {
+      "effect": "deny",
+      "ruleId": "deny-export-restricted",
+      "reason": "denied by rule deny-export-restricted"
+    },
+    {
+      "effect": "deny",
+      "reason": "no matching allow rule; default deny"
+    },
+    {
+      "effect": "allow",
+      "ruleId": "allow-user-approve",
+      "reason": "allowed by rule allow-user-approve"
+    },
+    {
+      "effect": "deny",
+      "reason": "no matching allow rule; default deny"
+    },
+    {
+      "effect": "deny",
+      "reason": "no matching allow rule; default deny"
+    }
+  ]
+}

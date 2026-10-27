@@ -20,6 +20,7 @@ import {
   type PolicyEngine,
   type PolicyRule,
 } from './policy.ts';
+import { analyzePolicy } from './policy-analysis.ts';
 import type { EventStore } from './events.ts';
 
 export interface BundleProvenance {
@@ -93,15 +94,47 @@ function assertBundleShape(bundle: unknown, kind: string): void {
   }
 }
 
+/**
+ * Rules arrive from disk: every field the analyzer and the matcher read is
+ * checked here, so a malformed bundle is refused with a bundle error instead of
+ * a TypeError from deep inside evaluation.
+ */
+function assertRulesShape(id: string, rules: readonly unknown[]): void {
+  const fail = (i: number, what: string): never => {
+    throw new PolicyBundleError(`policy bundle '${id}': rules[${i}] ${what}`);
+  };
+  rules.forEach((raw, i) => {
+    if (typeof raw !== 'object' || raw === null) fail(i, 'must be an object');
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== 'string' || r.id === '') fail(i, '"id" must be a non-empty string');
+    if (r.effect !== 'allow' && r.effect !== 'deny') fail(i, '"effect" must be "allow" or "deny"');
+    if (!Array.isArray(r.actions)) fail(i, '"actions" must be an array');
+    if (typeof r.principals !== 'object' || r.principals === null) fail(i, '"principals" must be an object');
+    if (typeof r.resources !== 'object' || r.resources === null) fail(i, '"resources" must be an object');
+  });
+}
+
 export function loadPolicyBundle(bundle: PolicyBundle): PolicyBundle {
   assertBundleShape(bundle, 'policy');
   if (!Array.isArray(bundle.rules)) {
     throw new PolicyBundleError(`policy bundle '${bundle.id}': "rules" must be an array`);
   }
+  assertRulesShape(bundle.id, bundle.rules);
   const computed = policyBundleHash(bundle);
   if (computed !== bundle.hash) {
     throw new PolicyBundleError(
-      `policy bundle '${bundle.id}': hash mismatch — recomputed ${computed}, bundle claims ${bundle.hash}`,
+      `policy bundle '${bundle.id}': hash mismatch - recomputed ${computed}, bundle claims ${bundle.hash}`,
+    );
+  }
+
+  // H3 (ADR-034): conflict detection on load. A hash-verified bundle carrying a
+  // rule that can never fire, or an allow entombed under a deny, is refused
+  // before an engine exists. Warnings are reported, not enforced.
+  const analysis = analyzePolicy(bundle.rules);
+  const errors = analysis.findings.filter((f) => f.severity === 'error');
+  if (errors.length > 0) {
+    throw new PolicyBundleError(
+      `policy bundle '${bundle.id}' refused: ${errors.length} dead or shadowed rule(s) - ${errors.map((f) => f.detail).join('; ')}`,
     );
   }
   return bundle;

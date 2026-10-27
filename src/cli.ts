@@ -14,6 +14,19 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPublicKey } from 'node:crypto';
 import { runAttackCorpus } from './attacks.ts';
+import {
+  ADVERSARIAL_REPORT_VERSION,
+  buildBaseline,
+  buildReport,
+  corpusLane,
+  decidedVector,
+  differentialLane,
+  digestDecisionVector,
+  digestDirectory,
+  driftLane,
+  type Baseline,
+  type Digests,
+} from './adversarial.ts';
 import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyRule } from './policy.ts';
 import { type Resource } from './domain.ts';
 import { buildWorld, buildWorldAsync, summarizeRepoModel, TENANT_A } from './scenario.ts';
@@ -1969,15 +1982,110 @@ async function evidenceCommand(): Promise<void> {
   }
 }
 
+/**
+ * H14 (ADR-033): one run over every enumerated adversarial lane, pinned by
+ * digests so corpus or decision drift fails loudly.
+ *
+ *   node src/cli.ts adversarial            # run; exit 1 on any failed lane
+ *   node src/cli.ts adversarial --bless    # re-pin the baseline (review the diff)
+ */
+async function adversarialCommand(): Promise<void> {
+  const bless = process.argv.slice(3).includes('--bless');
+  const baselinePath = join(ROOT, 'artifacts', 'adversarial-baseline.json');
+  const reportPath = join(ROOT, 'artifacts', 'adversarial-report.json');
+  const generatedAt = new Date().toISOString();
+  const world = await buildWorldAsync();
+  try {
+    heading('ADVERSARIAL EVALUATION (H14)');
+
+    const results = [
+      ...(await runAttackCorpus(world, join(ROOT, 'security-attacks'))),
+      ...(await runAttackCorpus(world, join(ROOT, 'security-fixtures'))),
+    ];
+    const failedIds = results.filter((r) => !r.passed).map((r) => r.testCase.id);
+
+    // The decision vector is the union of every policy fixture scenario, in
+    // fixture-id order — an oracle the repo already commits, not a new one.
+    const engine = createPolicyEngine(BASELINE_POLICY, 'adversarial');
+    const scenarios = loadFixtures(join(ROOT, 'tests', 'fixtures', 'policy'))
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .flatMap((f) => f.scenarios);
+
+    const digests: Digests = {
+      corpus: digestDirectory(join(ROOT, 'security-attacks')),
+      fixtures: digestDirectory(join(ROOT, 'security-fixtures')),
+      decisions: digestDecisionVector(decidedVector(simulate(engine, scenarios))),
+    };
+
+    // A baseline that exists but does not parse or does not match the shape is a
+    // hard error: falling back to "no baseline" would turn corruption into a
+    // prompt to re-bless blindly.
+    let baseline: Baseline | null = null;
+    if (existsSync(baselinePath)) {
+      const raw = JSON.parse(readFileSync(baselinePath, 'utf8')) as Partial<Baseline>;
+      const digests = raw.digests as Partial<Digests> | undefined;
+      if (
+        raw.version !== ADVERSARIAL_REPORT_VERSION ||
+        typeof digests?.corpus !== 'string' ||
+        typeof digests.fixtures !== 'string' ||
+        typeof digests.decisions !== 'string'
+      ) {
+        throw new Error(`baseline at ${baselinePath} is not a valid ${ADVERSARIAL_REPORT_VERSION} baseline - delete it and re-bless deliberately`);
+      }
+      baseline = raw as Baseline;
+    }
+    if (bless) {
+      baseline = buildBaseline(digests, generatedAt);
+      mkdirSync(join(ROOT, 'artifacts'), { recursive: true });
+      writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
+    }
+
+    const lanes = [
+      corpusLane(results.length - failedIds.length, results.length, failedIds),
+      driftLane(digests, baseline),
+      differentialLane(digests, baseline),
+    ];
+    const report = buildReport({
+      generatedAt,
+      gitHead: ((): string | null => {
+        try {
+          return gitHead(ROOT);
+        } catch {
+          return null; // a scheduled run outside a checkout still produces a report
+        }
+      })(),
+      digests,
+      lanes,
+    });
+    writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+
+    for (const lane of lanes) line(lane.lane, lane.passed ? 'PASS' : 'FAIL', lane.detail);
+    line('baseline', bless ? 'BLESSED' : baseline === null ? 'ABSENT' : 'PINNED', baselinePath);
+    line('report', 'WRITTEN', reportPath);
+    console.log(
+      '\n  Implementer-authored corpus: a green run means the enumerated attacks still behave\n  as specified. It is not evidence of safety (ADR-033).',
+    );
+    if (!report.passed) process.exitCode = 1;
+  } catch (error) {
+    console.error(`  adversarial run refused: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  } finally {
+    await world.incident.flush().catch(() => {});
+    world.incident.close();
+    world.eventLog.close();
+  }
+}
+
 const command = process.argv[2] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
+else if (command === 'adversarial') await adversarialCommand();
 else if (command === 'benchmark') await benchmark();
 else if (command === 'build') await buildCommand();
 else if (command === 'update') await updateCommand();
 else if (command === 'incident') await incidentCommand();
 else if (command === 'evidence') await evidenceCommand();
 else {
-  console.error(`unknown command: ${command} (try demo | attack | benchmark | build | update | incident | evidence)`);
+  console.error(`unknown command: ${command} (try demo | attack | adversarial | benchmark | build | update | incident | evidence)`);
   process.exitCode = 1;
 }

@@ -1,0 +1,9 @@
+{
+  "version": "ASL-ADVERSARIAL v1",
+  "blessedAt": "2026-10-27T18:41:58.105Z",
+  "digests": {
+    "corpus": "574edc33754af5072e8a1c5f13034a9517de282409efa2fbf5c645f70ec869c8",
+    "fixtures": "a892aba13bb1b11f57d16b13465126f7ca9a9578d60e48f3eb924298395a87ce",
+    "decisions": "530ecea5eafed2d219ac383c1126e705451bb969b84d9c9c751961907597b786"
+  }
+}

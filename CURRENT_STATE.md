@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H11 — tamper-evident evidence (ADR-031).
+Honest snapshot. Updated after H14 — adversarial evaluation harness (ADR-033).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -17,22 +17,28 @@ in-process query surface, which proved and closed a v2-evidence-key
 tenant-binding gap and a capability-request reviewer-tenancy gap), and H11
 (ADR-031, external anchor sinks + multi-source reconciliation, operator-held
 signed checkpoints, durable federation anchor history, recorded legal holds)
-are the landed Stage 2 items. M17 closed both
+are the landed Stage 2 items. H14 landed in part (ADR-033): `npm run
+adversarial` runs three lanes — corpus, committed-input drift, and policy
+decision-vector differential — and fails closed on corpus or semantic change
+until `--bless` is run deliberately; its mutation lane is deferred behind H3's
+golden decision sets, and no *continuous* claim is made (no scheduler, local
+remote only). M17 closed both
 ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Next frontier: H14 (continuous adversarial evaluation) or any remaining
-H3–H7/H9 item.
+Next frontier: H3 (policy evaluation under adversarial conditions) — which
+also unblocks H14's mutation lane — or any remaining H4–H7/H9 item.
 
 ## What exists
 
-TypeScript foundation on Node 24, ~14,000 lines of source across 48 modules
+TypeScript foundation on Node 24, ~14,000 lines of source across 49 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
-`retention.ts`, and `incident-store-pg.ts` are the latest additions), 716 tests
-(`tests/`, `security-tests/`; 695 pass, 21 Postgres-mode tests skip cleanly
+`retention.ts`, `adversarial.ts`, and `incident-store-pg.ts` are the latest
+additions), 732 tests
+(`tests/`, `security-tests/`; 711 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -42,7 +48,8 @@ a static operator UI (`tools/ui/index.html`), developer setup scripts
 (`artifacts/sbom.json` — the committed SBOM review baseline;
 `artifacts/build-manifest.json` + `.sig` — the first signed release manifest;
 the per-instance update state `artifacts/update-state.json` is runtime-only,
-gitignored — H12), and this documentation set.
+gitignored — H12; the H14 adversarial baseline `artifacts/adversarial-baseline.json`
+is committed while its per-run report is gitignored), and this documentation set.
 
 Runtime dependencies: **2** (`jose` — JWT/JWK verification, ADR-015;
 `postgres` 3.4.9 — Postgres event backend, ADR-018, zero transitive deps),
@@ -413,7 +420,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 716 tests pass (695 green; 21 Postgres-mode tests skip without
+All 732 tests pass (711 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1

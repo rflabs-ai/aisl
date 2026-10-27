@@ -14,3 +14,6 @@ node_modules/
 # written by code only and must never be committed or shared between instances.
 artifacts/update-state.json
 artifacts/update-state.json.tmp
+# H14 (ADR-033): the per-run report is instance output; the *baseline* is
+# committed and deliberately re-blessed, because that is what makes drift loud.
+artifacts/adversarial-report.json

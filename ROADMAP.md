@@ -166,13 +166,18 @@ residual risk, as required. Status markers apply: **[DONE]** / **[NEXT]** / **[ 
   tamper-evident evidence: external anchor sinks (file + HTTP witness, never
   blocking an append), multi-source reconciliation (binding, truncation, fork
   detection), operator-held signed checkpoints, durable federation anchor
-  history, and recorded legal holds. Next: H14 (continuous adversarial
-  evaluation) or any remaining H3-H7/H9 item. The remaining seven (H3-H7, H9,
-  H14) stay open [ ] until prioritized after it clears.
+  history, and recorded legal holds. Next: H14's remainder (the mutation lane,
+  gated on H3's oracle) or any remaining H3-H7/H9 item. H14 landed its runner,
+  drift baseline and differential lane (ADR-033) and stays open [ ] only for
+  the mutation lane; H3-H7 and H9 stay open [ ].
 
   **Working order (agreed 2026-10-12).** **H14** (continuous adversarial
   evaluation) and **H3** (policy adversarial) run first and in parallel —
   H14's corpus feeds every later track, H3 is file-disjoint (policy + fixtures).
+  As executed, H14's runner + drift + differential lanes landed first
+  (ADR-033, 2026-10-27); its mutation lane now waits on H3's versioned golden
+  decision sets, which reverses nothing — H3 simply becomes the oracle H14
+  needed.
   **M18 Phase 1** proceeds in the raven repo (ASL consume-only). A
   **control-plane gap pass** ("to a good place") runs alongside. Then the
   runtime track: **H4 → H7** (H4 is the shared dependency of kgp's clean-room,
@@ -487,6 +492,31 @@ unchanged.
 - **Residual risk:** unknown-unknown attacks.
 - **Class:** MVP/HA.
 
+**Closed in part (ADR-033, 2026-10-27):** `src/adversarial.ts` +
+`npm run adversarial` compose the existing pieces into one run over three lanes
+and pin their inputs with digests: **corpus** (attack cases + legitimate
+fixtures, every case must behave as specified), **drift** (SHA-256 of the
+corpus and fixtures against the committed `artifacts/adversarial-baseline.json`
+— the H10 SBOM pattern applied to test inputs, so adding, removing, renaming or
+editing a case fails the lane until `--bless` is run deliberately in a reviewed
+change), and **differential** (the digest of the decision vector across every
+policy fixture scenario, which catches semantic drift without adjudicating it —
+that stays H3's job). The report is written to
+`artifacts/adversarial-report.json` and carries digests and counts only, with a
+canary test asserting no fixture content can reach it. Proven end-to-end: a
+clone of a corpus case makes every case pass while the drift lane fails — the
+"coverage change mistaken for safety" failure mode, closed. `scripts/
+schedule-adversarial.ps1` registers an operator-local nightly run (verified
+register/status/unregister, then unregistered) and is documented as
+convenience, never a security control. **Not closed:** the mutation lane is
+deferred behind H3 (a mutant score is only as meaningful as its oracle, and the
+corpus asserts allow/deny rather than per-rule expectations) — debt marker in
+`src/adversarial.ts`; external red team remains an operator obligation and is
+never an acceptance criterion; and "continuous" is not claimed — this repo has
+no scheduler and its only remote is a local bare repo, so the claim is
+*scheduled* adversarial evaluation. 16 tests
+(`tests/h14-adversarial.test.ts`).
+
 ### H15 — Fail-closed availability engineering **[DONE]** (ADR-027)
 
 - **Attack surface:** the failure modes of the safety mechanisms themselves.
@@ -773,8 +803,9 @@ Stage 0 (EASY) and Stage 1 (MEDIUM) are fully closed as of M15/M16. M17
 federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
-H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE]; the remaining seven
-are H3–H7, H9, H14).
+H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE]; H14 landed its
+runner, drift baseline and differential lane (ADR-033) and remains open for the
+H3-gated mutation lane; the remaining items are H3–H7 and H9).
 
 ### M0 — Architectural foundation (done)
 

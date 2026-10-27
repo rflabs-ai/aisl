@@ -95,6 +95,7 @@ src/
   retention.ts        recorded legal holds replayed from the event log (H11, ADR-031)
   slo.ts              assurance-target catalog + gate (ADR-014, M10)
   attacks.ts          declarative adversarial harness
+  adversarial.ts      H14 lanes: corpus/drift/differential + digest baseline (H14, ADR-033)
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)
   cli.ts              demo | attack | benchmark | build | update | incident | evidence
   testing.ts          test wiring only

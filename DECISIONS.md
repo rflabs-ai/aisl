@@ -2558,3 +2558,86 @@ tracked as `LAS-I<n>` milestones in each related repo, indexed in
 `local-ai-system/docs/architecture/assembly-map.md`; the first real drive
 (Phase A) keeps ASL out of the loop, and the fully-wired drive is rehearsed as
 a simulation before it is real.
+
+---
+
+## ADR-033: Continuous adversarial evaluation - a runner and a drift baseline; the schedule belongs to the operator (H14)
+
+**Context:** the platform ships a 12-case attack corpus (`security-attacks/`), a
+legitimate-task fixture set (`security-fixtures/`), a declarative loader that
+routes each case through the session, network, or secret gate
+(`src/attacks.ts`), policy-testing primitives (`simulate`, `diffDecisions`,
+`loadFixtures`), an overlay differ (`npm run policy:diff`), and an M10 SLO gate
+(`npm run benchmark`). ROADMAP H14 asks for something those pieces do not
+provide: a *nightly* corpus run, mutation testing on policy, differential runs
+across versions, and external red team at intervals - with the honesty rule
+that an implementer-authored corpus is not high-assurance evidence.
+
+Two facts make the literal ROADMAP wording unshippable as written. First, this
+repository has no scheduler: no CI configuration, and its only remote is a local
+bare repo. A "nightly run" is the operator's cron, not code this repo can
+publish. Second, mutation testing is circular against the current oracle: the
+corpus asserts `allow`/`deny`, not per-rule expectations, so a surviving mutant
+is indistinguishable from a weak assertion. H3 owns the versioned golden
+decision sets that make a mutant meaningful; ADR-033 therefore holds the
+mutation lane behind H3 rather than reporting a number that means nothing.
+External red team is an organizational commitment and cannot be an acceptance
+criterion - a criterion that can never go green rots into a deletion.
+
+**Decision:**
+
+1. **H14 ships a runner and a report, not a scheduler.**
+   `npm run adversarial` executes every enumerated lane against the current
+   tree and writes `artifacts/adversarial-report.json` (version, lanes, digests,
+   pass/fail, optional git head). Exit is non-zero on any failed lane. The
+   repository additionally ships `scripts/schedule-adversarial.ps1`, which
+   registers an operator-local nightly task against that command. The script is
+   convenience infrastructure, explicitly **not** a security control: nothing in
+   the evidence chain depends on it having run.
+
+2. **Corpus drift is closed with a committed digest baseline.**
+   `artifacts/adversarial-baseline.json` pins the SHA-256 of the attack corpus,
+   the legitimate fixtures, and the policy decision vector - the H10 SBOM
+   pattern applied to test inputs. Any change to any of the three fails the
+   drift lane until `npm run adversarial --bless` rewrites the baseline in a
+   reviewed change. Drift becomes a visible, deliberate act instead of a silent
+   one, and the baseline itself is diffable in review.
+
+3. **The differential lane reports, it does not adjudicate.**
+   H14 compares the current decision vector against the baseline vector and
+   fails on any change. It does not state which change was correct - that is
+   H3's job, using versioned golden sets with rule ids and reasons. The overlap
+   between the two milestones is a shared *input* (the policy engine), never a
+   shared file.
+
+4. **The mutation lane is deferred behind H3.**
+   Recorded as debt with a named upgrade path, not silently omitted.
+
+5. **Claims are worded to the mechanism.** SECURITY_CLAIMS says *scheduled
+   adversarial evaluation with a drift baseline*, never "continuous"; and every
+   claim from this milestone states that the corpus is implementer-authored and
+   therefore evidence that known attacks are tested, not evidence of safety.
+
+**Security implications:** H14 adds no runtime path, no authority, no store, and
+no new dependency - the report is generated offline from the same inputs the
+test suite already consumes. The report records digests and counts only; it must
+never echo fixture content, and a structural test asserts that. Because the
+harness cannot widen authority, it cannot regress H1/H8/H11 guarantees.
+
+**Tradeoffs:** the baseline re-bless is a rubber-stamp risk - a reviewer who
+approves `--bless` without reading the corpus diff has bought nothing. The
+differential lane detects *that* decisions changed, not whether the change is
+worse. Both are accepted because the alternative (no baseline) detects nothing
+at all.
+
+**Residual risk (named):** unknown-unknown attacks (the ROADMAP's own
+assumption, "attacks can be enumerated faster than they are invented", is false
+but useful); implementer-authored corpus bias; nothing runs unless the operator
+schedules it; and no mutation coverage until H3 lands its oracle.
+
+**Future migration path:** H3 lands versioned golden decision sets -> the
+mutation lane turns on against that oracle and the `ponytail:` marker in
+`src/adversarial.ts` is retired. When the repository gains hosted CI, the
+nightly task moves from the operator script to the runner unchanged, and the
+claim upgrades from "scheduled" to "continuous" in the same commit that proves
+it ran.

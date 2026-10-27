@@ -12,6 +12,7 @@
     "demo": "node src/cli.ts demo",
     "benchmark": "node src/cli.ts benchmark",
     "attack": "node src/cli.ts attack",
+    "adversarial": "node src/cli.ts adversarial",
     "policy:diff": "node src/policy-diff.ts",
     "supply-chain": "node src/cli.ts build gate",
     "sbom": "node src/cli.ts build sbom",

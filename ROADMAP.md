@@ -715,6 +715,54 @@ Not MVP. Listed so the architecture is never painted into a corner.
 | Disaster recovery with evidence continuity | rebuild without losing the chain | anchoring, backups | E/HA |
 | High-assurance operational procedures | dual control, access reviews, drills | everything above | HA |
 
+**Stage 3 entry path (2026-10-27).** Stage 2 closed every item that could be
+built and proven inside one process. These cannot: each needs hardware, a host
+kernel, or a build environment, and none is provable by `npm test` — they need
+integration rigs and, for some, a purchase order. The four named when Stage 2
+closed, and what each actually replaces here:
+
+- **microVM isolation (Firecracker-class)** replaces `LocalSandbox`
+  ("in-process/no-isolation") and the Docker fallback behind `ContainerSandbox`.
+  It closes H5's sandbox-escape residual, H8's shared-process residual
+  (known-gap #7), and the half of H6 that says a tool which ignores the protocol
+  still holds the process. What it buys is a per-session kernel: escape requires
+  a hypervisor bug, not a container bug. What it costs is a jailer, a kernel
+  image pipeline, vsock I/O, and snapshot/restore if cold starts matter.
+  Prerequisite: the container sandbox that already exists.
+- **Hardware-backed key management (HSM/TPM)** replaces the env-var keys
+  (`CAPABILITY_SIGNING_KEY`, `EVENT_SIGNING_*_PEM`, `EVIDENCE_SEALING_KEY`,
+  `.build-keys/`). It closes ADR-008's key-custody residual and the signing-key
+  custody named in ADR-031. The point is not stronger crypto — it is that the
+  key becomes an *operation*, not a value: software can ask for a signature,
+  never for the key. Prerequisite: turn the signing seams into a `Signer` port
+  with pkcs11/TPM2 backends, then a custody ceremony with the dual control
+  ADR-008 already assumes.
+- **Cryptographic attestation** is what makes hardware keys mean anything.
+  Without it, an attacker who owns the host process simply asks the HSM to sign.
+  Attestation measures what is running (measured boot + a TPM quote), a relying
+  party verifies the measurement, and key release is conditional on it. It
+  closes the "the runtime process is not compromised" assumption that Claim 1
+  rests on. Prerequisite: measured boot and a TPM — so it follows the hardware
+  key work rather than leading it.
+- **Reproducible builds** replaces the `treeDigest` half of H10. H10 proves the
+  *source tree* is what the manifest says; it cannot prove the artifact someone
+  actually runs was built from it. Reproducibility lets a third party rebuild
+  and compare bytes, which is what closes H10's "a trusted maintainer going
+  rogue" residual. It is the most CI-shaped of the four and, for Node with a
+  lockfile and native modules, the most likely to stall — a hermetic, pinned
+  build image first; bit-for-bit Node builds are a research project.
+
+**Recommended order: microVM, then HSM/TPM, then attestation, then reproducible builds.**
+MicroVM first because it closes the largest user-visible gap between the product
+promise ("executed inside controlled environments") and what ships. HSM and
+attestation are one project in two halves and should not be split across
+quarters. Reproducible builds last because it is packaging work that benefits
+from every other decision being settled. Two Stage-3 rows are *software* and
+cheaper than any of the four — **formalized security invariants** (a
+machine-checked model of the PDP) and **advanced provenance** (taint already
+exists; this is lineage per artifact) — so if the goal is progress per unit of
+effort, start there instead.
+
 ---
 
 ## Federation integration milestones (ADR-022)
@@ -919,8 +967,9 @@ federation (ADR-022) landed with control-plane as the first client — its
 full-format spec is in `PROMPTS/M-Track--DONE/`. The open frontier is Stage 2
 (HARD) — the queue is `PROMPTS/H-Track/` (H1 [DONE], H10 [DONE], H12 [DONE],
 H13 [DONE], H15 [DONE], H2 [DONE], H8 [DONE], H11 [DONE], H3 [DONE] — ADR-034;
-H14 [DONE] - ADR-033 + ADR-035; H4 [DONE] - ADR-036; the remaining items are
-H5-H7 and H9).
+H14 [DONE] - ADR-033 + ADR-035; H4 [DONE] - ADR-036; H5 [DONE] - ADR-038;
+H6 [DONE] - ADR-039 (+ ADR-040 manifests); H7 [DONE] - ADR-037; H9 [DONE] -
+ADR-041). **Stage 2 is complete.** Stage 3 is next; see its entry path below.
 
 ### M0 — Architectural foundation (done)
 

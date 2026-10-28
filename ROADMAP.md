@@ -711,7 +711,7 @@ Not MVP. Listed so the architecture is never painted into a corner.
 | Formalized security invariants | machine-checked model of the PDP | stable semantics | HA/R - **[DONE]** ADR-042 (bounded, 375 states) |
 | Continuous adversarial testing | standing red team, not a one-off | harness | HA |
 | Sophisticated exfiltration resistance | volume, timing, and semantic controls | DLP, egress proxy | HA/R |
-| Advanced provenance | content-level lineage for every derived artifact | taint tracking | HA |
+| Advanced provenance | content-level lineage for every derived artifact | taint tracking | HA - **[DONE]** ADR-043 (in-memory graph; replay is the follow-up) |
 | Disaster recovery with evidence continuity | rebuild without losing the chain | anchoring, backups | E/HA |
 | High-assurance operational procedures | dual control, access reviews, drills | everything above | HA |
 

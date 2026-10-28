@@ -3175,3 +3175,45 @@ policy granted the *intended* thing).
 **Future migration path:** a real model checker (TLA+/Alloy) over the same seven
 properties would remove the enumeration bias; that needs a specification of the
 PDP in a formal language, which is a research project rather than a milestone.
+
+---
+
+## ADR-043: Content-level lineage for derived artifacts (Stage 3 row: advanced provenance)
+
+**Context:** the taint label (H4) flattens provenance into a set of source ids
+with a maximum classification. That is the right shape for a decision ("may this
+leave") and the wrong shape for an investigation ("where did this artifact come
+from, six derivations back"). H9 recorded a provenance *label* per artifact;
+nothing recorded the graph.
+
+**Decision:**
+
+1. **An explicit DAG.** `src/provenance.ts` `ProvenanceGraph` records nodes
+   `{ id, tenantId, kind, parents, classification }` and answers `lineage(id)`
+   (transitive ancestors, nearest first, deterministic order) and `depth(id)`.
+2. **Four refusals, because a partial lineage graph is worse than none:** an
+   unknown parent (no forward references), a parent in another tenant (existence
+   would leak, the H8 failure mode), a cycle, and a re-record with different
+   parents (one node, one history). Depth is capped at 32.
+3. **Artifacts record lineage at admission, quarantined or not.** `ArtifactStore`
+   takes an optional `ProvenanceGraph`; `derivedFrom` names the sources. A
+   quarantined artifact still gets a node - evidence of what arrived needs its
+   lineage as much as a released one does.
+
+**Security implications:** an investigator can answer "what fed this" without
+re-reading every event, and a derivation that skips its source is refused rather
+than silently recorded. The graph is tenant-bound, so lineage cannot be used as a
+cross-tenant existence oracle.
+
+**Tradeoffs:** parents must be recorded before children (strict ordering is a
+constraint on callers), and the graph is in-memory - persistence is the audit
+log's job, and rebuilding lineage from events is not implemented.
+
+**Residual risk (named):** in-memory only, so a restart loses lineage unless the
+caller replays; `depth()` is recursive without memoisation (fine for the capped
+graph, wrong for a large one); and lineage says what a node was *derived from*,
+never what was done with it.
+
+**Future migration path:** replay lineage from `document.ingest` /
+`session.guard` / artifact events at startup; then the graph becomes a derived
+view of evidence rather than a separate store.

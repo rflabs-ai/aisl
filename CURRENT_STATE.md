@@ -45,10 +45,12 @@ ASL-side REST gaps the control-plane client found (anchor registration,
 capability-request status) with no new runtime dependencies. M14's REST API,
 M12's Postgres control plane, M13's runtime realism, M11's authz depth and
 M10's SLO gate remain the non-regression baseline.
-Stage 2 is complete: H1-H15 are all [DONE]. Next frontier is Stage 3 (VERY
-HARD), and it is a different kind of work - hardware and infrastructure rather
-than TypeScript, none of it provable by `npm test`. Recommended order and the
-reasoning for it: `ROADMAP.md` "Stage 3 - entry path".
+Stage 2 is complete: H1-H15 are all [DONE]. Two Stage 3 rows landed on the same
+day - formalized invariants (ADR-042, bounded model checking over 375 states)
+and advanced provenance (ADR-043, a tenant-bound lineage DAG). What remains in
+Stage 3 is hardware and infrastructure rather than TypeScript, and none of it is
+provable by `npm test`. Recommended order and reasoning:
+`ROADMAP.md` "Stage 3 - entry path".
 
 ## What exists
 

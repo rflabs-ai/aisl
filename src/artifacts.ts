@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { classificationRank, type Classification } from './domain.ts';
 import { inspectEgress, type Canary } from './dlp.ts';
 import type { TaintLabel } from './taint.ts';
+import type { ProvenanceGraph, ProvenanceNode } from './provenance.ts';
 
 export type ArtifactKind = 'text' | 'json' | 'png' | 'pdf' | 'zip' | 'elf' | 'pe' | 'unknown';
 
@@ -82,10 +83,18 @@ export interface ArtifactAdmission {
   /** Highest classification this artifact store holds for the tenant. */
   readonly ceiling: Classification;
   readonly canaries?: readonly Canary[];
+  /** ADR-043: ids this artifact was derived from, already recorded in the graph. */
+  readonly derivedFrom?: readonly string[];
 }
 
 export class ArtifactStore {
   private readonly artifacts = new Map<string, Artifact>();
+  private readonly provenance: ProvenanceGraph | undefined;
+
+  /** Lineage is optional so the store stays usable on its own (ADR-043). */
+  constructor(provenance?: ProvenanceGraph) {
+    this.provenance = provenance;
+  }
 
   /** Admit or quarantine. Never throws: a hostile artifact is data, not an error. */
   admit(input: ArtifactAdmission): Artifact {
@@ -122,6 +131,14 @@ export class ArtifactStore {
       ...(reasons.length > 0 ? { reason: reasons.join('; ') } : {}),
     };
     this.artifacts.set(this.key(input.tenantId, input.id), artifact);
+    // Recorded even when quarantined: evidence needs the lineage of what arrived.
+    this.provenance?.record({
+      id: input.id,
+      tenantId: input.tenantId,
+      kind: 'artifact',
+      parents: input.derivedFrom ?? [],
+      classification: input.label.classification,
+    });
     return artifact;
   }
 
@@ -129,6 +146,11 @@ export class ArtifactStore {
   get(tenantId: string, id: string): Artifact | undefined {
     const artifact = this.artifacts.get(this.key(tenantId, id));
     return artifact?.tenantId === tenantId ? artifact : undefined;
+  }
+
+  /** Every ancestor of this artifact, nearest first (ADR-043). */
+  lineageOf(tenantId: string, id: string): readonly ProvenanceNode[] {
+    return this.provenance?.lineage(tenantId, id) ?? [];
   }
 
   list(tenantId: string): readonly Artifact[] {

@@ -708,7 +708,7 @@ Not MVP. Listed so the architecture is never painted into a corner.
 | Customer-controlled inference | data never leaves the customer boundary | model adapters, local models | E/HA |
 | Multi-domain security architecture | formally distinct sensitivity domains | classification, DLP | HA |
 | Cross-domain transfer controls | explicit, reviewed, logged downgrade/upgrades | multi-domain | HA/R |
-| Formalized security invariants | machine-checked model of the PDP | stable semantics | HA/R |
+| Formalized security invariants | machine-checked model of the PDP | stable semantics | HA/R - **[DONE]** ADR-042 (bounded, 375 states) |
 | Continuous adversarial testing | standing red team, not a one-off | harness | HA |
 | Sophisticated exfiltration resistance | volume, timing, and semantic controls | DLP, egress proxy | HA/R |
 | Advanced provenance | content-level lineage for every derived artifact | taint tracking | HA |

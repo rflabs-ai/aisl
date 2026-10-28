@@ -3126,3 +3126,52 @@ first magic; the mismatch check is only as good as the extension vocabulary.
 scanner); polyglot files; a released artifact of the right kind carrying hostile
 *meaning* (a PDF with an exploit is still a PDF); and quarantined artifacts still
 occupy storage.
+
+---
+
+## ADR-042: Machine-checked PDP invariants (Stage 3 row: formalized security invariants)
+
+**Context:** the thirteen invariants in `security-tests/invariants.test.ts` are
+examples - each names a scenario and asserts an outcome. They catch what someone
+thought to write, and they say nothing about the states nobody wrote. The
+Stage-3 row asks for a "machine-checked model of the PDP" with "stable
+semantics" as its prerequisite; semantics have been stable since H3 (mutation
+lane, goldens), so the row is buildable.
+
+**Decision:**
+
+1. **State the properties as predicates over a state**, not as scenarios.
+   `src/invariants.ts` defines `InvariantState` (principal, resource, action,
+   capabilities held, clock, decision) and seven invariants:
+   no-authority-without-capability, cross-tenant-never-allowed,
+   expired-capability-never-authorizes, classification-ceiling-respected,
+   foreign-capability-never-authorizes, empty-capability-set-denies,
+   deny-carries-no-authority.
+2. **Enumerate a bounded state space and check all of it.** The test drives the
+   real `AuthorizationService` across 5 capability specs x 3 principals x 5
+   resources x 5 actions (375 states) and asserts zero violations. Nothing is
+   mocked: the model runs the same code the product runs.
+3. **Prove the model has teeth.** A forged `allow` with no capabilities must
+   fire at least two invariants; a vacuous checker would report a clean run and
+   mean nothing.
+4. **Say what it is not.** This is bounded model checking, not a proof: it is
+   exhaustive over 375 hand-chosen coordinates and blind to any state outside
+   them. "Machine-checked" here means "a machine checks every enumerated state",
+   not "the property is proven for all inputs".
+
+**Security implications:** an engine change that breaks a property now fails on
+a class of states rather than on the one example someone remembered to update.
+The enumeration is deliberately small enough to read.
+
+**Tradeoffs:** the state space is chosen by hand, so its coverage is an opinion.
+Expired capabilities cannot be enumerated because issuance refuses a past
+expiry - that property is exercised by a constructed state instead, which is
+weaker (it proves the predicate works, not that the service upholds it).
+
+**Residual risk (named):** enumeration bias; no counterexample minimisation; the
+invariants are necessary conditions, not a specification (they cannot say the
+policy granted the *intended* thing).
+
+**Future migration path:** a real model checker (TLA+/Alloy) over the same seven
+properties would remove the enumeration bias; that needs a specification of the
+PDP in a formal language, which is a research project rather than a milestone.

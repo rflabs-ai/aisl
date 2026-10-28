@@ -414,7 +414,7 @@ root, and the probe's marker-scope limitation. 22 probe cases (20 live, 2
 Postgres-gated) + 1 evidence-seal extension; gate 676 tests / 655 pass / 0
 fail / 21 skip.
 
-### H9 — Secure artifact handling
+### H9 — Secure artifact handling **[DONE]** (ADR-041)
 
 - **Attack surface:** files produced by agents, uploads, model artifacts.
 - **Failure modes:** executing untrusted artifacts; storing malware; serving
@@ -424,6 +424,14 @@ fail / 21 skip.
   scanning and quarantine workflow; artifact provenance assertions.
 - **Residual risk:** zero-day malware; polyglot files.
 - **Class:** P/E.
+
+**Closed (ADR-041, 2026-10-27):** `src/artifacts.ts` - content is sniffed
+from magic bytes and compared to what the name claims; executable content, a
+mismatch, a payload above the store ceiling, or a canary hit all quarantine
+the artifact (kept as evidence, never released). Canary/ceiling checks reuse
+H7's `inspectEgress` - an artifact is egress to disk. Tenant binding is
+structural. 8 tests. Tool declarations moved to `tools/manifests/*.json` with
+strict binding (ADR-040).
 
 ### H10 — Signed builds and supply-chain security **[DONE]** (ADR-024)
 

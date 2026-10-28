@@ -3062,3 +3062,67 @@ positives and false negatives.
 **Future migration path:** once tools run out of process (H6's transport half,
 behind the container work), the same declaration becomes a wire schema and the
 `taint` field becomes a required message field; the quota moves to the sandbox.
+
+---
+
+## ADR-040: Tool declarations live in data (amends ADR-039)
+
+**Context:** ADR-039 put `ToolDeclaration` inline in each `Tool` object. That
+made the description, the action list, and the param schema reviewable only by
+reading source next to the implementation — while every other authoritative
+surface in this repo is data (policy bundles, goldens, the attack corpus, the
+tool manifest's own siblings).
+
+**Decision:** declarations live in `tools/manifests/*.json`, loaded and
+validated by `src/tool-manifest.ts` (same `validateDeclaration`). The binding is
+**strict**: `manifestFor(manifest, name)` throws rather than returning
+undefined, so a tool with no entry cannot register. That is the trap this
+design creates — two sources of truth for the same fact — and strict binding is
+the guard: a forgotten manifest is an error, not a silent downgrade to
+"provenance unknown". Manifest-level checks (duplicate names, injection-carrying
+descriptions) run in `parseManifest`, so a bad manifest fails before any world
+is built.
+
+**Tradeoffs:** a manifest and an implementation can still disagree about what
+the tool *does* (ADR-039's residual, unchanged); the file adds one hop between
+reading a declaration and reading its code.
+
+**Residual risk:** the manifest is trusted as written; nothing cross-checks it
+against behaviour.
+
+---
+
+## ADR-041: Artifact admission - sniff, compare, quarantine, keep (H9)
+
+**Context:** nothing handled artifacts. An agent could produce bytes, an upload
+could arrive, and there was no admission point that asked what the bytes are.
+H9's failure modes are all admission-time: executing untrusted artifacts,
+storing malware, serving attacker-controlled content, and artifacts as an
+exfiltration channel.
+
+**Decision:**
+
+1. **Content is sniffed, never trusted from the name.** `sniff` reads magic
+   bytes (PNG, PDF, zip, ELF, PE) and falls back to JSON-vs-text by parsing.
+   `kindFromName` reads the extension. Both are recorded on the artifact.
+2. **Four refusals at admission, all producing a quarantine, never an
+   exception:** executable bytes whatever the extension, a declared/sniffed
+   mismatch, a payload above the store ceiling, and a canary hit. The last two
+   reuse H7's `inspectEgress` — an artifact is egress to disk.
+3. **Quarantine keeps the bytes.** They are evidence; deleting them destroys the
+   only record of what arrived. `released()` is what may be handed out.
+4. **Tenant binding is structural** (H8 pattern): the key is
+   `tenantId\0id`, and `get` returns undefined for a foreign tenant, so an id
+   collision across tenants cannot leak.
+
+**Security implications:** closes the "artifact as exfiltration channel" path by
+reusing the egress mediator rather than inventing a second scanner, and makes
+executable content non-releasable regardless of naming.
+
+**Tradeoffs:** magic-byte sniffing is shallow — a polyglot file passes as its
+first magic; the mismatch check is only as good as the extension vocabulary.
+
+**Residual risk (named):** zero-day malware (no AV, by design — we do not ship a
+scanner); polyglot files; a released artifact of the right kind carrying hostile
+*meaning* (a PDF with an exploit is still a PDF); and quarantined artifacts still
+occupy storage.

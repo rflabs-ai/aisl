@@ -16,6 +16,9 @@ import { AuthorizationService, authorizationRoot } from './pdp.ts';
 import { ResourceRegistry, defineResource, ingestDocument } from './registry.ts';
 import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from './runtime.ts';
 import { taintFor } from './taint.ts';
+import { loadToolManifest, manifestFor } from './tool-manifest.ts';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 import { type IdPHealth } from './identity.ts';
@@ -228,6 +231,8 @@ export interface WorldOptions {
   readonly bootstrap?: boolean;
 }
 
+const WORLD_TOOLS = loadToolManifest(join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'manifests', 'world-tools.json'));
+
 export function buildWorld(options: WorldOptions = {}): World {
   return assembleWorld(makeEventLog(options), options);
 }
@@ -278,22 +283,22 @@ function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
 
   const readTool: Tool = {
     name: 'read',
-    declaration: { name: 'read', description: 'Read the resource this action names.', actions: ['read'] },
+    declaration: manifestFor(WORLD_TOOLS, 'read'),
     invoke: (ctx) => ({ output: ctx.content ?? '', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const writeTool: Tool = {
     name: 'write',
-    declaration: { name: 'write', description: 'Write the resource this action names.', actions: ['write'] },
+    declaration: manifestFor(WORLD_TOOLS, 'write'),
     invoke: (ctx) => ({ output: `wrote ${ctx.resourceId}`, changed: true, taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const deleteTool: Tool = {
     name: 'delete',
-    declaration: { name: 'delete', description: 'Delete the resource this action names.', actions: ['delete'] },
+    declaration: manifestFor(WORLD_TOOLS, 'delete'),
     invoke: (ctx) => ({ output: `deleted ${ctx.resourceId}`, changed: true, taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const exportTool: Tool = {
     name: 'export',
-    declaration: { name: 'export', description: 'Export the resource this action names.', actions: ['export'] },
+    declaration: manifestFor(WORLD_TOOLS, 'export'),
     invoke: (ctx) => ({ output: ctx.content ?? '', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   tools.register(readTool);

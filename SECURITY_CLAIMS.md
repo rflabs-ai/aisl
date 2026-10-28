@@ -2408,3 +2408,35 @@ the tool proven never invoked, undeclared output at the ceiling, and the
 process (ADR-003 containment residual); a declaration that lies about what the
 tool does; description scanning inherits the detector's false positives and
 negatives.
+
+---
+
+## Claim 46 - An artifact is snuffed, compared to its name, and quarantined rather than served (H9)
+
+**Claim:** Every artifact is admitted through one point that sniffs its content
+from magic bytes, compares that to what the name claims, and quarantines —
+without throwing — when the bytes are executable, when content and name
+disagree, when the payload exceeds the store ceiling, or when it carries a
+canary. Quarantined artifacts are retained as evidence and are never returned by
+`released()`. Artifacts are tenant-bound: a foreign tenant id reads as missing,
+and the same id in two tenants does not collide.
+
+**Mechanism:** `src/artifacts.ts` (`sniff`, `kindFromName`, `ArtifactStore.admit`
+/`get`/`list`/`released`, key `tenantId\0id`). Ceiling and canary checks reuse
+`src/dlp.ts` `inspectEgress` — an artifact is egress to disk, so it goes through
+the same mediator as a network payload.
+
+**Threat model:** TM-003 (tenant isolation) and TM-002 (data injection) — an
+artifact as both a smuggling container and an exfiltration channel.
+
+**Assumptions:** the store ceiling is the operator's intended policy; the canary
+list is maintained.
+
+**Evidence:** `tests/h9-artifacts.test.ts` (8) — an ELF named `.txt` quarantined,
+a PNG named `.png` containing prose quarantined, an honest artifact released
+with digest and provenance, a canary body quarantined with the record proving
+the value is not echoed, and both tenant-bound cases.
+
+**Residual risk:** zero-day malware (no scanner is shipped, by design);
+polyglot files pass as their first magic; a released artifact of the right kind
+can still carry hostile meaning; quarantined bytes consume storage.

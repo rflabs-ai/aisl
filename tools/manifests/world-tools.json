@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "read",
+      "description": "Read the resource this action names and return its content.",
+      "actions": ["read"]
+    },
+    {
+      "name": "write",
+      "description": "Write the resource this action names.",
+      "actions": ["write"]
+    },
+    {
+      "name": "delete",
+      "description": "Delete the resource this action names.",
+      "actions": ["delete"]
+    },
+    {
+      "name": "export",
+      "description": "Export the resource this action names.",
+      "actions": ["export"]
+    }
+  ]
+}

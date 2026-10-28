@@ -24,6 +24,32 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 45 - 2026-10-27 - opencode/h9-artifacts + tool manifests
+
+**Did:**
+- Tool declarations moved to data (ADR-040): `tools/manifests/world-tools.json`
+  + `src/tool-manifest.ts`, with **strict binding** - `manifestFor` throws for a
+  tool with no entry rather than letting it register undeclared, so a forgotten
+  manifest is an error instead of a silent "provenance unknown".
+- H9 (ADR-041): `src/artifacts.ts` - `sniff` from magic bytes, `kindFromName`,
+  and `ArtifactStore.admit` quarantining executable content, content/name
+  mismatch, above-ceiling payloads, and canary hits. Canary/ceiling checks reuse
+  H7's `inspectEgress`, so an artifact is treated as egress to disk rather than
+  getting a second scanner. Quarantine keeps the bytes (evidence); `released()`
+  is what may be served; tenant binding is structural (`tenantId\0id`).
+- **Tests:** manifest suite appended to `tests/h6-tool-protocol.test.ts` (15
+  total there), `tests/h9-artifacts.test.ts` (8).
+- **Gate:** typecheck clean; 818 tests / 797 pass / 0 fail / 21 skipped.
+
+**Left:**
+- Zero-day malware and polyglot files (no scanner shipped, by design).
+- A manifest can still disagree with what its implementation does.
+- Stage 2 is now complete except operator obligations (external red team,
+  nightly schedule registration).
+
+**Next session should:**
+- Stage 3 selection (microVM isolation, HSM keys, attestation), or finish the
+  operator obligations: `pwsh -File scripts/schedule-adversarial.ps1`.
 ### SESSION 44 - 2026-10-27 - opencode/h6-tool-protocol
 
 **Did:**

@@ -97,7 +97,10 @@ describe('H4: labels survive the session, not just the step', () => {
     const world = testWorld({ policies: [writeRule, readRule] });
     const phiId = world.resources.phi!;
     const targetId = world.resources.internalDoc!;
-    world.tools.register({ name: 'read', invoke: () => ({ output: 'patient_id,diagnosis\n0001,E11.9' }) });
+    world.tools.register({
+      name: 'read',
+      invoke: (ctx) => ({ output: 'patient_id,diagnosis\n0001,E11.9', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
+    });
 
     const phiCap = world.authorization.issue(world.root, {
       subject: world.agent.id,
@@ -179,7 +182,10 @@ describe('H4: evidence records provenance, never content', () => {
   test('each step records a taint label with ids and no plaintext', () => {
     const world = testWorld({ policies: [writeRule, readRule] });
     const phiId = world.resources.phi!;
-    world.tools.register({ name: 'read', invoke: () => ({ output: 'PHI-CANARY-7f3a' }) });
+    world.tools.register({
+      name: 'read',
+      invoke: (ctx) => ({ output: 'PHI-CANARY-7f3a', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
+    });
     world.authorization.issue(world.root, {
       subject: world.agent.id,
       tenantId: 'acme',
@@ -203,7 +209,7 @@ describe('H4: evidence records provenance, never content', () => {
     assert.ok(taint, 'every execution event carries a taint label');
     assert.equal(taint.classification, 'phi');
     assert.deepEqual(taint.sources, [phiId]);
-    assert.equal(taint.untrusted, false, 'the target resource itself is not attacker-influenced');
+    assert.equal(taint.untrusted, true, 'tool output is attacker-influenceable by definition (H6)');
 
     // Structural: the label is metadata, and the canary must not be in it.
     assert.ok(!JSON.stringify(taint).includes('PHI-CANARY'));

@@ -328,7 +328,7 @@ as `tool-quota` failures rather than hiding in a log. Sandbox escape is
 ADR-003's residual and stays named - `LocalSandbox` has no isolation by design.
 5 tests (`tests/h5-malicious-tools.test.ts`).
 
-### H6 — Secure agent-to-tool protocols
+### H6 — Secure agent-to-tool protocols **[DONE]** (ADR-039)
 
 - **Attack surface:** the transport and schema between session and tool.
 - **Failure modes:** injection via tool schema descriptions; parameter smuggling;
@@ -338,6 +338,14 @@ ADR-003's residual and stays named - `LocalSandbox` has no isolation by design.
   process holds no credentials the capability does not imply.
 - **Residual risk:** tool implementations that ignore the protocol.
 - **Class:** P/E.
+
+**Closed (ADR-039, 2026-10-27):** `src/tool-protocol.ts` - a declaration is
+validated at registration (empty fields, unknown actions, duplicate params, and
+injection signals in the description are refused); params are closed (undeclared
+keys refused before invocation, types checked, required present); and provenance
+is **mandatory** - an output with no declared taint is `UNKNOWN_TAINT`, which
+retires the H4 `ponytail:` marker. The `ExecutionContext` key set is asserted
+by test to be action-scoped only (invariant 4 made structural). 11 tests.
 
 ### H7 — Data-flow enforcement and egress DLP **[DONE]** (ADR-037)
 

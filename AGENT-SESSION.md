@@ -24,6 +24,40 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 44 - 2026-10-27 - opencode/h6-tool-protocol
+
+**Did:**
+- H6 (agent-to-tool protocols, ADR-039) on branch `feat/h6-tool-protocol`,
+  plus both deferred debts it was carrying.
+- **`src/tool-protocol.ts`:** `ToolDeclaration` validated at registration -
+  empty fields, actions outside the vocabulary, duplicate params, and
+  **injection signals in the description** are refused (the document detector
+  reused: a schema description has no legitimate reason to trip it).
+  `validateParams` closes the param set: undeclared keys refused, types
+  checked, required present.
+- **Debt 1 retired (H4):** provenance is now mandatory. An output with no
+  declared `taint` is `UNKNOWN_TAINT` (ceiling, untrusted) - the
+  `ponytail:` marker in `src/runtime.ts` is deleted and its upgrade path
+  executed. The four scenario tools declare; the h4 test that asserted
+  `untrusted: false` now asserts `true`, because tool output is
+  attacker-influenceable by definition.
+- **Debt 2 (H5 quota) carried forward as-is:** the quota still lives in the
+  session, not the declaration. It becomes a wire field when tools move out of
+  process; recorded rather than pretended.
+- **Tests:** `tests/h6-tool-protocol.test.ts` (11), including the structural
+  test that `ExecutionContext` exposes only action-scoped keys - invariant 4
+  made structural.
+- **Docs:** ROADMAP (H6 [DONE]), SECURITY_CLAIMS Claim 45, CURRENT_STATE,
+  this entry.
+- **Gate:** typecheck clean; 806 tests / 785 pass / 0 fail / 21 skipped.
+
+**Left:**
+- A tool that ignores the protocol still holds the process (ADR-003 residual).
+- A declaration that lies about what the tool does is believed.
+- H5's quota is still a session convention, not a protocol field.
+
+**Next session should:**
+- H9 (secure artifact handling) - the last open Stage 2 item.
 ### SESSION 43 - 2026-10-27 - opencode/h5-malicious-tools
 
 **Did:**

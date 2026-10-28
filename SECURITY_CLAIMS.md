@@ -2374,3 +2374,37 @@ isolation, and containment is Stage 3 (microVM). Duration and memory are
 preempted; by the time a slow tool is measured, the damage is done. A tool that
 lies about what it did is caught only by the verification checks the operator
 configured. Cumulative session budgets are not built.
+
+---
+
+## Claim 45 - The tool schema is validated, params are closed, and tool output cannot be unlabelled (H6)
+
+**Claim:** A tool declaration is validated when it is registered: empty fields,
+actions outside the vocabulary, duplicate params, and injection signals in the
+description are refused, so a schema cannot carry instructions into a prompt.
+When a declaration lists params, exactly those keys are accepted with their
+declared types and required ones present — an undeclared key is refused before
+the tool runs. An output with no declared taint is treated as `UNKNOWN_TAINT`
+(untrusted, ranked at the ceiling), so no tool result can be the one unlabelled
+value in the data flow.
+
+**Mechanism:** `src/tool-protocol.ts` (`validateDeclaration`, `assertDeclaration`,
+`schemaInjectionSignals`, `validateParams`, `ToolProtocolError`).
+`src/runtime.ts` (`Tool.declaration`, registry-time validation, param check in
+`attempt`, `UNKNOWN_TAINT` for undeclared output).
+
+**Threat model:** TM-001 (compromised model/tool) — a schema description that
+carries instructions, params that smuggle scope, output that hides its origin.
+
+**Assumptions:** the operator writes declarations honestly; a description
+scanner (the document injection detector) is a filter, not an oracle.
+
+**Evidence:** `tests/h6-tool-protocol.test.ts` (11) — injection-in-description
+refusal, registry-time refusal, undeclared/typed/required param handling with
+the tool proven never invoked, undeclared output at the ceiling, and the
+`ExecutionContext` key set asserted to be action-scoped only.
+
+**Residual risk:** a tool implementation that ignores the protocol holds the
+process (ADR-003 containment residual); a declaration that lies about what the
+tool does; description scanning inherits the detector's false positives and
+negatives.

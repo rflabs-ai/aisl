@@ -37,6 +37,7 @@ import {
   taintMetadata,
   type TaintLabel,
 } from './taint.ts';
+import { assertDeclaration, validateParams, ToolProtocolError, type ToolDeclaration } from './tool-protocol.ts';
 
 export interface ExecutionContext {
   readonly sessionId: string;
@@ -91,13 +92,22 @@ export interface ToolResult {
 
 export interface Tool {
   readonly name: string;
+  /** H6 (ADR-039): what the tool is for, which actions it serves, its params. */
+  readonly declaration?: ToolDeclaration;
   invoke(ctx: ExecutionContext): ToolResult;
 }
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
 
+  /** A declaration is validated on registration — a bad schema never reaches a call. */
   register(tool: Tool): void {
+    if (tool.declaration !== undefined) {
+      assertDeclaration(tool.declaration);
+      if (tool.declaration.name !== tool.name) {
+        throw new ToolProtocolError(tool.name, [`declaration names '${tool.declaration.name}'`]);
+      }
+    }
     this.tools.set(tool.name, tool);
   }
 
@@ -287,6 +297,17 @@ export class AgentSession {
       return { request, decision, executed: false, error, verifications: [], taint: inputTaint };
     }
 
+    // H6: a declared tool accepts exactly its declared params. Undeclared keys
+    // are refused, not ignored — ignoring leaves the tool free to read them.
+    if (tool.declaration !== undefined) {
+      const check = validateParams(tool.declaration, request.params);
+      if (!check.ok) {
+        const error = check.error ?? 'params rejected by the tool protocol';
+        this.record('error', request, decision, error, {}, undefined, undefined, inputTaint);
+        return { request, decision, executed: false, error, verifications: [], taint: inputTaint };
+      }
+    }
+
     const ctx: ExecutionContext = {
       sessionId: this.sessionId,
       capabilityId: decision.capabilityId,
@@ -325,14 +346,14 @@ export class AgentSession {
       quotaFindings.push(quotaVerification(request, outputBytes, `duration ${durationMs}ms > ${quota.maxDurationMs}ms`, at));
     }
 
-    // A declared label joins the inherited one; it can only raise. No
-    // declaration means "the resource I was given" - the common case.
-    // ponytail: an undeclared output is trusted to be the target resource's
-    // data, so a tool that fetched something else without declaring under-states
-    // provenance. Ceiling: silent under-attribution, never over-grant (the
-    // label still cannot lower). Upgrade path: make `taint` mandatory at H6's
-    // tool-protocol boundary, where the runtime can refuse an undeclared result.
-    const outputTaint = combine(inputTaint, toolResult.taint ?? targetTaint);
+    // H6 retires the H4 marker: provenance is mandatory. An output with no
+    // declared taint is UNKNOWN_TAINT - untrusted, ranked at the ceiling - so a
+    // tool cannot under-state where its data came from by staying silent. A
+    // tool that returns the resource it was given declares exactly that.
+    const outputTaint =
+      output !== undefined
+        ? combine(inputTaint, toolResult.taint ?? UNKNOWN_TAINT)
+        : combine(inputTaint, targetTaint);
     const stepTaint = combine(outputTaint, targetTaint);
     // Carried across steps: what this session has seen stays seen, even after
     // the capability that justified seeing it has been consumed or revoked.

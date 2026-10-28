@@ -15,6 +15,7 @@ import { BASELINE_POLICY, createPolicyEngine, type Approval, type PolicyEngine, 
 import { AuthorizationService, authorizationRoot } from './pdp.ts';
 import { ResourceRegistry, defineResource, ingestDocument } from './registry.ts';
 import { AgentSession, LocalSandbox, ToolRegistry, type Tool } from './runtime.ts';
+import { taintFor } from './taint.ts';
 import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
 import { type IdPHealth } from './identity.ts';
@@ -277,19 +278,23 @@ function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
 
   const readTool: Tool = {
     name: 'read',
-    invoke: (ctx) => ({ output: ctx.content ?? '' }),
+    declaration: { name: 'read', description: 'Read the resource this action names.', actions: ['read'] },
+    invoke: (ctx) => ({ output: ctx.content ?? '', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const writeTool: Tool = {
     name: 'write',
-    invoke: (ctx) => ({ output: `wrote ${ctx.resourceId}`, changed: true }),
+    declaration: { name: 'write', description: 'Write the resource this action names.', actions: ['write'] },
+    invoke: (ctx) => ({ output: `wrote ${ctx.resourceId}`, changed: true, taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const deleteTool: Tool = {
     name: 'delete',
-    invoke: (ctx) => ({ output: `deleted ${ctx.resourceId}`, changed: true }),
+    declaration: { name: 'delete', description: 'Delete the resource this action names.', actions: ['delete'] },
+    invoke: (ctx) => ({ output: `deleted ${ctx.resourceId}`, changed: true, taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   const exportTool: Tool = {
     name: 'export',
-    invoke: (ctx) => ({ output: ctx.content ?? '' }),
+    declaration: { name: 'export', description: 'Export the resource this action names.', actions: ['export'] },
+    invoke: (ctx) => ({ output: ctx.content ?? '', taint: taintFor(ctx.resourceId, ctx.resourceClassification) }),
   };
   tools.register(readTool);
   tools.register(writeTool);

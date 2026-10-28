@@ -3011,3 +3011,54 @@ directly is out of scope until containment is real.
 memory, and output limits at the kernel/cgroup boundary, at which point the
 `tool-quota` verification becomes a backstop rather than the only signal. H6
 makes the declaration boundary explicit once tools run out of process.
+
+---
+
+## ADR-039: Agent-to-tool protocol - the schema is data, and provenance is mandatory (H6)
+
+**Context:** tools were `{ name, invoke }`. Three things crossed the boundary
+unvalidated. The **description** is prompt text the model reads, so it is an
+injection surface with no legitimate reason to contain instructions. **Params**
+arrived from a possibly-compromised model (H5 refuses authority keys, but any
+other undeclared key was ignored, leaving a tool free to read it). **Output**
+carried no provenance, and H4 explicitly deferred that: a `ponytail:` marker
+said an undeclared tool result is trusted to be the target's data until this
+boundary existed.
+
+**Decision:**
+
+1. **A declaration is validated at registration.** `src/tool-protocol.ts`
+   defines `ToolDeclaration { name, description, actions, params?, maxOutputBytes? }`.
+   `ToolRegistry.register` refuses a declaration with an empty field, an action
+   outside the vocabulary, a duplicate param, or **injection signals in the
+   description** (the same detector that flags hostile documents - a schema
+   description has no legitimate reason to trip it).
+2. **Params are closed.** When a declaration lists params, exactly those keys
+   are accepted, types are checked, and required ones must be present. Undeclared
+   keys are refused before invocation, not ignored.
+3. **Provenance is mandatory - the H4 debt is retired.** An output with no
+   declared `taint` is `UNKNOWN_TAINT` (untrusted, ranked at the ceiling). Silence
+   can no longer under-state where data came from. Every tool in the scenario
+   world now declares, which is the pattern operators copy.
+4. **No ambient authority.** The `ExecutionContext` key set is asserted by test
+   to be exactly the action-scoped fields - no `authorization`, no `principal`,
+   no credential, no capability handle. This is invariant 4 made structural.
+
+**Security implications:** the schema attacks are now refused rather than
+trusted, and tool output can no longer be the one unlabelled value in the data
+flow. Costs are one validation per registration and one param check per call.
+
+**Tradeoffs:** a legacy tool with no declaration still works but its output is
+labelled at the ceiling, which will look noisy - deliberately so: declaring is
+one line and it is the reviewable act. Descriptions with marketing language that
+resembles injection guidance are refused too; rewrite the description.
+
+**Residual risk (named):** a tool implementation that ignores the protocol
+entirely (it holds the process; ADR-003's containment residual); a declaration
+that lies about what the tool does - the protocol constrains the call, not the
+code; and description scanning inherits `detectInjectionSignals`' false
+positives and false negatives.
+
+**Future migration path:** once tools run out of process (H6's transport half,
+behind the container work), the same declaration becomes a wire schema and the
+`taint` field becomes a required message field; the quota moves to the sandbox.

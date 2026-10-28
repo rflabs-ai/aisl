@@ -100,6 +100,7 @@ src/
   mutation.ts         policy mutation lane against the golden set (H14, ADR-035)
   taint.ts            one-directional data-flow labels carried across session steps (H4, ADR-036)
   dlp.ts              content-level egress DLP: canaries, encodings, byte cap (H7, ADR-037)
+  tool-protocol.ts    tool declarations, schema/param validation, mandatory provenance (H6, ADR-039)
   scenario.ts         assembled MVP world (shared by demo, tests, benchmark)
   cli.ts              demo | attack | benchmark | build | update | incident | evidence
   testing.ts          test wiring only

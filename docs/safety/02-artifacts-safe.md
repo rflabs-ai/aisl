@@ -1,11 +1,11 @@
 # Safety ticket 02 — artifacts safe
 
-**Status:** open (blocks publishing)
+**Status:** open — one item left (the packing script)
 **Evidence:** [`../SAFETY-2026-11-01.md`](../SAFETY-2026-11-01.md), gate 2
 
 - [x] No tracked file over 200 KB; whole tree is 3.4 MB across 322 files
 - [x] No binary payloads, models, databases or logs in the tree
-- [ ] **Exclude `.scratch/` from any published artifact** — 114 files, 776 KB, containing local absolute paths (`C:\Users\<user>\...`) from session evidence
+- [x] **Exclude `.scratch/` from the published tree** — untracked and added to `.gitignore` (2026-11-01); the files stay on disk for local evidence use
 - [ ] **Build the handoff with a script, never by hand**, and have it refuse on a token-shaped string or a `C:\Users\` path
 - [ ] The archive prints its own entry count and forbidden-path check, so the recipient can verify the claim
 

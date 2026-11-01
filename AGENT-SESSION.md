@@ -24,6 +24,40 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 46 - 2026-11-01 - opencode/branding, safety gates, pilot, spend cap
+
+**Did:**
+- **Brand settled** (`BRAND.md`): company **Kept**, domain `kepthq.dev`, GitHub org
+  **kepthqdev**, CLI **`aisl`** said as "aisle", category **"AI bailment"**, company
+  line "Nothing leaves without a record.", lockup "Held in. Accounted for.",
+  positioning "The fence, not the guardrail." The rejected names and why are
+  recorded so they are not relitigated.
+- **Safety milestones** (`docs/SAFETY-2026-11-01.md`, four tickets in
+  `docs/safety/`): gate 1 clean, gate 3 clean across 135 commits, gate 2 closed
+  by untracking `.scratch/`, gate 4 down to two deployment items.
+- **Publish readiness**: `LICENSE` (Apache-2.0), `SECURITY.md` with an explicit
+  out-of-scope list, README rewritten to open with what this is *and is not*.
+- **`docs/PILOT.md`**: six-week design-partner pilot, $7,500 / $4,000 for the
+  first two, evidence bundle as the deliverable.
+- **Spend cap** (`src/model-http.ts`): `ModelBudget`, refused before the fetch,
+  `denyReason: budget-exhausted`, 7 tests. Ticket 04 closed for spend.
+- **GitHub**: org `kepthqdev` exists. Repo created as `kepthqdev/aisl` but the
+  local push failed (`--remote origin` collides with the local bare repo);
+  nothing has been pushed yet.
+
+**Left (and deliberately parked):**
+- Domain not purchased. Not required for any next step.
+- `aisl` not published to npm — this is the blocker for wiring raven.
+- Raven (M18 Phase 1) untouched: `bin/sync.sh` still does an unverified
+  `git fetch && git checkout -B main origin/main`.
+- Ticket 04 open items: fail-closed on missing keys in production, TLS at the edge.
+- Zero design-partner conversations so far.
+
+**Next session should:**
+1. `git remote add gh https://github.com/kepthqdev/aisl.git && git push -u gh main`
+2. Publish `aisl` to npm (also unblocks the raven verifier).
+3. Send the pilot page to twenty people. That number is the whole game.
+
 ### SESSION 45 - 2026-10-27 - opencode/h9-artifacts + tool manifests
 
 **Did:**

@@ -75,6 +75,10 @@ export interface HttpModelConfig {
   readonly canaries?: readonly Canary[];
   /** Byte cap for one outbound payload; above it the egress is refused. */
   readonly dlpMaxBytes?: number;
+  /** Daily ceiling on provider spend. Absent = no ceiling. */
+  readonly budget?: ModelBudget;
+  /** Clock override for the budget window; defaults to `Date.now`. */
+  readonly now?: () => number;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
   readonly maxRetries?: number;
@@ -87,7 +91,31 @@ const SYSTEM_INSTRUCTION =
   + '{"text":string,"requests":[{"action":string,"resourceId":string,"justification"?:string}]}. '
   + 'No prose, no markdown fences, no extra fields.';
 
-type Egress = 'allow' | 'refused-above-ceiling' | 'refused-unclassifiable' | 'refused-dlp' | 'pdp-denied' | 'provider-error' | 'parse-error';
+type Egress =
+  | 'allow'
+  | 'refused-above-ceiling'
+  | 'refused-unclassifiable'
+  | 'refused-dlp'
+  | 'refused-budget'
+  | 'pdp-denied'
+  | 'provider-error'
+  | 'parse-error';
+
+/**
+ * A daily ceiling on provider spend. The point is not cost control for a careful
+ * operator — it is that a stranger running this repo cannot hand a provider an
+ * open-ended loop. Exhaustion refuses *before* the fetch, so the refusal costs
+ * nothing.
+ *
+ * ponytail: in-memory counter, reset by process restart. Ceiling: a restart
+ * refills the budget, so this stops the runaway case (a loop, a retry storm),
+ * not a determined spender. Upgrade path: persist the counter next to the
+ * evidence store and reconcile on boot.
+ */
+export interface ModelBudget {
+  readonly maxCallsPerDay: number;
+  readonly maxTokensPerDay: number;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -131,6 +159,51 @@ export class HttpModelAdapter implements ModelPort {
     this.cfg = cfg;
     this.id = cfg.id;
     this.doFetch = cfg.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  }
+
+  /** Today's spend, for operators and tests. */
+  spendSnapshot(): { day: string; calls: number; tokens: number } {
+    this.rollSpend();
+    return { ...this.spend };
+  }
+
+  private spend = { day: '', calls: 0, tokens: 0 };
+
+  private rollSpend(): void {
+    const at = this.cfg.now?.() ?? Date.now();
+    const day = new Date(at).toISOString().slice(0, 10);
+    if (day !== this.spend.day) this.spend = { day, calls: 0, tokens: 0 };
+  }
+
+  /** Refuse before the fetch: an exhausted budget must not bill. */
+  private assertBudget(derived: Classification, startedAt: number): void {
+    const budget = this.cfg.budget;
+    if (!budget) return;
+    this.rollSpend();
+    if (this.spend.calls >= budget.maxCallsPerDay || this.spend.tokens >= budget.maxTokensPerDay) {
+      const detail = `${this.spend.calls}/${budget.maxCallsPerDay} calls, ${this.spend.tokens}/${budget.maxTokensPerDay} tokens`;
+      this.record({
+        startedAt,
+        decision: 'deny',
+        denyReason: 'budget-exhausted',
+        egress: 'refused-budget',
+        classification: derived,
+        error: `daily budget exhausted (${detail})`,
+      });
+      throw new ModelEgressDeniedError(`model egress refused: daily budget exhausted (${detail})`);
+    }
+  }
+
+  private chargeCall(): void {
+    if (!this.cfg.budget) return;
+    this.rollSpend();
+    this.spend.calls += 1;
+  }
+
+  private chargeTokens(tokens: number): void {
+    if (!this.cfg.budget) return;
+    this.rollSpend();
+    this.spend.tokens += Math.max(0, Math.ceil(tokens));
   }
 
   async complete(input: ModelInput): Promise<ModelOutput> {
@@ -201,6 +274,11 @@ export class HttpModelAdapter implements ModelPort {
       throw new ModelEgressDeniedError(`model egress refused: ${dlp.reason}`);
     }
 
+    // 2c. Spend ceiling (safety gate): refuse before the fetch, so an exhausted
+    // budget costs nothing. A stranger can run this repo; they should not be
+    // able to hand a provider an open-ended loop.
+    this.assertBudget(derived, startedAt);
+
     // 3. PDP consult: no capability for the provider resource = no egress.
     const decision = this.cfg.authorization.authorize({
       principal: this.cfg.principal,
@@ -219,7 +297,9 @@ export class HttpModelAdapter implements ModelPort {
       throw new ModelEgressDeniedError(`model egress denied by policy: ${decision.reason}`);
     }
 
-    // 4. Send with bounded retry.
+    // 4. Send with bounded retry. The call is charged on attempt, not on
+    // success: a provider bills for work it did before failing.
+    this.chargeCall();
     const { res, attempts } = await this.send(input, derived, startedAt);
     if (res.status < 200 || res.status >= 300) {
       // Non-retryable HTTP failure: fail closed without reading the body.
@@ -274,7 +354,14 @@ export class HttpModelAdapter implements ModelPort {
       throw error;
     }
 
-    // 6. Success: event + telemetry, then return. No post-processing — the
+    // Charge the tokens the provider actually reported. When it reports none,
+    // charge a conservative estimate so silence cannot bypass the ceiling.
+    const reported = (usagePromptTokens ?? 0) + (usageCompletionTokens ?? 0);
+    this.chargeTokens(
+      reported > 0 ? reported : Math.ceil((outbound.length + output.text.length) / 4),
+    );
+
+    // 6. Success: event + telemetry, then return. No post-processing - the
     // session's guard owns output policy.
     this.record({
       startedAt,

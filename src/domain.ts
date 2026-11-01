@@ -204,6 +204,8 @@ export type DenyReason =
   | 'classification-ceiling'
   /** H7: content-level egress DLP refused the payload (canary, volume). */
   | 'dlp-refused'
+  /** Safety gate: the daily provider budget is spent; refuse before billing. */
+  | 'budget-exhausted'
   | 'policy-deny'
   | 'tenant-mismatch'
   | 'evaluation-error'

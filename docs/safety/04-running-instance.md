@@ -1,6 +1,6 @@
 # Safety ticket 04 — running instance safe
 
-**Status:** open
+**Status:** open — two items left
 **Evidence:** [`../SAFETY-2026-11-01.md`](../SAFETY-2026-11-01.md), gate 4
 **Blocked by:** gates 1 and 2 (both satisfied for local use; gate 2 open for publishing)
 
@@ -11,7 +11,7 @@
 - [x] No code execution from untrusted input: no issuance handle in `ExecutionContext`, authority keys refused in params
 - [x] Auditable: hash-chained signed log with external anchors; `npm run adversarial`
 - [x] One-command stop: `incident freeze`, `incident revoke-all`
-- [ ] **Provider spend cap** — per-day call and token ceilings. Timeouts and bounded retries exist; a budget does not. A stranger running this against a paid provider can generate a bill.
+- [x] **Provider spend cap** — `ModelBudget` on `HttpModelAdapter`: per-day call and token ceilings, refused **before** the fetch with `denyReason: budget-exhausted`, so an exhausted budget costs nothing. Provider-reported usage is charged; when the provider reports none, a conservative estimate is charged instead. In-memory counter (documented ceiling: a restart refills it).
 - [ ] **Fail closed on missing keys in production** — the process currently falls back to an ephemeral key. Correct for a demo; a deployment must refuse to start without durable keys rather than silently minting one that dies with the process.
 - [ ] **TLS at the edge** — loopback plus a reverse proxy is the documented shape; nothing in the repo terminates TLS.
 

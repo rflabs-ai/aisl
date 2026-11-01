@@ -1,6 +1,9 @@
-# AI Security Layer (ASL)
+# AISL — AI Security Layer
 
 A high-assurance execution environment for AI agents.
+
+The project is **AISL**; the artifact and CLI are `aisl`. Older documents
+(ADRs, the roadmap, the claims log) say "ASL" — same thing, historical name.
 
 The premise is one sentence:
 
@@ -10,6 +13,31 @@ ASL lets a capable model act on sensitive code, documents, and data while an
 infrastructure layer — not the model's good behavior — decides what it may
 actually do, executes it in a controlled environment, and records evidence of
 every decision.
+
+## What this is — and what it is not
+
+**This is** a single-process enforcement plane: capability-based authority,
+policy evaluation, a signed hash-chained audit log with external anchoring, taint
+tracking across a session, content-level egress DLP, artifact admission, and an
+adversarial harness that runs on a schedule. It is the reference implementation
+of the AISL idea; the specification is `DECISIONS.md` plus `SECURITY_CLAIMS.md`.
+
+**This is not** production-ready, and the gaps are named rather than implied:
+
+- **No containment.** `LocalSandbox` is in-process with no isolation. The
+  container backend is opt-in and unverified on your host. Real isolation is
+  Stage 3 (microVM) and is not built.
+- **Not distributed.** One process, one event store. Federation is a REST seam,
+  not a cluster.
+- **Keys are environment variables.** No HSM, no attestation. An attacker who
+  owns the process owns the keys.
+- **The adversarial evidence is self-authored.** The corpus, the goldens and the
+  mutation lane were written by the same author as the code. A green run proves
+  the enumerated attacks still behave as specified — not that the system is safe.
+- **Pre-1.0.** Only the tip of `main` is supported. No backports.
+
+If you need any of those guarantees today, AISL is not the right choice. If you
+want a defensible enforcement path you can read, test and audit, it is.
 
 ## The one boundary that matters
 
@@ -75,7 +103,7 @@ Optional environment:
 Convenience setup: `scripts/setup.ps1` (Windows) or `scripts/setup.sh`; pass
 `-WithPostgres` / `--with-postgres` to bootstrap a Postgres 16 container.
 
-## Running ASL
+## Running AISL
 
 ASL is a **library + proof suite**, not a running service. There is no
 start/daemon command today — the commands above are the whole surface. The M14
@@ -132,3 +160,13 @@ Two, both exact-pinned and admitted by ADR: `jose` (JWT/JWK verification,
 ADR-015) and `postgres` 3.4.9 (Postgres event backend, ADR-018). Everything else
 is a Node built-in. For a system whose trust story depends on what it does *not*
 include, that is a property worth buying.
+
+## License
+
+Apache-2.0 — see `LICENSE`. The patent grant is why it is not MIT.
+
+## Security
+
+Do not open a public issue for a vulnerability. See `SECURITY.md`: it lists what
+is in scope and, just as importantly, what is a stated limitation rather than a
+bug.

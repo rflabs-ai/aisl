@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AISL — design-partner pilot</title>
+<style>
+  :root{
+    --ink:#111418; --muted:#5b6470; --line:#e3e6ea; --bg:#fbfbfc; --accent:#0b5fff; --warn:#8a4b00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       -webkit-text-size-adjust:100%}
+  main{max-width:44rem;margin:0 auto;padding:2rem 1.25rem 5rem}
+  h1{font-size:1.6rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+  h2{font-size:1.05rem;margin:2.5rem 0 .75rem;letter-spacing:-.01em}
+  h2::before{content:"";display:block;height:1px;background:var(--line);margin-bottom:1.25rem}
+  p{margin:0 0 1rem}
+  .lede{font-size:1.05rem;color:var(--muted);margin-bottom:1.75rem}
+  strong{font-weight:650}
+  em{font-style:normal;background:#fff3cd;padding:0 .15em;border-radius:2px}
+  ul,ol{padding-left:1.15rem;margin:0 0 1rem}
+  li{margin:.35rem 0}
+  table{width:100%;border-collapse:collapse;margin:0 0 1rem;font-size:.94rem}
+  th,td{text-align:left;padding:.55rem .5rem;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+  .price{border:1px solid var(--line);background:#fff;border-radius:10px;padding:1rem 1.1rem;margin:0 0 1rem}
+  .price b{font-size:1.35rem;letter-spacing:-.02em}
+  .quiet{color:var(--muted);font-size:.9rem}
+  .tag{display:inline-block;font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;
+       color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:.15rem .55rem;margin-bottom:1rem}
+  footer{margin-top:3rem;padding-top:1.25rem;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+  @media (max-width:420px){
+    main{padding:1.5rem 1rem 4rem}
+    h1{font-size:1.35rem}
+    table,thead,tbody,th,td,tr{display:block}
+    thead{display:none}
+    tr{border-bottom:1px solid var(--line);padding:.4rem 0}
+    td{border:0;padding:.15rem 0}
+    td:first-child{font-weight:600}
+  }
+</style>
+</head>
+<body>
+<main>
+  <span class="tag">Design-partner pilot</span>
+  <h1>Six weeks. One agent workflow.<br>One question answered.</h1>
+  <p class="lede"><strong>Can you prove what your agents did?</strong></p>
+
+  <p>This is for organizations that have already put AI agents in front of data they care about — and have discovered that “the agent said it did X” is not an answer a security team, an auditor, or a regulator will accept.</p>
+
+  <h2>Who this is for</h2>
+  <p>You have agents (or are about to) touching documents, tickets, code, or customer records. You have a policy about what they may do. What you do not have is a mechanism that <strong>enforces</strong> that policy at the action, and a record that <strong>proves</strong> what happened — independent of the model’s own account of itself.</p>
+  <p class="quiet">Good fits: regulated engineering teams, security teams with an agent rollout stuck in review, platform teams who have been asked “how do you know?”.</p>
+
+  <h2>The problem, stated plainly</h2>
+  <p>Today’s agent security is guardrails: classifiers that read prompts and flag things. They are advisory. When they are wrong, nothing stops the action — and when they are right, they leave a log line, not evidence.</p>
+  <ol>
+    <li><strong>Authority leaks through the model.</strong> If the agent can be talked into requesting something, and the request path trusts the agent, the model is the authority. It should never be.</li>
+    <li><strong>Data leaves through allowed channels.</strong> The destination was permitted, the credentials were valid, and the bytes were the attack.</li>
+    <li><strong>The record is a narrative.</strong> Application logs say what the agent <em>claims</em>. They are not signed, not chained, and not anchored anywhere the attacker cannot rewrite.</li>
+  </ol>
+  <p>AISL is built on the opposite premise: <strong>the model is not the authority, the infrastructure is.</strong></p>
+
+  <h2>What the six weeks produce</h2>
+  <table>
+    <thead><tr><th>Week</th><th>Work</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Map one real workflow: what the agent reads, decides, writes, sends</td><td>Boundary diagram and the enforcement points</td></tr>
+      <tr><td>2–3</td><td>Deploy AISL in front of that workflow, in a sandboxed copy of your environment</td><td>An agent running under capability-scoped authority</td></tr>
+      <tr><td>4</td><td>Policy in your terms: who may do what, to which classification, with whose approval</td><td>A policy file you own and can read</td></tr>
+      <tr><td>5</td><td>Adversarial pass against <em>your</em> workflow, not the demo corpus</td><td>A findings list, each reproduced</td></tr>
+      <tr><td>6</td><td>Evidence review and handover</td><td>A signed, anchored audit bundle plus a runbook</td></tr>
+    </tbody>
+  </table>
+  <p><strong>The deliverable is not a demo.</strong> It is an evidence bundle you can hand to someone who was not in the room: every action, the authority that permitted it, and a hash chain that proves nothing was rewritten afterwards.</p>
+
+  <h2>What AISL enforces during the pilot</h2>
+  <ul>
+    <li><strong>Capability-based authority.</strong> Every action carries a signed capability naming the resource, action, classification ceiling, and expiry. The model cannot mint one; delegation is attenuation-checked against the parent.</li>
+    <li><strong>One enforcement path.</strong> Nothing executes unless both a capability and the policy allow it.</li>
+    <li><strong>Containment and egress control.</strong> Taint follows data across a session; egress is classified, canary-scanned, and byte-capped before it leaves.</li>
+    <li><strong>Evidence.</strong> Hash-chained, per-event signed, externally anchored, with operator-held checkpoints and recorded legal holds.</li>
+    <li><strong>Fail-closed with a loud health signal</strong> — a distinct reason and an operator-visible transition, never a silent degradation.</li>
+  </ul>
+
+  <h2>What it does not do — read this first</h2>
+  <ul>
+    <li><strong>It does not contain a hostile host.</strong> The sandbox is in-process. If an attacker owns the machine, they own the keys. Real isolation (microVM, HSM, attestation) is not shipped.</li>
+    <li><strong>It does not judge intent.</strong> A model doing something harmful <em>inside</em> granted scope is out of reach. AISL constrains authority, not meaning.</li>
+    <li><strong>It does not replace your DLP, SIEM, or IdP.</strong> It produces evidence; it is not a dashboard, a SOC, or a certificate.</li>
+    <li><strong>It is pre-1.0.</strong> Sharp edges, and direct access to the person who fixes them.</li>
+  </ul>
+
+  <h2>What we need from you</h2>
+  <ul>
+    <li>One workflow owner who can say yes to a six-week sandboxed deployment.</li>
+    <li>A non-production copy of the data and credentials the workflow touches.</li>
+    <li>Two hours a week from someone technical, thirty minutes from whoever owns the risk.</li>
+    <li>Agreement that findings may be written up publicly, anonymized, at the end.</li>
+  </ul>
+
+  <h2>Commercials</h2>
+  <div class="price">
+    <p><b>$7,500</b> for six weeks, fixed scope.</p>
+    <p class="quiet" style="margin:0">The first two design partners pay <strong>$4,000</strong>, in exchange for a named reference call at the end. Either amount is credited in full against the first year of a licence if you continue.</p>
+  </div>
+  <p>Mutual NDA and a written scope before work starts. No auto-renewal: at week six you decide yes or no, and either answer is fine.</p>
+
+  <h2>Not a fit if</h2>
+  <ul>
+    <li>You need a vendor with SOC 2, an SLA, and a support line today. That is a legitimate need; this is not that yet.</li>
+    <li>You want prompt filtering and a monthly report on model behaviour.</li>
+    <li>You cannot give a sandboxed copy of the workflow, only production.</li>
+    <li>Your agents do not touch anything sensitive yet — you have time, spend it on something else first.</li>
+  </ul>
+
+  <h2>Start</h2>
+  <p>Email with three things:</p>
+  <ol>
+    <li>What the agent does today, in two sentences.</li>
+    <li>What data it touches, and how that data is classified.</li>
+    <li>Who, internally, has to say yes.</li>
+  </ol>
+  <p class="quiet">That is enough to decide whether a pilot makes sense in one call.</p>
+
+  <footer>
+    AISL — Agent Infrastructure Security Layer · pre-1.0 · hosted locally for review
+  </footer>
+</main>
+</body>
+</html>

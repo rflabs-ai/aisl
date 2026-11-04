@@ -128,6 +128,14 @@ auto-renewal; at week six you decide yes or no, and either answer is fine.
 
 ---
 
+## Who you would be working with
+
+AISL is built by **Kept**, a one-person project. There is no sales team and no
+support tier: the person who signs the pilot is the person who writes the code,
+answers the security questionnaire, and picks up when it breaks at 2am. For a
+six-week engagement that is an advantage; for a five-year contract it is not,
+and you should weigh it that way.
+
 ## Start
 
 Email the maintainer with:

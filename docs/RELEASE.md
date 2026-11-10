@@ -50,7 +50,7 @@ concern:
       plus how to produce it. `AISL_ALLOW_EPHEMERAL_KEYS=1` is the explicit,
       warned override for a throwaway instance. The demo still runs with zero
       environment variables.
-- [ ] **TLS at the edge.** Both servers bind loopback; nothing terminates TLS.
+- [x] **TLS at the edge.** `RestApi` terminates TLS when given `tls: { key, cert }`, and refuses a non-loopback bind without it, before a socket exists.
 
 Until TLS is done, the honest sentence is: *safe to run locally, not safe to
 expose on a public interface.*

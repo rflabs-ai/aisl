@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-10T18:38:53.927Z",
+  "generatedAt": "2026-11-10T20:01:05.388Z",
   "node": "v24.18.0",
   "policyEngine": "in-process-rego-free-v1",
   "adversarial": {
@@ -26,13 +26,13 @@
     "expectedDecisions": 2122,
     "auditCompleteness": 1,
     "hashChainValid": true,
-    "head": "198ed41628126dbd4a854232842f07723c9522748650d22a3a162ef124327843",
-    "auditQueryLatencyP99Ms": 0.219,
-    "auditExportLatencyP99Ms": 0.249,
-    "policyDiffLatencyMs": 0.107,
+    "head": "2e0edd5148c7c168e279915dbac5601f329559fb845064e435781fe0758411e1",
+    "auditQueryLatencyP99Ms": 0.187,
+    "auditExportLatencyP99Ms": 0.227,
+    "policyDiffLatencyMs": 0.102,
     "guardLatencyP99Ms": 0.007,
-    "decisionLatencyP99WithPersistenceMs": 1.679,
-    "decisionLatencyP99WithoutPersistenceMs": 0.169,
+    "decisionLatencyP99WithPersistenceMs": 1.7,
+    "decisionLatencyP99WithoutPersistenceMs": 0.1,
     "falseClaimRate": 0,
     "totalLegitimateResponses": 101,
     "legitimateResponsesNonDelivered": 0,
@@ -136,7 +136,7 @@
         "id": "audit-query-latency-p99",
         "metric": "evidence.auditQueryLatencyP99Ms",
         "target": "reported",
-        "measured": "0.219",
+        "measured": "0.187",
         "gate": "advisory",
         "pass": true
       },
@@ -144,7 +144,7 @@
         "id": "audit-export-latency-p99",
         "metric": "evidence.auditExportLatencyP99Ms",
         "target": "reported",
-        "measured": "0.249",
+        "measured": "0.227",
         "gate": "advisory",
         "pass": true
       },
@@ -152,7 +152,7 @@
         "id": "policy-diff-latency",
         "metric": "evidence.policyDiffLatencyMs",
         "target": "reported",
-        "measured": "0.107",
+        "measured": "0.102",
         "gate": "advisory",
         "pass": true
       },
@@ -168,7 +168,7 @@
         "id": "decision-latency-p99-with-persistence",
         "metric": "evidence.decisionLatencyP99WithPersistenceMs",
         "target": "reported",
-        "measured": "1.679",
+        "measured": "1.7",
         "gate": "advisory",
         "pass": true
       },
@@ -176,7 +176,7 @@
         "id": "decision-latency-p99-without-persistence",
         "metric": "evidence.decisionLatencyP99WithoutPersistenceMs",
         "target": "reported",
-        "measured": "0.169",
+        "measured": "0.1",
         "gate": "advisory",
         "pass": true
       }

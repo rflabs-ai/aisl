@@ -28,8 +28,17 @@ const FORBIDDEN = [
   { name: 'macOS home path', re: /\/Users\/[A-Za-z0-9._-]+\/(?:projects|repos|src)\// },
 ];
 
+/**
+ * A self-signed certificate for the TLS binding test. It is a fixture, not a
+ * credential: it is generated for `CN=localhost`, never used by the runtime, and
+ * its private key is worthless outside the test. Exempted explicitly so the
+ * exemption is visible rather than implied by a pattern that happens to miss it.
+ */
+const TEST_KEY_FIXTURES = ['tests/fixtures/tls/'];
+
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 const files = git('ls-files').split('\n').filter(Boolean);
+const exempt = files.filter((f) => TEST_KEY_FIXTURES.some((p) => f.startsWith(p)));
 
 const findings = [];
 let bytes = 0;
@@ -44,6 +53,7 @@ for (const file of files) {
   }
   bytes += stat.size;
   if (stat.size > 1_000_000) continue; // not a source file
+  if (TEST_KEY_FIXTURES.some((p) => file.startsWith(p))) continue; // test-only cert
 
   let text;
   try {
@@ -70,6 +80,7 @@ console.log(`entries   ${files.length}`);
 console.log(`scanned   ${scanned} (binary and >1MB skipped)`);
 console.log(`bytes     ${bytes}`);
 console.log(`forbidden ${findings.length === 0 ? 'none' : findings.length + ' finding(s)'}`);
+if (exempt.length > 0) console.log(`exempt    ${exempt.length} test-only key fixture(s) under ${TEST_KEY_FIXTURES.join(', ')}`);
 
 if (findings.length > 0) {
   for (const f of findings.slice(0, 20)) console.error(`  ${f}`);

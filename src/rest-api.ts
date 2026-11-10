@@ -10,6 +10,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { readFileSync } from 'node:fs';
 import type { AuthContext, Principal, Action } from './domain.ts';
 import type { AuthorizationService } from './pdp.ts';
@@ -158,6 +159,14 @@ export interface RestApiDeps {
   /** Body size cap in bytes. Default: 1_048_576 (1 MiB). */
   readonly maxBodyBytes?: number;
   /**
+   * Bind address. Default `127.0.0.1`. A non-loopback host REQUIRES `tls`:
+   * the server refuses to start rather than serve plaintext on a reachable
+   * interface (safety ticket 04, item 3).
+   */
+  readonly host?: string;
+  /** TLS material (PEM). Required when `host` is not loopback. */
+  readonly tls?: { readonly key: string; readonly cert: string };
+  /**
    * Static pages (ADR-020 minimal UI): exact GET routes served as-is — no
    * directory listing, no parametrized path, so traversal does not exist by
    * construction. Pages contain no secrets; the UI authorizes like any other
@@ -195,6 +204,13 @@ export function createRestApi(deps: RestApiFullDeps): RestApi {
   return api;
 }
 
+/** The only hosts that may serve without TLS. `0.0.0.0` is deliberately not one. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', 'localhost']);
+
+function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
+}
+
 export class RestApi {
   private readonly authorization: AuthorizationService;
   private readonly idp: IdentityProvider;
@@ -204,8 +220,10 @@ export class RestApi {
   private readonly health?: HealthState;
   private readonly maxBodyBytes: number;
   private readonly incidentSync?: () => void;
+  private readonly host: string;
+  private readonly tls: { readonly key: string; readonly cert: string } | undefined;
   private readonly routes = new Map<string, CompiledRoute>();
-  private server: Server | undefined;
+  private server: Server | HttpsServer | undefined;
   private port: number | undefined;
 
   constructor(deps: RestApiDeps) {
@@ -217,6 +235,8 @@ export class RestApi {
     this.health = deps.health;
     this.maxBodyBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     this.incidentSync = deps.incidentSync;
+    this.host = deps.host ?? '127.0.0.1';
+    this.tls = deps.tls;
 
     this.addRoute('GET', '/healthz', () => ({
       status: 200,
@@ -256,9 +276,23 @@ export class RestApi {
    */
   async start(): Promise<number> {
     assertDurableKeys('server');
-    this.server = createServer((req, res) => this.handleRequest(req, res));
+
+    // No plaintext on a reachable interface. Loopback is the only host that may
+    // run without TLS, and the refusal happens before a socket exists.
+    if (!isLoopbackHost(this.host) && this.tls === undefined) {
+      throw new Error(
+        `refusing to bind ${this.host} without TLS: set tls.key and tls.cert, or bind 127.0.0.1`,
+      );
+    }
+
+    const handler = (req: IncomingMessage, res: ServerResponse): void => this.handleRequest(req, res);
+    this.server =
+      this.tls === undefined
+        ? createServer(handler)
+        : createHttpsServer({ key: this.tls.key, cert: this.tls.cert }, handler);
+
     await new Promise<void>((resolve, reject) => {
-      this.server?.listen(0, '127.0.0.1', resolve);
+      this.server?.listen(0, this.host, resolve);
       this.server?.on('error', reject);
     });
     const addr = this.server.address();

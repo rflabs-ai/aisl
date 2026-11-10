@@ -169,15 +169,20 @@ witnesses that make a host-level rewrite detectable.
 ### REST API exposure (M14, ADR-019)
 
 The REST surface (`src/rest-api.ts`) is the platform's first network
-ingress. Its own in-process story is deliberately modest: it binds
-**loopback only** and does no TLS.
+ingress. It binds **loopback by default**, and it will terminate TLS itself
+when given `tls: { key, cert }`.
 
-- **TLS terminates at the deployment** — reverse proxy / load balancer in
-  front of the API (operator-owned, same discipline as `pg_hba` TLS above).
-  Never expose the Node process directly on an untrusted network; there is
-  no in-process TLS and no in-process rate limiting (H15/ADR-027 resolved
-  rate limiting as deployment territory) — a proxy that terminates TLS and
-  applies connection budgets/rate limits is the required front door.
+- **No plaintext on a reachable interface.** A non-loopback `host` without
+  `tls` is refused before a socket exists. `0.0.0.0` is not treated as
+  loopback. Loopback stays plaintext by default, which is what tests and local
+  development use.
+- **TLS may still terminate at the deployment** - reverse proxy / load balancer
+  in front of the API (operator-owned, same discipline as `pg_hba` TLS above).
+  Either shape is supported; what is not supported is exposing the process on
+  an untrusted network without TLS. There is still no in-process rate limiting
+  (H15/ADR-027 resolved rate limiting as deployment territory), so a proxy that
+  applies connection budgets remains the required front door for anything
+  public.
 - **Identity:** clients authenticate with `Authorization: Bearer <JWT>` from
   the trusted IdP (ADR-016). The deployment registers the principal table
   the resolver maps verified tokens onto — tokens decide *who*; the

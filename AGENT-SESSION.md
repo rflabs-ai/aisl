@@ -24,6 +24,39 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 47 - 2026-11-10 - opencode/durable keys + hook incident
+
+**Did:**
+- **Durable keys (safety ticket 04, item 2), commit `2e59707`**, done by a
+  subagent in an isolated worktree. New `src/key-policy.ts`:
+  `assertDurableKeys(mode, deps)`. `RestApi.start()` refuses before binding a
+  socket, and the world store factory refuses before opening a persistent store,
+  when the keys that verify and decrypt existing evidence are missing.
+  Demo, benchmark, tests and in-memory worlds are untouched and still run with
+  zero environment variables. Override: `AISL_ALLOW_EPHEMERAL_KEYS=1`, exact
+  value only, one warning, never the default. Error text names every missing
+  variable and the command that generates it.
+- **Incident: the pre-commit hook leaked `GIT_DIR`.** Git exports `GIT_DIR`,
+  `GIT_WORK_TREE` and `GIT_INDEX_FILE` into hooks. The `m15-git` fixture shells
+  out to git in a temp directory, inherited them, and operated on this
+  repository: `core.bare` was flipped to true on the whole checkout and a
+  fixture commit staged files into this index.
+- **Recovery:** `git config core.bare false`; `git reset --hard HEAD` (the commit
+  held all eight files, the tree and index were stale); gate re-run clean.
+- **Fix:** `scripts/pre-commit` is now tracked (it lived only in `.git/hooks`, so
+  a fresh clone had no gate at all) and unsets the five `GIT_*` variables before
+  running the gate. Ticket in `docs/safety/05-hook-git-dir.md`.
+- **Gate:** 849 total, 828 pass, 0 fail, 21 Postgres skips.
+
+**Left:**
+- The `m15-git` fixture should isolate itself rather than rely on the caller
+  (ticket 05, "still open").
+- TLS at the edge (ticket 04, item 3).
+- Trademark: no official record retrieved, `docs/brand-check.md` says unknown.
+
+**Next session should:**
+- Fix the fixture's environment, then publish `aisl` to npm.
+
 ### SESSION 46 - 2026-11-01 - opencode/branding, safety gates, pilot, spend cap
 
 **Did:**

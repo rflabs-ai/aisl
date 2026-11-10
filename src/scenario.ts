@@ -29,6 +29,7 @@ import { InMemoryRevocationChannel, IncidentService, type RevocationChannel } fr
 import { PostgresRevocationChannel } from './incident-store-pg.ts';
 import { type HealthState } from './health.ts';
 import { HttpAnchorSink, type AnchorSink } from './anchors.ts';
+import { assertDurableKeys } from './key-policy.ts';
 
 export const TENANT_A = 'acme';
 export const TENANT_B = 'globex';
@@ -183,9 +184,16 @@ function makeEventLog(options: { sqlitePath?: string; memory?: boolean; anchors?
     // not touch the process's configured store.
     return new EventLog(undefined, { anchorPath: process.env.EVENT_ANCHOR_PATH, ...sinkOptions });
   }
-  return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
+  const postgresUrl =
+    process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL ? process.env.DATABASE_URL : undefined;
+  // Safety ticket 04: a store that outlives the process must be able to verify
+  // and decrypt what it already holds. Refuse before opening it.
+  if (postgresUrl !== undefined || Boolean(options.sqlitePath)) {
+    assertDurableKeys('persistent');
+  }
+  return postgresUrl !== undefined
     ? new PostgresEventLog({
-        url: process.env.DATABASE_URL,
+        url: postgresUrl,
         ...(process.env.MIGRATION_DATABASE_URL ? { migrateUrl: process.env.MIGRATION_DATABASE_URL } : {}),
         ...(process.env.EVENT_ANCHOR_PATH ? { anchorPath: process.env.EVENT_ANCHOR_PATH } : {}),
         ...sinkOptions,

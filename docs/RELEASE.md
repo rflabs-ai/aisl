@@ -7,13 +7,13 @@ projects ship something they cannot support.
 | --- | --- | --- |
 | **Source** | someone can clone, read, build and run it | **ready** |
 | **Package** | `npm i aisl` works | blocked on publish |
-| **Service** | someone else runs it exposed to a network | two items open |
+| **Service** | someone else runs it exposed to a network | one item open |
 
 ---
 
 ## Source release — ready
 
-- [x] `npm run typecheck && npm test` — 818 pass, 0 fail, 21 Postgres skips
+- [x] `npm run typecheck && npm test`: 828 pass, 0 fail, 21 Postgres skips
 - [x] `npm run demo` and `npm run benchmark` run clean; SLO block passes
 - [x] `LICENSE` — Apache-2.0 with the patent grant
 - [x] `SECURITY.md` — private reporting, scope, and an explicit out-of-scope list
@@ -39,17 +39,20 @@ projects ship something they cannot support.
 Not a blocker for outreach. It *is* the blocker for wiring raven, because the
 Pi needs a way to run `verifyUpdate` (see `PROMPTS/M18-federation-project-raven.md`).
 
-## Service release — two items
+## Service release (one item)
 
-From safety ticket 04. Both are deployment concerns, not code defects:
+From safety ticket 04. The key item is closed in code; TLS remains a deployment
+concern:
 
-- [ ] **Fail closed on missing keys in production.** The process currently falls
-      back to an ephemeral signing key with a warning. Correct for a demo; a
-      deployment must refuse to start rather than mint a key that dies with the
-      process.
+- [x] **Fail closed on missing keys in production.** `src/key-policy.ts` refuses
+      to start the REST server or open a persistent event store without the
+      durable keys the evidence plane needs, and names each missing variable
+      plus how to produce it. `AISL_ALLOW_EPHEMERAL_KEYS=1` is the explicit,
+      warned override for a throwaway instance. The demo still runs with zero
+      environment variables.
 - [ ] **TLS at the edge.** Both servers bind loopback; nothing terminates TLS.
 
-Until both are done, the honest sentence is: *safe to run locally, not safe to
+Until TLS is done, the honest sentence is: *safe to run locally, not safe to
 expose on a public interface.*
 
 ---

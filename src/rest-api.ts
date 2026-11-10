@@ -16,6 +16,7 @@ import type { AuthorizationService } from './pdp.ts';
 import type { IdentityProvider } from './identity.ts';
 import type { EventStore } from './events.ts';
 import type { HealthState } from './health.ts';
+import { assertDurableKeys } from './key-policy.ts';
 import { registerSessionRoutes, type SessionRouteDeps } from './rest-sessions.ts';
 import { registerAuditRoutes, type AuditRouteDeps } from './rest-audit.ts';
 import { registerAnchorRoutes, type AnchorRouteDeps } from './rest-anchors.ts';
@@ -249,8 +250,12 @@ export class RestApi {
     });
   }
 
-  /** Bind 127.0.0.1 ephemeral port; resolves with the port (mirror EgressProxy.start()). */
+  /**
+   * Bind 127.0.0.1 ephemeral port; resolves with the port (mirror EgressProxy.start()).
+   * A long-lived server refuses to start without durable keys (safety ticket 04).
+   */
   async start(): Promise<number> {
+    assertDurableKeys('server');
     this.server = createServer((req, res) => this.handleRequest(req, res));
     await new Promise<void>((resolve, reject) => {
       this.server?.listen(0, '127.0.0.1', resolve);

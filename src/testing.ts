@@ -1,12 +1,26 @@
-/** Shared test wiring. Test-only: pins a signing key so results are reproducible. */
+/** Shared test wiring. Test-only: pins signing keys so results are reproducible. */
 
+import { generateKeyPairSync } from 'node:crypto';
 import { buildWorld, type World, type WorldOptions } from './scenario.ts';
 import { type AuthContext, type Principal } from './domain.ts';
 import { hasMfa, IdentityProvider, type IdPConfig } from './identity.ts';
 import { exportJWK, SignJWT, generateKeyPair, type JWK } from 'jose';
 
+/**
+ * Serving a RestApi requires durable keys (src/key-policy.ts). The test suite
+ * is a demo context, so pin them here, once, before any server starts: fixed
+ * strings for the symmetric keys and a per-process Ed25519 pair for events.
+ */
+process.env.CAPABILITY_SIGNING_KEY ??= 'test-signing-key-not-for-production';
+process.env.EVIDENCE_SEALING_KEY ??= 'test-evidence-sealing-key-not-for-production';
+process.env.SECRET_MASTER_KEY ??= 'test-secret-master-key-not-for-production-32b';
+if (process.env.EVENT_SIGNING_PRIVATE_KEY_PEM === undefined || process.env.EVENT_SIGNING_PUBLIC_KEY_PEM === undefined) {
+  const pair = generateKeyPairSync('ed25519');
+  process.env.EVENT_SIGNING_PRIVATE_KEY_PEM ??= pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  process.env.EVENT_SIGNING_PUBLIC_KEY_PEM ??= pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+}
+
 export function testWorld(options: WorldOptions = {}): World {
-  process.env.CAPABILITY_SIGNING_KEY ??= 'test-signing-key-not-for-production';
   return buildWorld(options);
 }
 

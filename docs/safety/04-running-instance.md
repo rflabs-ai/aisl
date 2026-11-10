@@ -1,6 +1,6 @@
 # Safety ticket 04 — running instance safe
 
-**Status:** open — two items left
+**Status:** open, one item left
 **Evidence:** [`../SAFETY-2026-11-01.md`](../SAFETY-2026-11-01.md), gate 4
 **Blocked by:** gates 1 and 2 (both satisfied for local use; gate 2 open for publishing)
 
@@ -12,7 +12,7 @@
 - [x] Auditable: hash-chained signed log with external anchors; `npm run adversarial`
 - [x] One-command stop: `incident freeze`, `incident revoke-all`
 - [x] **Provider spend cap** — `ModelBudget` on `HttpModelAdapter`: per-day call and token ceilings, refused **before** the fetch with `denyReason: budget-exhausted`, so an exhausted budget costs nothing. Provider-reported usage is charged; when the provider reports none, a conservative estimate is charged instead. In-memory counter (documented ceiling: a restart refills it).
-- [ ] **Fail closed on missing keys in production** — the process currently falls back to an ephemeral key. Correct for a demo; a deployment must refuse to start without durable keys rather than silently minting one that dies with the process.
+- [x] **Fail closed on missing keys in production.** `src/key-policy.ts` refuses to start the REST server (the `RestApi.start()` path, which requires all five keys) or to open a persistent event store (the world's store factory: a SQLite path, or `EVENT_STORE=postgres` plus `DATABASE_URL`; the event-signing pair plus `EVIDENCE_SEALING_KEY`) when a required key is missing. The error names each missing variable, explains why it matters, and says how to produce one. `npm run demo`, the test suite, and in-memory worlds are unchanged. The explicit override `AISL_ALLOW_EPHEMERAL_KEYS=1` is never the default and prints one warning that evidence will not survive a restart. Covered by `tests/key-policy.test.ts`.
 - [ ] **TLS at the edge** — loopback plus a reverse proxy is the documented shape; nothing in the repo terminates TLS.
 
 ## Done when

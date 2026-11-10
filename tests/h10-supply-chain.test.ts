@@ -17,8 +17,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { git } from './helpers/git.ts';
 import { canonicalJson } from '../src/domain.ts';
 import {
   ADMITTED_RUNTIME_DEPS,
@@ -228,10 +228,8 @@ describe('Tree digest (blob SHAs — platform-independent)', () => {
     mkdirSync(join(dir, 'artifacts'), { recursive: true });
     writeFileSync(join(dir, 'src', 'a.ts'), 'export const a = 1;\n');
     writeFileSync(join(dir, 'artifacts', 'sbom.json'), '{"format":"ASL-SBOM","version":1,"packages":[]}\n');
-    const r = spawnSync('git', ['init', '--initial-branch=main'], { cwd: dir, encoding: 'utf8' });
-    if (r.status !== 0) throw new Error(r.stderr);
-    const add = spawnSync('git', ['add', '.'], { cwd: dir, encoding: 'utf8' });
-    if (add.status !== 0) throw new Error(add.stderr);
+    git(['init', '--initial-branch=main'], dir);
+    git(['add', '.'], dir);
   }
 
   test('is deterministic and excludes artifacts/ (outputs, not inputs)', () => {
@@ -243,7 +241,7 @@ describe('Tree digest (blob SHAs — platform-independent)', () => {
       assert.equal(d1, d2);
       assert.match(d1, /^sha256-[0-9a-f]{64}$/);
       writeFileSync(join(dir, 'artifacts', 'build-manifest.json'), '{"touched":true}\n');
-      spawnSync('git', ['add', '.'], { cwd: dir });
+      git(['add', '.'], dir);
       assert.equal(computeTreeDigest(dir), d1, 'changes under artifacts/ do not change the tree digest');
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -256,7 +254,7 @@ describe('Tree digest (blob SHAs — platform-independent)', () => {
       gitRepo(dir);
       const before = computeTreeDigest(dir);
       writeFileSync(join(dir, 'src', 'a.ts'), 'export const a = 2;\n');
-      spawnSync('git', ['add', '.'], { cwd: dir });
+      git(['add', '.'], dir);
       assert.notEqual(computeTreeDigest(dir), before);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -298,8 +296,8 @@ describe('Signed build manifest', () => {
         },
       }, null, 2)}\n`,
     );
-    spawnSync('git', ['init', '--initial-branch=main'], { cwd: dir });
-    spawnSync('git', ['add', '.'], { cwd: dir });
+    git(['init', '--initial-branch=main'], dir);
+    git(['add', '.'], dir);
 
     const kp = generateKeyPairSync('ed25519');
     privatePem = pemOf(kp.privateKey);
@@ -325,10 +323,10 @@ describe('Signed build manifest', () => {
     const manifest = manifestFor();
     const sig = signManifest(manifest, privatePem);
     writeFileSync(join(dir, 'src', 'a.ts'), 'y\n');
-    spawnSync('git', ['add', '.'], { cwd: dir });
+    git(['add', '.'], dir);
     assert.deepEqual(verifyManifest(manifest, sig, publicPem, { repoRoot: dir }), { valid: false, reason: 'stale-source' });
     writeFileSync(join(dir, 'src', 'a.ts'), 'x\n');
-    spawnSync('git', ['add', '.'], { cwd: dir });
+    git(['add', '.'], dir);
     assert.equal(verifyManifest(manifest, sig, publicPem, { repoRoot: dir }).valid, true);
   });
 
@@ -338,7 +336,7 @@ describe('Signed build manifest', () => {
     const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf8'));
     lock.packages['node_modules/jose'].version = '6.3.0';
     writeFileSync(join(dir, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
-    spawnSync('git', ['add', '.'], { cwd: dir });
+    git(['add', '.'], dir);
     const result = verifyManifest(manifest, sig, publicPem, { repoRoot: dir });
     assert.equal(result.valid, false);
     assert.match(result.reason ?? '', /^stale-dependencies/);

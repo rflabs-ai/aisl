@@ -17,8 +17,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { git } from './helpers/git.ts';
 import {
   computeSbom,
   computeTreeDigest,
@@ -67,8 +67,8 @@ function fixtureRepo(): string {
       },
     }, null, 2)}\n`,
   );
-  spawnSync('git', ['init', '--initial-branch=main'], { cwd: dir });
-  spawnSync('git', ['add', '.'], { cwd: dir });
+  git(['init', '--initial-branch=main'], dir);
+  git(['add', '.'], dir);
   return dir;
 }
 
@@ -207,7 +207,7 @@ describe('Chain: descriptor -> build manifest -> live tree', () => {
       const { descriptor } = descriptorFor(dir);
       const sig = signUpdate(descriptor, PRIVATE_PEM);
       writeFileSync(join(dir, 'src', 'a.ts'), 'evil\n');
-      spawnSync('git', ['add', '.'], { cwd: dir });
+      git(['add', '.'], dir);
       const result = verifyUpdate(descriptor, sig, { publicKeyPem: PUBLIC_PEM, repoRoot: dir });
       assert.equal(result.valid, false);
       assert.equal(result.reason, 'manifest-rejected');

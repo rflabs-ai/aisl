@@ -35,13 +35,32 @@ manually. No bad commit entered history.
   before running the gate.
 - Install with `cp scripts/pre-commit .git/hooks/pre-commit && chmod +x`.
 
-## Still open
+## Fixture isolation (closed 2026-11-10)
 
-- The `m15-git` fixture should also isolate itself (`env` without `GIT_DIR`)
-  rather than relying on the caller. The hook fix covers the observed path; the
-  fixture fix covers every other caller.
+- Every test fixture that shells out to git now goes through
+  `tests/helpers/git.ts`. The helper sets `cwd` explicitly and removes
+  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES` from the child environment.
+- Fixtures routed through it: `tests/m15-git.test.ts`,
+  `tests/h10-supply-chain.test.ts`, `tests/h12-secure-updates.test.ts`.
+  `security-tests/` spawns no git.
+- Regression: `tests/fixture-isolation.test.ts` exports a bogus `GIT_DIR` and
+  `GIT_WORK_TREE` in the test process, commits in a temp repo through the
+  helper, and asserts the commit landed in the temp repo, the poisoned path was
+  never created, and the real repository's HEAD did not move. Against the old
+  unisolated spawn the same sequence fails with
+  `fatal: this operation must be run in a work tree`.
+
+## Remaining, out of scope here
+
+- `src/supply-chain.ts` still spawns `git ls-files` / `git rev-parse` with the
+  inherited environment. That is production code and was not changed. It is
+  benign when `GIT_DIR` points at the real repository (the hook case), and it
+  fails closed when the variable points elsewhere. A future change can give it
+  the same minimal environment as `src/git-reader.ts`.
 
 ## Done when
 
 A commit from a clean checkout runs the full gate and leaves `git status` clean,
-and `npm test` passes identically whether or not the caller exported `GIT_DIR`.
+and the git fixtures pass identically whether or not the caller exported
+`GIT_DIR`.

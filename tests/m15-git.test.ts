@@ -9,10 +9,10 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { git as runGit } from './helpers/git.ts';
 import { GIT_READ_VERBS, GitReader } from '../src/git-reader.ts';
 import { DocumentIngester } from '../src/ingestion.ts';
 import { ResourceRegistry, defineResource } from '../src/registry.ts';
@@ -23,8 +23,7 @@ import { TENANT_A } from '../src/scenario.ts';
 let repoDir = '';
 
 function git(argv: readonly string[]): void {
-  const r = spawnSync('git', argv, { cwd: repoDir, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(`setup git ${argv.join(' ')} failed: ${r.stderr}`);
+  runGit(argv, repoDir);
 }
 
 before(() => {

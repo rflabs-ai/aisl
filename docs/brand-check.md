@@ -1,6 +1,7 @@
 # Brand check: KEPT
 
-**Status: not cleared. Blocked on records access, not on effort.**
+**Status: BLOCKED. An identical word mark is live and pending in classes 9 and 42,
+filed 2026-10-20.**
 
 This is a knockout screen, not legal advice. A lawyer decides registrability and
 clearance.
@@ -29,24 +30,58 @@ clearance.
 **No official record was retrieved.** Per the knockout rule, a name is not
 marked clear if any in-scope class was not searched. Both classes are unsearched.
 
-## Verdict
+## Result: retrieved 2026-11-11
+
+Source: USPTO Trademark Search export, 220 results for `kept`. Saved locally as
+`KEPT-tmSearchResults2026-11-11.xlsx`. No API key was used; this is the public
+search UI's own export.
+
+### The blocking mark
+
+| Field | Value |
+| --- | --- |
+| Mark | **KEPT** (word mark) |
+| Serial | **50171161** |
+| Status | Live (filed, not yet registered) |
+| Classes | **IC 009, IC 041, IC 042** |
+| Filed | **2026-10-20** (three weeks before this check) |
+| Owner | Janus AI Solutions LLC, Raleigh, North Carolina |
+| Goods (9) | Downloadable software for organizing personal healthcare and treatment information; symptom, mood and biomarker tracking; meal planning; personal budgeting |
+| Services (42) | Software as a service |
+
+Identical word mark. The two classes that matter. Filed three weeks ago, so it
+is a **prior-filed application** for any application filed after it.
+
+### Verdict
 
 | Name | Class | Closest live mark | Serial | Status | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| KEPT | 9 | not retrieved | n/a | n/a | **unknown** |
-| KEPT | 42 | not retrieved | n/a | n/a | **unknown** |
+| KEPT | 9 | KEPT (Janus AI Solutions) | 50171161 | Live, pending | **blocked** |
+| KEPT | 42 | KEPT (Janus AI Solutions) | 50171161 | Live, pending | **blocked** |
 
-### Prior expectation (not evidence)
+"Blocked" here means: **do not file, and do not build a company on it.** An
+examiner comparing an identical word mark in identical classes would refuse or
+require a strong argument about the relatedness of the goods. Wellness software
+versus agent-security software is a real difference, but it is an argument, not
+a clean path, and it would be argued against a party that filed first.
 
-"Kept" is a high-frequency English word with an established commercial use
-(consumer apps, retail, HR and finance brands). Class 9 and class 42 are the two
-most crowded classes in software. The base rate of at least one live or pending
-registration on a common word is high.
+### The field is crowded regardless
 
-**Expect caution at best. Do not expect clear.**
+19 live marks in classes 9 or 42 contain "kept": KEPT, KEPPT, BESTKEPT,
+KEPTHAVEN, MATTERSKEPT, EVERKEPT, WELLKEPT, WELLKEP, UPKEPT, TRUSTJAR. WHERE
+PROMISES ARE KEPT, SOME THINGS ARE BEST KEPT PRIVATE, and others. Even if the
+identical mark did not exist, this word is a bad bet for a registerable brand.
 
-That is a prior, not a finding. It should make you want the records, not decide
-the question for you.
+### Use is not the same as register
+
+Common-law use of KEPT for security software is defensible, because the goods
+differ from wellness. That is not the same as owning it. The realistic outcome of
+building on this name is a brand you cannot register, in a class where an
+identical mark was filed first, with a holder who may enforce once their
+application matures.
+
+**Recommendation: drop KEPT as the company name.** Keep AISL as the product name,
+which is what the code, the CLI and the pilot page already say.
 
 ## What the market screen did show
 

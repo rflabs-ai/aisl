@@ -20,3 +20,5 @@ artifacts/adversarial-report.json
 
 # Session evidence: useful locally, must not travel (docs/safety/02-artifacts-safe.md).
 .scratch/
+# Release tarballs (npm pack --pack-destination dist).
+dist/

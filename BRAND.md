@@ -7,15 +7,39 @@ Last updated: 2026-11-01.
 
 ---
 
+## Company name: deferred (2026-11-11)
+
+"Kept" was chosen, checked, and dropped. It is **blocked**:
+
+| Field | Value |
+| --- | --- |
+| Mark | KEPT (word mark) |
+| Serial | 50171161 |
+| Status | Live, pending |
+| Classes | IC 009, IC 041, IC 042 |
+| Filed | 2026-10-20 |
+| Owner | Janus AI Solutions LLC, Raleigh, NC |
+
+Identical word mark, the two classes that matter, filed first. Nineteen other
+live marks in classes 9 and 42 contain "kept". Evidence and reasoning:
+`docs/brand-check.md`.
+
+**Decision: ship the software as AISL and defer the company name.** A company
+name is required at incorporation, at a signed agreement, and at the first
+payment. None of those is imminent, and none of them is a prerequisite for
+publishing.
+
+AISL is the product name, the CLI, and the npm package. It is descriptive and
+therefore weak as a trademark, which is normal and acceptable for infrastructure.
+The company name gets chosen later, when it has to be real.
+
 ## The system
 
 | Layer | Value | Notes |
 | --- | --- | --- |
-| **Company** | **Kept** | One syllable. "Kept" = held, looked after, preserved. |
-| **Domain (canonical)** | `kepthq.dev` | `.dev` is HSTS-preloaded — plaintext HTTP cannot be served, which is the right default for a security brand. |
-| **Domain (deferred)** | `kept.security` | Free to resolve but priced at $2k. Not bought. Revisit only when a pilot pays for it. |
-| **Domain (optional)** | `kept.engineering` | Free at ~$15/yr. Defensive redirect only, never canonical. |
-| **GitHub org** | `kepthqdev` | `kepthq` is **reserved by GitHub** — the API reports it free (404) but the UI refuses it, which is the signature of a name held back after a deletion. `kepthqdev` mirrors the domain. Owned by the personal account: add a second owner before the first customer. |
+| **Company** | **deferred** (see below) | "Kept" is blocked: an identical live word mark in classes 9 and 42. A company name is not needed until incorporation, a signed agreement, or money. |
+| **Domain** | none purchased | `kepthq.dev` was free at ~$15. Nothing depends on it. Buy when a name exists. |
+| **GitHub org** | `kepthqdev` | Created 2026-11-01, empty. Name is provisional; the org can be renamed or abandoned. |
 | **CLI / artifact** | **`aisl`** | npm `aisl` is free. Spoken as "aisle". The name in the repo, the terminal, and the logs. |
 | **Category** | **AI bailment** | Our coinage. A bailment is the legal relationship of holding another's property under a duty of care, with a duty to return and account. |
 | **Company line** | **Nothing leaves without a record.** | Hero, deck, footer, sticker. |

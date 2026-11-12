@@ -23,7 +23,7 @@ projects ship something they cannot support.
 - [x] `docs/PILOT-TARGETS.md` — 50 organizations, ranked by reply likelihood
 - [x] Safety gates 1, 2, 3 — evidence in `docs/SAFETY-2026-11-01.md`,
       tickets in `docs/safety/`
-- [x] `node scripts/pack-release.mjs` — 235 entries, 2.7 MB, forbidden: none.
+- [x] `node scripts/pack-release.mjs` - 238 entries, 2.7 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
 - [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release
@@ -32,12 +32,13 @@ projects ship something they cannot support.
 
 The tarball is correct. The installed CLI is not runnable yet.
 
-- [x] `files` allowlist: 90 files, 207 kB packed. Ships `src`, `bin`,
+- [x] `files` allowlist: 91 files, 207 kB packed. Ships `src`, `bin`,
       `tools/manifests`, `security-attacks`, `security-fixtures`,
       `tests/fixtures/policy`, `artifacts/sbom.json`, and
       `npm-shrinkwrap.json` (npm never publishes `package-lock.json`, so the
-      shrinkwrap is the lockfile that ships). No `docs/`, `PROMPTS/`,
-      `security-tests/`, `.build-keys/`, `.scratch/`, or `dist/`.
+      shrinkwrap is the lockfile that ships). Ships `LICENSE`, `NOTICE`,
+      `README.md`, `SECURITY.md`. No `docs/`, `PROMPTS/`, `security-tests/`,
+      `.build-keys/`, `.scratch/`, or `dist/`.
 - [x] Extracted tarball runs: `node package/bin/aisl.mjs demo` exits 0.
 - [ ] **Compiled output.** `bin/aisl.mjs` imports `src/cli.ts`. Node refuses
       type stripping under `node_modules`
@@ -73,7 +74,7 @@ a reverse proxy that owns rate limits.*
 The order matters, and the last step is the least urgent.
 
 1. Land the compiled-output step, then `npm publish` (the tarball is verified:
-   90 files, 207 kB, and the extracted CLI runs).
+   91 files, 207 kB, and the extracted CLI runs).
 2. `git tag v0.1.0`.
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,

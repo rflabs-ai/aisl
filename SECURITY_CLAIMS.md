@@ -1483,7 +1483,7 @@ Verification is fail-closed with distinct reasons; no path prints
 
 **Mechanism:** `src/supply-chain.ts` (ADR-024). The gate
 (`runSupplyChainGate`) regenerates the deterministic `ASL-SBOM v1` from
-`package-lock.json` (every package: name/version/resolved/integrity/direct/dev,
+`npm-shrinkwrap.json` (the lockfile npm publishes; every package: name/version/resolved/integrity/direct/dev,
 canonically sorted, digest = `sha256(canonicalJson(sbom))` — the Claim 26
 primitive) and byte-diffs it against the committed baseline
 `artifacts/sbom.json`: added/removed/version-changed entries fail the gate

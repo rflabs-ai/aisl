@@ -30,17 +30,18 @@ manually. No bad commit entered history.
 ## Fix
 
 - `scripts/pre-commit` is now **tracked** (it was only in `.git/hooks`, so a
-  fresh clone had no gate at all) and unsets `GIT_DIR`, `GIT_WORK_TREE`,
-  `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`
-  before running the gate.
+  fresh clone had no gate at all) and unsets **every** `GIT_*` variable before
+  running the gate. The whole prefix, not a list: `GIT_CONFIG_COUNT` and
+  `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` can set `core.hooksPath` and recreate
+  the same class of bug.
 - Install with `cp scripts/pre-commit .git/hooks/pre-commit && chmod +x`.
 
 ## Fixture isolation (closed 2026-11-10)
 
 - Every test fixture that shells out to git now goes through
-  `tests/helpers/git.ts`. The helper sets `cwd` explicitly and removes
-  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and
-  `GIT_ALTERNATE_OBJECT_DIRECTORIES` from the child environment.
+  `tests/helpers/git.ts`. The helper sets `cwd` explicitly and removes every
+  `GIT_*` variable from the child environment, including the `GIT_CONFIG_*`
+  family.
 - Fixtures routed through it: `tests/m15-git.test.ts`,
   `tests/h10-supply-chain.test.ts`, `tests/h12-secure-updates.test.ts`.
   `security-tests/` spawns no git.

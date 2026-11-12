@@ -24,6 +24,59 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 48 - 2026-11-12 - opencode/release audit + security fixes
+
+**Did:**
+- **Release-readiness audit** with two independent subagent reviews (trust-boundary
+  code, publish packaging) plus the full milestone gate.
+- **Fixed a real key-policy bypass:** `src/cli.ts` imported `src/testing.ts` for
+  `mockAuth`, and that module pins all five durable keys into `process.env` at
+  import. Every CLI command therefore passed `assertDurableKeys` on test
+  constants and sealed evidence with known keys. `mockAuth` now lives in a
+  side-effect-free `src/mock-auth.ts`; a structural test refuses any `src/`
+  import of `testing.ts`.
+- **Fixed a silent persistence fallback:** `EVENT_STORE=postgres` without
+  `DATABASE_URL` now throws instead of quietly using an in-memory store and
+  channel.
+- **TLS hardening:** `localhost` is no longer a plaintext-allowlisted host (the
+  OS resolves it, so it can point anywhere); incomplete `tls: {}` material is
+  refused before a socket exists; the TLS test now binds `0.0.0.0`, not
+  loopback.
+- **Git fixture isolation:** `tests/helpers/git.ts` strips every `GIT_*`
+  variable (including the `GIT_CONFIG_*` hooks escape), `scripts/pre-commit`
+  does the same, and the regression test hardcodes the names instead of
+  iterating the helper's own list.
+- **Packaging:** `files` now ships `security-attacks`, `security-fixtures`,
+  `tests/fixtures/policy`, and `npm-shrinkwrap.json`; the extracted tarball's
+  CLI runs `demo` to exit 0. `package.json` gained repository/homepage/bugs and
+  a valid `bin` path. The lockfile is now `npm-shrinkwrap.json` (npm never
+  publishes `package-lock.json`).
+- **Docs:** CURRENT_STATE, RELEASE, README, safety tickets 04/05, the safety
+  snapshot, DECISIONS (ADR-015 lockfile note), SECURITY_CLAIMS.
+
+**Left:**
+- **Package release is still blocked:** `bin/aisl.mjs` imports `src/cli.ts`, and
+  Node refuses type stripping under `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). `npm i aisl` installs a CLI
+  that cannot start. Fix is a `tsc` build to `dist/` with `bin` pointing at
+  `dist/cli.js`; it changes the buildless-TS posture, so it needs a decision.
+- Not published, not tagged, not pushed to GitHub (`gh` remote still absent).
+- Postgres suites were not run live this session (no `DATABASE_URL`); 21 skip.
+
+**Next session should:**
+1. Land the compiled-output step, then `npm publish` and tag `v0.1.0`.
+2. `git remote add gh https://github.com/kepthqdev/aisl.git && git push -u gh main`.
+3. Clean-clone test: clone, install, `npm run demo`, `npm test`.
+
+**Evidence:**
+- Gate: typecheck clean; 859 tests, 838 pass, 0 fail, 21 Postgres skips.
+- `demo`, `benchmark` (SLO pass, 0 hard failures), `adversarial` (corpus 14/14,
+  mutation 17/17), `supply-chain` (SBOM digest unchanged), `pack-release`
+  (235 entries, 2.7 MB) all exit 0.
+- npm tarball: 90 files, 207 kB; extracted `demo` exits 0.
+- Commits since SESSION 47: `b390a2f`, `f146230`, `f8ca727`, `f8c576e`,
+  `fc7369b`, `5ccc86c`, plus the fixes on `fix/release-blockers`.
+
 ### SESSION 47 - 2026-11-10 - opencode/durable keys + hook incident
 
 **Did:**

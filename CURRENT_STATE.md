@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Honest snapshot. Updated after H9 - secure artifact handling (ADR-041).
+Honest snapshot. Updated after the release-readiness audit (2026-11-12).
 Stage 0 (ADR-020) and Stage 1 (M16, ADR-021) are
 fully [DONE]: deterministic document ingestion, read-only Git integration, the
 capability-request persistence seam, the developer setup scripts, the minimal
@@ -54,13 +54,13 @@ provable by `npm test`. Recommended order and reasoning:
 
 ## What exists
 
-TypeScript foundation on Node 24, ~14,700 lines of source across 57 modules
+TypeScript foundation on Node 24, ~16,200 lines of source across 60 modules
 (comments and blanks included)
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
 `retention.ts`, `adversarial.ts`, `policy-analysis.ts`, and
-`incident-store-pg.ts` are the latest additions), 839 tests
-(`tests/`, `security-tests/`; 828 pass, 21 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 859 tests
+(`tests/`, `security-tests/`; 838 pass, 21 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -442,7 +442,7 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 839 tests run (828 green; 21 Postgres-mode tests skip without
+All 859 tests run (838 green; 21 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
 live against a disposable `postgres:16` container — serialized run 612 tests
 (skipped suites enumerate their child cases once live), 611 pass, 1

@@ -1,22 +1,26 @@
 {
-  "name": "ai-security-layer",
+  "name": "aisl",
   "version": "0.1.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
-      "name": "ai-security-layer",
+      "name": "aisl",
       "version": "0.1.0",
+      "license": "Apache-2.0",
       "dependencies": {
         "jose": "6.2.12",
         "postgres": "3.4.9"
+      },
+      "bin": {
+        "aisl": "bin/aisl.mjs"
       },
       "devDependencies": {
         "@types/node": "22.20.3",
         "typescript": "7.0.2"
       },
       "engines": {
-        "node": ">=22.5"
+        "node": ">=22.18"
       }
     },
     "node_modules/@types/node": {

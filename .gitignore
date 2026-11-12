@@ -1,7 +1,8 @@
 # .gitignore
 
 node_modules/
-# package-lock.json is committed per ADR-015 (dependency admission policy).
+# npm-shrinkwrap.json is committed per ADR-015 (dependency admission policy).
+# It is the lockfile npm actually publishes; package-lock.json is never shipped.
 # .build-keys/ holds dev-only signing keys (H10, ADR-024) — never committed.
 .build-keys/
 *.db

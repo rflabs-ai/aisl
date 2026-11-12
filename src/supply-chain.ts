@@ -119,7 +119,13 @@ function readPackageManifest(repoRoot: string): PackageManifest {
 }
 
 function readLockfile(repoRoot: string): unknown {
-  return JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8'));
+  // npm never publishes package-lock.json, so a packaged CLI ships the same
+  // content as npm-shrinkwrap.json (the one lockfile npm does publish).
+  for (const name of ['package-lock.json', 'npm-shrinkwrap.json']) {
+    const path = join(repoRoot, name);
+    if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'));
+  }
+  throw new Error('no lockfile found: expected package-lock.json or npm-shrinkwrap.json');
 }
 
 function sbomOf(sbom: unknown): sbom is AslSbom {
@@ -130,12 +136,12 @@ function sbomOf(sbom: unknown): sbom is AslSbom {
   );
 }
 
-/** Deterministic SBOM over `package-lock.json` + `package.json` at repoRoot. */
+/** Deterministic SBOM over the lockfile + `package.json` at repoRoot. */
 export function computeSbom(repoRoot: string): AslSbom {
   const manifest = readPackageManifest(repoRoot);
   const lockfile: unknown = readLockfile(repoRoot);
   const packages = (typeof lockfile === 'object' && lockfile !== null ? (lockfile as { packages?: unknown }).packages : undefined);
-  if (typeof packages !== 'object' || packages === null) throw new Error('package-lock.json has no packages map');
+  if (typeof packages !== 'object' || packages === null) throw new Error('lockfile has no packages map');
   const prod = new Set(directProdNames(manifest));
   const dev = new Set(manifestDepNames(manifest, 'devDependencies'));
 
@@ -183,11 +189,11 @@ export function checkPins(manifest: PackageManifest): readonly string[] {
 export function checkLockfileIntegrity(lockfile: unknown, manifest: PackageManifest): readonly string[] {
   const violations: string[] = [];
   if (typeof lockfile !== 'object' || lockfile === null) {
-    return ['package-lock.json is not an object — refuse (fail closed)'];
+    return ['lockfile is not an object — refuse (fail closed)'];
   }
   const packages = (lockfile as { packages?: unknown }).packages;
   if (typeof packages !== 'object' || packages === null) {
-    return ['package-lock.json has no packages map — refuse (fail closed)'];
+    return ['lockfile has no packages map — refuse (fail closed)'];
   }
   for (const [key, entry] of Object.entries(packages as Record<string, unknown>)) {
     if (key === '') continue;

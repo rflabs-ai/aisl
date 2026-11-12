@@ -1,8 +1,8 @@
 # Safety ticket 04 — running instance safe
 
-**Status:** open, one item left
+**Status:** closed 2026-11-12
 **Evidence:** [`../SAFETY-2026-11-01.md`](../SAFETY-2026-11-01.md), gate 4
-**Blocked by:** gates 1 and 2 (both satisfied for local use; gate 2 open for publishing)
+**Blocked by:** nothing
 
 - [x] Both servers bind `127.0.0.1` only; no wildcard bind anywhere
 - [x] Every credential is environment-supplied, documented in `DEPLOYMENT.md`

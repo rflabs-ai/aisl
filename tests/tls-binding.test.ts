@@ -70,13 +70,22 @@ describe('TLS: no plaintext on a reachable interface', () => {
   });
 
   test('a public bind with TLS serves HTTPS', async () => {
-    const api = await makeApi({ host: '127.0.0.1', tls: { key: KEY, cert: CERT } });
+    // Bind a reachable interface, not loopback: the interesting path is that the
+    // host actually reaches listen(). A test on 127.0.0.1 would stay green even
+    // if start() ignored this.host.
+    const api = await makeApi({ host: '0.0.0.0', tls: { key: KEY, cert: CERT } });
     const port = await api.start();
     try {
       assert.equal(await httpsGet(port, '/healthz'), 200);
     } finally {
       api.stop();
     }
+  });
+
+  test('incomplete TLS material is refused before a socket exists', async () => {
+    const api = await makeApi({ host: '0.0.0.0', tls: { key: '', cert: '' } });
+    await assert.rejects(() => api.start(), /incomplete TLS/);
+    assert.equal(api.getPort(), undefined, 'no port was bound');
   });
 
   test('the refusal names the fix', async () => {

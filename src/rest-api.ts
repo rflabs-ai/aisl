@@ -204,8 +204,12 @@ export function createRestApi(deps: RestApiFullDeps): RestApi {
   return api;
 }
 
-/** The only hosts that may serve without TLS. `0.0.0.0` is deliberately not one. */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', 'localhost']);
+/**
+ * The only hosts that may serve without TLS. `0.0.0.0` is deliberately not one,
+ * and neither is `localhost`: it is resolved by the OS, so a hosts entry or a
+ * container can point it at a reachable address we never verified.
+ */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1']);
 
 function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
@@ -282,6 +286,11 @@ export class RestApi {
     if (!isLoopbackHost(this.host) && this.tls === undefined) {
       throw new Error(
         `refusing to bind ${this.host} without TLS: set tls.key and tls.cert, or bind 127.0.0.1`,
+      );
+    }
+    if (this.tls !== undefined && (!this.tls.key || !this.tls.cert)) {
+      throw new Error(
+        `refusing to bind ${this.host} with incomplete TLS: tls.key and tls.cert must both be non-empty PEM`,
       );
     }
 

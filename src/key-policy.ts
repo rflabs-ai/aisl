@@ -168,5 +168,5 @@ export function assertDurableKeys(mode: KeyMode, deps: KeyPolicyDeps = {}): void
 }
 
 function isSet(value: string | undefined): boolean {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && value.trim().length > 0;
 }

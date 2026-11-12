@@ -5,6 +5,9 @@ import { buildWorld, type World, type WorldOptions } from './scenario.ts';
 import { type AuthContext, type Principal } from './domain.ts';
 import { hasMfa, IdentityProvider, type IdPConfig } from './identity.ts';
 import { exportJWK, SignJWT, generateKeyPair, type JWK } from 'jose';
+import { mockAuth } from './mock-auth.ts';
+
+export { mockAuth };
 
 /**
  * Serving a RestApi requires durable keys (src/key-policy.ts). The test suite
@@ -22,23 +25,6 @@ if (process.env.EVENT_SIGNING_PRIVATE_KEY_PEM === undefined || process.env.EVENT
 
 export function testWorld(options: WorldOptions = {}): World {
   return buildWorld(options);
-}
-
-/** Mock AuthContext for tests — represents a fully authenticated human with MFA. */
-export function mockAuth(overrides: Partial<AuthContext> = {}): AuthContext {
-  return {
-    issuer: 'https://idp.test.example.com',
-    subject: overrides.subject ?? 'user:test-subject',
-    audience: 'test-audience',
-    expiresAt: overrides.expiresAt ?? Date.now() + 3_600_000,
-    issuedAt: overrides.issuedAt ?? Date.now(),
-    tokenId: overrides.tokenId ?? 'tok_test_001',
-    authTime: overrides.authTime ?? Date.now(),
-    amr: overrides.amr ?? ['pwd', 'mfa'],
-    acr: overrides.acr ?? 'urn:mace:incommon:iap:silver',
-    claims: overrides.claims ?? {},
-    verifiedAt: overrides.verifiedAt ?? Date.now(),
-  };
 }
 
 /** Create an authenticated user principal for tests. */

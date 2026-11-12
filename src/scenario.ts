@@ -168,6 +168,22 @@ function anchorSinksFromEnv(): readonly AnchorSink[] {
 }
 
 /**
+ * EVENT_STORE=postgres is a promise that evidence persists. A missing
+ * DATABASE_URL fails loudly instead of falling back to an in-memory store
+ * that silently loses it (safety ticket 04 follow-up).
+ */
+function postgresUrlFromEnv(): string | undefined {
+  if (process.env.EVENT_STORE !== 'postgres') return undefined;
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      'EVENT_STORE=postgres requires DATABASE_URL: refusing to fall back to an in-memory store that will not persist evidence',
+    );
+  }
+  return url;
+}
+
+/**
  * Postgres is opt-in (EVENT_STORE=postgres + DATABASE_URL): an ambient
  * DATABASE_URL alone would flip every in-process world to a store that
  * must be migrated and awaited — the SQLite/in-memory backends stay the
@@ -184,8 +200,7 @@ function makeEventLog(options: { sqlitePath?: string; memory?: boolean; anchors?
     // not touch the process's configured store.
     return new EventLog(undefined, { anchorPath: process.env.EVENT_ANCHOR_PATH, ...sinkOptions });
   }
-  const postgresUrl =
-    process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL ? process.env.DATABASE_URL : undefined;
+  const postgresUrl = postgresUrlFromEnv();
   // Safety ticket 04: a store that outlives the process must be able to verify
   // and decrypt what it already holds. Refuse before opening it.
   if (postgresUrl !== undefined || Boolean(options.sqlitePath)) {
@@ -209,9 +224,8 @@ function makeEventLog(options: { sqlitePath?: string; memory?: boolean; anchors?
  */
 function makeRevocationChannel(injected?: RevocationChannel): RevocationChannel {
   if (injected) return injected;
-  return process.env.EVENT_STORE === 'postgres' && process.env.DATABASE_URL
-    ? new PostgresRevocationChannel({ url: process.env.DATABASE_URL })
-    : new InMemoryRevocationChannel();
+  const url = postgresUrlFromEnv();
+  return url ? new PostgresRevocationChannel({ url }) : new InMemoryRevocationChannel();
 }
 
 export interface WorldOptions {

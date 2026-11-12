@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GIT_ENV_VARS, git, gitEnv } from './helpers/git.ts';
+import { git, gitEnv } from './helpers/git.ts';
 
 const REPO_ROOT = join(import.meta.dirname, '..');
 
@@ -56,7 +56,32 @@ describe('git fixture isolation', () => {
       GIT_INDEX_FILE: 'x',
       GIT_OBJECT_DIRECTORY: 'x',
       GIT_ALTERNATE_OBJECT_DIRECTORIES: 'x',
+      GIT_COMMON_DIR: 'x',
+      GIT_NAMESPACE: 'x',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.hooksPath',
+      GIT_CONFIG_VALUE_0: '/tmp/hooks',
+      GIT_CONFIG_KEY_1: 'core.bare',
+      GIT_CONFIG_VALUE_1: 'true',
     });
-    for (const name of GIT_ENV_VARS) assert.equal(name in env, false, `${name} must not reach the fixture`);
+    // Hardcoded on purpose: iterating a list the helper deletes cannot fail.
+    const redirectors = [
+      'GIT_DIR',
+      'GIT_WORK_TREE',
+      'GIT_INDEX_FILE',
+      'GIT_OBJECT_DIRECTORY',
+      'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+      'GIT_COMMON_DIR',
+      'GIT_NAMESPACE',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'GIT_CONFIG_VALUE_0',
+      'GIT_CONFIG_KEY_1',
+      'GIT_CONFIG_VALUE_1',
+    ];
+    for (const name of redirectors) assert.equal(name in env, false, `${name} must not reach the fixture`);
+    for (const name of Object.keys(env)) {
+      assert.equal(name.startsWith('GIT_'), false, `${name} is a GIT_* variable and must not reach the fixture`);
+    }
   });
 });

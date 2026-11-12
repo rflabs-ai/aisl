@@ -93,7 +93,7 @@ describe('Pinning + hash verification', () => {
 
   test('the committed lockfile passes integrity + registry verification', () => {
     const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
-    const lockfile = JSON.parse(readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'));
+    const lockfile = JSON.parse(readFileSync(join(REPO_ROOT, 'npm-shrinkwrap.json'), 'utf8'));
     assert.deepEqual(checkLockfileIntegrity(lockfile, manifest), []);
     assert.deepEqual(checkRuntimeAllowlist(manifest), []);
   });

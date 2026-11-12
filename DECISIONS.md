@@ -1394,7 +1394,8 @@ the recorded residual.
    break or forge a manifest across machines) and binds the commit, not the
    working tree.
 2. **SBOM as a review artifact.** `ASL-SBOM v1` is generated from
-   `package-lock.json`: every package entry as
+   the lockfile (`npm-shrinkwrap.json`; npm never publishes
+   `package-lock.json`, so the shrinkwrap is the one that ships): every package entry as
    `{ name, version, resolved, integrity, direct, dev }`, canonically sorted,
    hash `sha256(canonicalJson(sbom))` (the Claim 26 primitive). The committed
    baseline `artifacts/sbom.json` is diffed by the gate: byte drift fails with

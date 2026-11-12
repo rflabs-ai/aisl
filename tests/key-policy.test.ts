@@ -9,7 +9,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -100,9 +100,13 @@ describe('key policy: the decision', () => {
     assert.doesNotThrow(() => assertDurableKeys('persistent', { env: envWith(EVIDENCE_KEYS) }));
   });
 
-  test('an empty value counts as missing', () => {
+  test('an empty value counts as missing (whitespace too)', () => {
     const env = { ...envWith(ALL_KEYS), CAPABILITY_SIGNING_KEY: '' };
     assert.throws(() => assertDurableKeys('server', { env }), /CAPABILITY_SIGNING_KEY/);
+    assert.throws(
+      () => assertDurableKeys('server', { env: { ...envWith(ALL_KEYS), CAPABILITY_SIGNING_KEY: '   ' } }),
+      /CAPABILITY_SIGNING_KEY/,
+    );
   });
 
   test('all keys set means no throw and no warning', () => {
@@ -163,6 +167,36 @@ describe('key policy: the seams', () => {
         world.eventLog.close();
       }
     });
+  });
+
+  test('EVENT_STORE=postgres without DATABASE_URL refuses instead of falling back to memory', () => {
+    const saved = { store: process.env.EVENT_STORE, url: process.env.DATABASE_URL };
+    process.env.EVENT_STORE = 'postgres';
+    delete process.env.DATABASE_URL;
+    try {
+      assert.throws(
+        () => buildWorld(),
+        /EVENT_STORE=postgres requires DATABASE_URL/,
+        'a silent in-memory fallback would tell the operator their evidence is persisted when it is not',
+      );
+    } finally {
+      if (saved.store === undefined) delete process.env.EVENT_STORE;
+      else process.env.EVENT_STORE = saved.store;
+      if (saved.url === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = saved.url;
+    }
+  });
+
+  test('nothing under src/ imports the test wiring (it pins keys into process.env)', () => {
+    const dir = join(import.meta.dirname, '..', 'src');
+    for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts'))) {
+      const text = readFileSync(join(dir, file), 'utf8');
+      assert.doesNotMatch(
+        text,
+        /from '\.\/testing\.ts'/,
+        `${file} must not import src/testing.ts: it writes durable keys into process.env at import`,
+      );
+    }
   });
 
   test('the REST server refuses to start with no keys', async () => {

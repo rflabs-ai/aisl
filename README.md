@@ -80,7 +80,7 @@ rest of the story.
 
 ## Quick start
 
-Requires **Node.js >= 22.5** (uses native TypeScript execution, `node:test`,
+Requires **Node.js >= 22.18** (uses native TypeScript execution, `node:test`,
 `node:sqlite` — no build step).
 
 ```bash
@@ -106,10 +106,11 @@ Convenience setup: `scripts/setup.ps1` (Windows) or `scripts/setup.sh`; pass
 ## Running AISL
 
 ASL is a **library + proof suite**, not a running service. There is no
-start/daemon command today — the commands above are the whole surface. The M14
-REST API (`createRestApi`) exists and is fully exercised by the test suite, but
-it is wired to an HTTP server **only in tests**; there is no production
-entrypoint yet. Cross-repo federation (control-plane as an ASL client,
+start/daemon command today — the commands above are the whole surface. The
+`aisl` bin in the npm package runs the same commands. The M14 REST API
+(`createRestApi`) exists and is fully exercised by the test suite, but it is
+wired to an HTTP server **only in tests**; there is no `serve` command yet.
+Cross-repo federation (control-plane as an ASL client,
 ADR-022) is **opt-in and currently off**; turning it on is what would require a
 `serve` command, which is not built. For how to run every project in this stack
 (start/stop/status/ports, on-demand vs always-on), see
@@ -117,10 +118,11 @@ ADR-022) is **opt-in and currently off**; turning it on is what would require a
 
 ## Status
 
-Stage 0 (conventional engineering) is **[DONE]**, and Stage 1/2 milestones
-(M2–M17, H1, H10) have landed. The system is a **foundation, not a product** —
-the seam exists everywhere, but several implementations are deliberately
-trivial and labelled as such. Where a component is a stub, the docs say so.
+Stage 0, 1 and 2 are **[DONE]** (M2–M17, H1–H15), and two Stage 3
+rows have landed (ADR-042, ADR-043). The system is a **foundation, not a
+product**: the seam exists everywhere, but several implementations are
+deliberately trivial and labelled as such. Where a component is a stub, the
+docs say so.
 
 Honest current gaps are listed in `CURRENT_STATE.md` under *Known
 vulnerabilities and gaps* and mirrored as limitations in

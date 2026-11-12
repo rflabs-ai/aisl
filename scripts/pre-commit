@@ -5,18 +5,17 @@
 # Gate: supply-chain, typecheck, tests. Bypass only with `git commit --no-verify`
 # and say why in the message.
 #
-# GIT_DIR HAZARD: while a hook runs, git exports GIT_DIR, GIT_WORK_TREE and
+# GIT_* HAZARD: while a hook runs, git exports GIT_DIR, GIT_WORK_TREE and
 # GIT_INDEX_FILE into the environment. Any test that shells out to git in a
 # temporary directory then operates on THIS repository instead of its own: a
 # fixture's `git init --bare` once flipped core.bare on the whole checkout and a
-# fixture's commit landed in this index. Unset them for the gate, so the test
-# process sees an ordinary environment.
+# fixture's commit landed in this index. Unset every GIT_* variable for the gate
+# (GIT_CONFIG_COUNT and GIT_CONFIG_KEY_n can set core.hooksPath too), so the
+# test process sees an ordinary environment.
 
-unset GIT_DIR
-unset GIT_WORK_TREE
-unset GIT_INDEX_FILE
-unset GIT_OBJECT_DIRECTORY
-unset GIT_ALTERNATE_OBJECT_DIRECTORIES
+for name in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$name"
+done
 
 echo "pre-commit: running supply-chain gate..."
 npm run supply-chain

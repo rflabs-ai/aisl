@@ -35,7 +35,7 @@ import { defineResource, detectInjectionSignals } from './registry.ts';
 import { AgentSession, LocalSandbox } from './runtime.ts';
 import { AuthorizationService } from './pdp.ts';
 import { policyBundleHash, createEngineFromBundle } from './policy-config.ts';
-import { mockAuth } from './testing.ts';
+import { mockAuth } from './mock-auth.ts';
 import {
   verifyBundle,
   eventPublicKey,

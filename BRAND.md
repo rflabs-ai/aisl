@@ -33,6 +33,25 @@ AISL is the product name, the CLI, and the npm package. It is descriptive and
 therefore weak as a trademark, which is normal and acceptable for infrastructure.
 The company name gets chosen later, when it has to be real.
 
+### The deferral got more expensive (2026-11-12)
+
+Still deferred, but no longer free to defer. Two facts changed the cost:
+
+1. **The revenue path starts sooner.** The recommended sequence leads with a
+   product that ships now (`docs/portfolio-wedge.md`), so the first invoice, and
+   therefore the entity, arrives earlier than "when it has to be real" implied.
+2. **The name is a distribution asset, not just a legal one.** The open-source
+   route to attention runs through a GitHub org, a Product Hunt launch, the
+   open-source credit programs, and "the team you want support from." All of
+   those are the company mark. The slot is now on the critical path.
+
+The naming method also fixes the structural mistake behind the KEPT loss: one
+name was asked to be both the registerable company mark and the descriptive
+product mark. See `docs/naming-method.md`. Legal screening comes first, creative
+work happens inside the cleared space, and the two names keep separate jobs.
+
+Background on the business consequences: `docs/business-and-ip.md`.
+
 ## The system
 
 | Layer | Value | Notes |
@@ -130,8 +149,13 @@ What survived was always either a compound or a coinage (`aisl`, `nemion`).
 ## Open questions
 
 - **Trademark search** in class 9 (software) and 42 (SaaS/security) for the next
-  candidate, before anything is printed. A lawyer, $500–1500.
-- **Second org owner** — required before the first customer, so the org does not
+  candidate, before anything is printed. Run it the legal-first way, not the
+  guess-then-check way: `docs/naming-method.md`. Two names, two jobs: a
+  registerable company mark, and `aisl` as the descriptive product mark.
+- **USPTO API key** (`developer.uspto.gov`, free). Without it no candidate is
+  screened, and an unscreened candidate counts as blocked, not as clear. The
+  previous attempt left both in-scope classes unsearched (`docs/brand-check.md`).
+- **Second org owner**: required before the first customer, so the org does not
   depend on one personal account surviving.
-- **Contact email** — currently a personal address. Move to a domain address
+- **Contact email**: currently a personal address. Move to a domain address
   once a name exists.

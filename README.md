@@ -153,6 +153,10 @@ adversary.
 | `PROJECT_CONTEXT.md` | Stable repository map (the live snapshot lives in CURRENT_STATE) |
 | `AGENTS.md` | Build discipline for contributors and agents |
 | `initial-idea-CONTEXT.md` | The original product brief this repository distills |
+| `docs/business-and-ip.md` | Business model, the legal stack, and the open-core seam |
+| `docs/naming-method.md` | Legal-first naming method, and which USPTO surface has the key |
+| `docs/portfolio-wedge.md` | Which project leads, by measured evidence rather than description |
+| `docs/naming-batch-2026-11-12.md` | Three naming batches, their results, and the domain-first correction |
 
 ## Contributing
 

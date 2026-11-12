@@ -24,6 +24,32 @@ was left, and what the next session should pick up.
 
 ---
 
+### SESSION 49 - 2026-11-12 - opencode/positioning, naming, and portfolio survey
+
+**Did:**
+- Added `docs/business-and-ip.md`: the open-source taxonomy, the legal stack (trademark is the gap, not copyright or patent), the three-layer license seam (format and denial free; custody, certification and support paid), and the DFY-to-product company shape.
+- Added `docs/naming-method.md`: legal-first naming, the six-surface USPTO map, and the Step 2b domain-first correction.
+- Added `docs/portfolio-wedge.md`: the wedge survey rebuilt from `shared-docs/CLAIMS-INDEX.md` instead of the control-plane registry. `vkeys` is the wedge that feeds AISL, `mcp-weight` has the only measured demand, `fixture-cad` has the best verifiable shipped claim.
+- Added `docs/naming-batch-2026-11-12.md`: 79 candidates across three batches. Concept field 0 survivors, two-syllable coinage 0 survivors, domain-first three-syllable 2 survivors with stated caveats.
+- Updated `BRAND.md`: the name deferral is now on the critical path, plus the two-name rule (company mark vs product mark).
+- Added `data/tm/` to `.gitignore`; raw screen payloads stay local.
+- Created the `name-project` skill in `~/.agents/skills` (commercial, creative, internal modes) and registered it.
+- Recorded the competitor finding: Sigilith, Custodel and Testari describe this thesis almost verbatim, so the category is not empty.
+
+**Left:**
+- No registered trademark. `AISL` is a descriptive product mark; the company mark is still unfilled.
+- `nirastra` and `velethra` need a real clearance pass in classes 9 and 42, through the search export rather than the API.
+- The generator needs a sound profile; both survivors fail the ear test for opposite reasons.
+
+**Next session should:**
+- Run the clearance export for `velethra`, `nirastra`, `mandaris`, `warrantia`, or define the sound profile and run batch 4 with the domain-first filter.
+- Decide standard vs product (`docs/business-and-ip.md` §8), which sets the license seam.
+
+**Evidence:**
+- Docs only, no source change. `npm run typecheck` clean; `npm test` 859 tests, 838 pass, 0 fail, 21 skipped (Postgres-gated).
+- Naming batches: 79 candidates screened, 2 survivors with caveats.
+- Competitor pages fetched 2026-11-12; exact lines in `docs/naming-batch-2026-11-12.md`.
+
 ### SESSION 48 - 2026-11-12 - opencode/release audit + security fixes
 
 **Did:**

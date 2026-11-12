@@ -21,5 +21,8 @@ artifacts/adversarial-report.json
 
 # Session evidence: useful locally, must not travel (docs/safety/02-artifacts-safe.md).
 .scratch/
+# Raw trademark screen payloads: reproducible locally, re-fetched per batch,
+# never a source of truth once stale (docs/naming-method.md).
+data/tm/
 # Release tarballs (npm pack --pack-destination dist).
 dist/

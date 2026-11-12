@@ -3,7 +3,7 @@
 Working brand decisions for this project, recorded so later sessions do not
 relitigate naming. Every claim here was checked; every rejection has a reason.
 
-Last updated: 2026-11-01.
+Last updated: 2026-11-12.
 
 ---
 
@@ -38,8 +38,8 @@ The company name gets chosen later, when it has to be real.
 | Layer | Value | Notes |
 | --- | --- | --- |
 | **Company** | **deferred** (see below) | "Kept" is blocked: an identical live word mark in classes 9 and 42. A company name is not needed until incorporation, a signed agreement, or money. |
-| **Domain** | none purchased | `kepthq.dev` was free at ~$15. Nothing depends on it. Buy when a name exists. |
-| **GitHub org** | `kepthqdev` | Created 2026-11-01, empty. Name is provisional; the org can be renamed or abandoned. |
+| **Domain** | none purchased | The placeholder checked on 2026-11-01 is abandoned with the dropped name. Buy when a name exists. |
+| **GitHub org** | none active | The provisional org created on 2026-11-01 is abandoned. A new org comes with the name. |
 | **CLI / artifact** | **`aisl`** | npm `aisl` is free. Spoken as "aisle". The name in the repo, the terminal, and the logs. |
 | **Category** | **AI bailment** | Our coinage. A bailment is the legal relationship of holding another's property under a duty of care, with a duty to return and account. |
 | **Company line** | **Nothing leaves without a record.** | Hero, deck, footer, sticker. |
@@ -48,7 +48,7 @@ The company name gets chosen later, when it has to be real.
 
 ### Pronoun and casing
 
-- **Kept** — always capitalised, never "KEPT", never "Kept™" in prose.
+- **Kept** — dropped. Do not use it. See the deferred-name section above.
 - **aisl** — always lowercase, monospace when referring to the binary, "AISL"
   never. In speech: "aisle".
 - **AI bailment** — lowercase "bailment". It is a category, not a product.
@@ -68,21 +68,29 @@ decade (Mastercard "Priceless" since 1997, CrowdStrike "We stop breaches" since
 | Logo lockup | Held in. Accounted for. |
 | Comparison page, sales call | The fence, not the guardrail. |
 
-The tagline never repeats the company name. "Kept — everything is kept" makes the
-sentence eat itself.
+The tagline never repeats the company name. A name that restates the promise
+makes the sentence eat itself.
 
 ---
 
-## Why "Kept"
+## Why "Kept" was chosen, and why it was dropped
+
+Kept as a record of the reasoning, not as a recommendation. Do not revive it.
+
+Why it was chosen:
 
 - It is the past participle of the exact verb the product performs: data is
   **held**, **maintained**, and **not released**.
 - It is one syllable, pronounceable in every major language, and has no
   unfortunate rhyme.
 - It carries the containment sense (kept in), the care sense (well-kept), and the
-  confidentiality sense (a well-kept secret) — three meanings, one word.
+  confidentiality sense (a well-kept secret): three meanings, one word.
 - The archaic "kept man" reading is a dictionary footnote, not a live mental
-  category. Accepted risk, recorded here so nobody re-raises it.
+  category.
+
+Why it was dropped: an identical live word mark in classes 9 and 42, serial
+50171161, filed 2026-10-20. See the deferred-name section above and
+`docs/brand-check.md`.
 
 ---
 
@@ -101,6 +109,7 @@ sentence eat itself.
 | Cordon / Palisade / Bastion / Aegis | Obvious to us means obvious to everyone; all taken or generic. |
 | EyeHold / EyeKeep | Apple-derived `i-` pattern, and "eye" now reads as eye-tracking. |
 | `ASL` | Collides with American Sign Language and the "age/sex/location" chat acronym. Survives only as the historical repo name. |
+| Kepthq / kepthqdev | Placeholder domain and org built on the dropped Kept name. Abandoned 2026-11-12. |
 
 ---
 
@@ -114,18 +123,15 @@ names, including `kept`, `held`, `bound`, `berth`, `trove`, `redoubt`,
 Finnish and Japanese words for guardian. A meaningful, unmodified, free name is
 an empty set — the namespace land rush ended around 2015.
 
-What survived was always either a compound (`kepthq`, `kept.security`) or a
-coinage (`aisl`, `nemion`).
+What survived was always either a compound or a coinage (`aisl`, `nemion`).
 
 ---
 
 ## Open questions
 
-- **Trademark search** in class 9 (software) and 42 (SaaS/security) — not done.
-  A lawyer, $500–1500, before anything is printed.
-- **`kept.security` at $2k** — verify whether that is one-time or annual. If
-  annual, never buy it.
+- **Trademark search** in class 9 (software) and 42 (SaaS/security) for the next
+  candidate, before anything is printed. A lawyer, $500–1500.
 - **Second org owner** — required before the first customer, so the org does not
   depend on one personal account surviving.
 - **Contact email** — currently a personal address. Move to a domain address
-  once `kepthq.dev` mail is set up.
+  once a name exists.

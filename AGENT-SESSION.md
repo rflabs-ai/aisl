@@ -53,6 +53,10 @@ was left, and what the next session should pick up.
   publishes `package-lock.json`).
 - **Docs:** CURRENT_STATE, RELEASE, README, safety tickets 04/05, the safety
   snapshot, DECISIONS (ADR-015 lockfile note), SECURITY_CLAIMS.
+- **Brand:** KEPTHQ and its domain/org placeholders are abandoned; no company
+  name is in use. BRAND.md records the dropped Kept mark and the deferred name.
+- **History:** the stray docs-only commit `5ccc86c` was removed from `main` by
+  rebase and the local relay force-updated. No content from it was needed.
 
 **Left:**
 - **Package release is still blocked:** `bin/aisl.mjs` imports `src/cli.ts`, and
@@ -65,7 +69,7 @@ was left, and what the next session should pick up.
 
 **Next session should:**
 1. Land the compiled-output step, then `npm publish` and tag `v0.1.0`.
-2. `git remote add gh https://github.com/kepthqdev/aisl.git && git push -u gh main`.
+2. `git remote add gh https://github.com/<org>/aisl.git && git push -u gh main`.
 3. Clean-clone test: clone, install, `npm run demo`, `npm test`.
 
 **Evidence:**
@@ -75,7 +79,7 @@ was left, and what the next session should pick up.
   (235 entries, 2.7 MB) all exit 0.
 - npm tarball: 90 files, 207 kB; extracted `demo` exits 0.
 - Commits since SESSION 47: `b390a2f`, `f146230`, `f8ca727`, `f8c576e`,
-  `fc7369b`, `5ccc86c`, plus the fixes on `fix/release-blockers`.
+  `fc7369b`, plus the release fixes on `3cad39d`.
 
 ### SESSION 47 - 2026-11-10 - opencode/durable keys + hook incident
 
@@ -113,8 +117,8 @@ was left, and what the next session should pick up.
 ### SESSION 46 - 2026-11-01 - opencode/branding, safety gates, pilot, spend cap
 
 **Did:**
-- **Brand settled** (`BRAND.md`): company **Kept**, domain `kepthq.dev`, GitHub org
-  **kepthqdev**, CLI **`aisl`** said as "aisle", category **"AI bailment"**, company
+- **Brand settled** (`BRAND.md`): company **Kept** (later dropped), placeholder
+  domain and org (both abandoned 2026-11-12), CLI **`aisl`** said as "aisle", category **"AI bailment"**, company
   line "Nothing leaves without a record.", lockup "Held in. Accounted for.",
   positioning "The fence, not the guardrail." The rejected names and why are
   recorded so they are not relitigated.
@@ -127,7 +131,7 @@ was left, and what the next session should pick up.
   first two, evidence bundle as the deliverable.
 - **Spend cap** (`src/model-http.ts`): `ModelBudget`, refused before the fetch,
   `denyReason: budget-exhausted`, 7 tests. Ticket 04 closed for spend.
-- **GitHub**: org `kepthqdev` exists. Repo created as `kepthqdev/aisl` but the
+- **GitHub**: a provisional org existed. Repo created as `aisl` under it, but the
   local push failed (`--remote origin` collides with the local bare repo);
   nothing has been pushed yet.
 
@@ -140,7 +144,7 @@ was left, and what the next session should pick up.
 - Zero design-partner conversations so far.
 
 **Next session should:**
-1. `git remote add gh https://github.com/kepthqdev/aisl.git && git push -u gh main`
+1. `git remote add gh https://github.com/<org>/aisl.git && git push -u gh main`
 2. Publish `aisl` to npm (also unblocks the raven verifier).
 3. Send the pilot page to twenty people. That number is the whole game.
 

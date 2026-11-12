@@ -26,7 +26,7 @@ projects ship something they cannot support.
 - [x] `node scripts/pack-release.mjs` — 235 entries, 2.7 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
-- [ ] **Push to `kepthqdev/aisl`** — the only remaining step for this release
+- [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release
 
 ## Package release — blocked on one thing
 
@@ -44,8 +44,8 @@ The tarball is correct. The installed CLI is not runnable yet.
       (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so `npm i aisl` installs
       a CLI that cannot start. Fix: `tsc` to `dist/`, point `bin` at
       `dist/cli.js`, and keep the source tree as the review artifact.
-- [ ] `npm publish` under the name `aisl` (unscoped name is free; `@kepthqdev/aisl`
-      also works and is safer against squatters)
+- [ ] `npm publish` under the name `aisl` (unscoped name is free; a scoped
+      `@<org>/aisl` also works once the org exists)
 - [ ] Tag `v0.1.0`
 
 Not a blocker for outreach. It *is* the blocker for wiring raven, because the

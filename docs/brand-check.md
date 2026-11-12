@@ -92,9 +92,7 @@ Separate from trademark records, availability of the names people type:
 | `kept.security` | resolves free, priced $2k by the registrar | 2026-11-01 |
 | `kept.dev` | SERVFAIL, treat as unavailable | 2026-11-01 |
 | `kept.io`, `kept.ai` | registered | 2026-11-01 |
-| `kepthq.dev` | free | 2026-11-01 |
-| GitHub org `kepthq` | reserved by GitHub (API 404, UI refuses) | 2026-11-01 |
-| GitHub org `kepthqdev` | free, created | 2026-11-01 |
+| Kepthq variants (`kepthq.dev`, orgs `kepthq` / `kepthqdev`) | checked 2026-11-01; abandoned 2026-11-12 with the dropped Kept name | 2026-11-01 |
 | npm `aisl` | free | 2026-11-01 |
 
 Market availability says nothing about registrability. A word can be free to

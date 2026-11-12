@@ -97,8 +97,14 @@ Optional environment:
 - `CAPABILITY_SIGNING_KEY` — without it an ephemeral key is generated and a
   warning is emitted (fail-closed still holds; capabilities just don't survive
   restarts).
+- `EVENT_SIGNING_PRIVATE_KEY_PEM` + `EVENT_SIGNING_PUBLIC_KEY_PEM`,
+  `EVIDENCE_SEALING_KEY`, `SECRET_MASTER_KEY` — the durable keys. Demo,
+  benchmark, and the attack harness run with ephemeral keys on purpose and warn
+  about it; set these to silence the warnings and keep evidence readable after
+  a restart. See `DEPLOYMENT.md`.
 - `EVENT_STORE=postgres` + `DATABASE_URL` — opt into the Postgres event backend.
-  Ambient `DATABASE_URL` alone flips nothing.
+  Ambient `DATABASE_URL` alone flips nothing. `EVENT_STORE=postgres` without
+  `DATABASE_URL` refuses to start rather than fall back to memory.
 
 Convenience setup: `scripts/setup.ps1` (Windows) or `scripts/setup.sh`; pass
 `-WithPostgres` / `--with-postgres` to bootstrap a Postgres 16 container.

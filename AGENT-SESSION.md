@@ -105,7 +105,8 @@ was left, and what the next session should pick up.
   (235 entries, 2.7 MB) all exit 0.
 - npm tarball: 90 files, 207 kB; extracted `demo` exits 0.
 - Commits since SESSION 47: `b390a2f`, `f146230`, `f8ca727`, `f8c576e`,
-  `fc7369b`, plus the release fixes on `3cad39d`.
+  `fc7369b`, plus the release fixes now on `ea32733` (SHA after the 2026-11-12
+  history rewrite).
 
 ### SESSION 47 - 2026-11-10 - opencode/durable keys + hook incident
 

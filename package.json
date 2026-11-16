@@ -11,6 +11,7 @@
     "aisl": "bin/aisl.mjs"
   },
   "files": [
+    "dist",
     "src",
     "bin",
     "tools/manifests",
@@ -25,6 +26,8 @@
     "SECURITY.md"
   ],
   "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "test": "node --test \"tests/*.test.ts\" \"security-tests/*.test.ts\"",
     "demo": "node src/cli.ts demo",
     "benchmark": "node src/cli.ts benchmark",

@@ -2,7 +2,7 @@
 
 Status: open
 Source: mining S3-D0078, shard-3.md.
-Repo: C:\Users\kcpat\projects\ai-security-layer.
+Repo: `ai-security-layer`.
 
 ## Evidence
 

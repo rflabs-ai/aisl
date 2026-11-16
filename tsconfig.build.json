@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    // TypeScript 7 refuses to infer it; src is the only input.
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": false,
+    "sourceMap": false,
+    // The source tree imports with .ts specifiers so Node can run it directly
+    // with no build step. The publish build must emit .js specifiers, or dist
+    // would depend on Node stripping types it will not strip under
+    // node_modules.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}

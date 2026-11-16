@@ -3218,3 +3218,58 @@ never what was done with it.
 **Future migration path:** replay lineage from `document.ingest` /
 `session.guard` / artifact events at startup; then the graph becomes a derived
 view of evidence rather than a separate store.
+
+## ADR-044: Buildless development, compiled publish
+
+**Context:** the source tree runs directly under Node's type stripping, pinned
+to `engines.node >= 22.18`. `bin/aisl.mjs` imported `../src/cli.ts`, and the
+`files` allowlist shipped `src`, so the tarball was complete and the extracted
+CLI ran. It still could not start after `npm i aisl`: Node refuses type
+stripping anywhere under `node_modules`
+(`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). The package was installable and
+inert at the same time (ticket 01).
+
+**Decision:**
+
+1. **Two build modes, one source tree.** `tsconfig.json` stays the review
+   artifact: `noEmit`, every relative import written with a `.ts` specifier, and
+   `node src/cli.ts demo` stays the development loop. `tsconfig.build.json`
+   extends it with `outDir: dist`, `rootDir: src`, `noEmit: false`,
+   `declaration: false`, `sourceMap: false`, and includes only `src/**/*.ts`.
+2. **`tsc` rewrites the specifiers.** `allowImportingTsExtensions` plus
+   `rewriteRelativeImportExtensions` turn `./events.ts` into `./events.js` on
+   emit, so the published JavaScript has no `.ts` specifier and needs no type
+   stripping. No bundler: `typescript` is already a devDependency, and adding one
+   would be a second compiler to trust.
+3. **`bin/aisl.mjs` launches `../dist/cli.js`.** It keeps `pathToFileURL`
+   because a Windows drive letter is not a valid ESM specifier. The launcher is
+   the only file that knows where the entry lives.
+4. **`dist` is in `files` and in `.gitignore`.** The npm package ships compiled
+   output plus the source tree; the repository tracks only the source. `build`
+   deletes `dist` before compiling, so a removed or renamed module cannot
+   survive in a stale artifact and ship.
+5. **`prepublishOnly` is `typecheck && test && build`.** No `prepare`: a
+   consumer install must not need devDependencies, and a dependency that builds
+   on install is a dependency that can fail on install.
+
+**Security implications:** what npm publishes is now a deterministic function of
+committed source, and the supply-chain gate keeps binding `files` content
+through the SBOM baseline. Nothing about the runtime dependency set changes:
+still `jose` and `postgres` (ADR-015).
+
+**Tradeoffs:** two configs to keep in step; a publish step that can forget to
+run `build` (`prepublishOnly` is the guard, and it is skipped by
+`--ignore-scripts`); and the reviewer must read `src`, not `dist`, because
+`dist` is generated.
+
+**Residual risk (named):** `dist` is regenerated, never reviewed, so a
+publishing machine with a dirty compiler or a stale `node_modules` can emit
+different bytes than a clean clone would. The tree digest in the build manifest
+covers committed source, not emitted output. And `aisl demo` sections 20-21
+shell out to `git ls-files` at the package root (ADR-024), so a bare
+`npm i aisl` with no `.git` starts the CLI but ends the demo with exit 1; the
+packaging test stages a repository to reach exit 0.
+
+**Future migration path:** emit a reproducibility record (compiler version,
+`dist` digest) into the build manifest, then a consumer can check the published
+bytes against the committed source instead of trusting the publisher.

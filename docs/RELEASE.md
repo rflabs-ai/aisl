@@ -6,7 +6,7 @@ projects ship something they cannot support.
 | Release | Meaning | Status |
 | --- | --- | --- |
 | **Source** | someone can clone, read, build and run it | **ready** |
-| **Package** | `npm i aisl` works | **blocked: compiled output** |
+| **Package** | `npm i aisl` works | **ready** (ships compiled `dist/`; `aisl demo` wants a git checkout) |
 | **Service** | someone else runs it exposed to a network | **ready** (TLS at the edge; rate limits are the proxy's job) |
 
 ---
@@ -23,31 +23,38 @@ projects ship something they cannot support.
 - [x] `docs/PILOT-TARGETS.md` — 50 organizations, ranked by reply likelihood
 - [x] Safety gates 1, 2, 3 — evidence in `docs/SAFETY-2026-11-01.md`,
       tickets in `docs/safety/`
-- [x] `node scripts/pack-release.mjs` - 238 entries, 2.7 MB, forbidden: none.
+- [x] `node scripts/pack-release.mjs` - 259 entries, 2.8 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
 - [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release
 
-## Package release — blocked on one thing
+## Package release — ready
 
-The tarball is correct. The installed CLI is not runnable yet.
+The tarball is correct and the installed CLI runs from it.
 
-- [x] `files` allowlist: 91 files, 207 kB packed. Ships `src`, `bin`,
-      `tools/manifests`, `security-attacks`, `security-fixtures`,
-      `tests/fixtures/policy`, `artifacts/sbom.json`, and
+- [x] `files` allowlist: 151 files, 366,599 bytes packed (1,407,408 unpacked).
+      Ships `dist`, `src`, `bin`, `tools/manifests`, `security-attacks`,
+      `security-fixtures`, `tests/fixtures/policy`, `artifacts/sbom.json`, and
       `npm-shrinkwrap.json` (npm never publishes `package-lock.json`, so the
       shrinkwrap is the lockfile that ships). Ships `LICENSE`, `NOTICE`,
       `README.md`, `SECURITY.md`. No `docs/`, `PROMPTS/`, `security-tests/`,
-      `.build-keys/`, `.scratch/`, or `dist/`.
-- [x] Extracted tarball runs: `node package/bin/aisl.mjs demo` exits 0.
-- [ ] **Compiled output.** `bin/aisl.mjs` imports `src/cli.ts`. Node refuses
-      type stripping under `node_modules`
-      (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so `npm i aisl` installs
-      a CLI that cannot start. Fix: `tsc` to `dist/`, point `bin` at
-      `dist/cli.js`, and keep the source tree as the review artifact.
+      `.build-keys/`, or `.scratch/`. `dist/` is gitignored and generated.
+- [x] Extracted tarball runs: `node node_modules/aisl/bin/aisl.mjs demo` exits
+      0 from the installed layout (also asserted offline in
+      `tests/packaging-installed-cli.test.ts`).
+- [x] **Compiled output.** `tsconfig.build.json` emits `dist/` with
+      `tsc`, which rewrites the source tree's `.ts` import specifiers to `.js`;
+      `bin/aisl.mjs` launches `../dist/cli.js`. Development stays buildless
+      (`node src/cli.ts demo`). No new runtime dependency: `typescript` was
+      already a devDependency. See ADR-044.
 - [ ] `npm publish` under the name `aisl` (unscoped name is free; a scoped
       `@<org>/aisl` also works once the org exists)
 - [ ] Tag `v0.1.0`
+
+Known, and not a packaging defect: `aisl demo` sections 20-21 digest the
+committed tree (`git ls-files`, ADR-024), so a `node_modules` copy with no
+`.git` around it starts the CLI but ends the demo with exit 1. Give it a
+repository, or use a command that does not run the supply-chain gate.
 
 Not a blocker for outreach. It *is* the blocker for wiring raven, because the
 Pi needs a way to run `verifyUpdate` (see `PROMPTS/M18-federation-project-raven.md`).
@@ -73,8 +80,9 @@ a reverse proxy that owns rate limits.*
 
 The order matters, and the last step is the least urgent.
 
-1. Land the compiled-output step, then `npm publish` (the tarball is verified:
-   91 files, 207 kB, and the extracted CLI runs).
+1. `npm publish` (the tarball is verified: 151 files, 366,599 bytes, and the
+   extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
+   so a publish cannot ship a `dist` older than the source.
 2. `git tag v0.1.0`.
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,

@@ -2,7 +2,7 @@
 
 Status: open
 Source: mining D0159, cont-1.md.
-Repo: C:\Users\kcpat\projects\ai-security-layer.
+Repo: `ai-security-layer`.
 
 ## Evidence
 

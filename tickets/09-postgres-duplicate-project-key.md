@@ -2,7 +2,7 @@
 
 Status: open
 Source: mining S6-D0097, shard-6.md.
-Repo: C:\Users\kcpat\projects\ai-security-layer.
+Repo: `ai-security-layer`.
 
 ## Evidence
 

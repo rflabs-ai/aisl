@@ -2,7 +2,7 @@
 
 Status: open
 Source: mining S4-D0021, shard-4.md.
-Repo: C:\Users\kcpat\projects\ai-security-layer.
+Repo: `ai-security-layer`.
 
 ## Evidence
 

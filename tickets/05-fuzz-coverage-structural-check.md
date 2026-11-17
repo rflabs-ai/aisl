@@ -1,6 +1,6 @@
 # Fuzz coverage claim needs a structural check
 
-Status: open
+Status: done
 Source: mining S3-D0078, shard-3.md.
 Repo: `ai-security-layer`.
 
@@ -30,3 +30,23 @@ fails when a key has no entry in the extremes table.
 - A test fails when a new `IssueRequest` field is added without an extreme
   case, proven by temporarily adding a field and watching it go red.
 - The suite title matches what the table actually covers.
+
+## Result
+
+Done 2026-11-17, test-only.
+
+- The fuzz suite is now "every IssueRequest field has an extreme case": 18 rows
+  over all 9 keys. Rows may name their own parent, so the constraint cases run
+  against a constrained parent.
+- Refusing extremes: a child that widens the parent network hosts, a child that
+  sends an empty constraint list, and a child that flips a single-use parent to
+  non-single-use. The earlier constraint/single-use tests stay.
+- A structural test parses the `IssueRequest` interface out of
+  `src/capability.ts` and fails when a key has no row. Proven by temporarily
+  adding `readonly budget?: number;` (failed with "no extreme case for
+  IssueRequest.budget"), then removing it. `src/` is unchanged.
+- Not refused today, so marked `carried` instead of claimed as refusals: an
+  unknown constraint kind, a non-boolean `singleUse`, an empty `subject`, and
+  an unknown `provenance.source` all reach the signed capability. Those rows
+  turn red if `src/` starts validating them; closing the gaps needs a src
+  change and is out of scope here.

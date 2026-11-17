@@ -452,65 +452,55 @@ describe('H1: issuance fuzzing, every IssueRequest field has an extreme case', (
     readonly over: Partial<IssueRequest>;
     /** Parent to present; defaults to the unconstrained one. */
     readonly parent?: Capability;
-    /**
-     * `refuses`: issuance must throw. `carried`: src has no issuance-time check
-     * for this extreme today, so it reaches the signed capability. Those two
-     * cases are documented gaps, not endorsements; they flip red when src
-     * starts refusing them.
-     */
-    readonly outcome: 'refuses' | 'carried';
   }
 
   const extremes: readonly Extreme[] = [
-    { field: 'subject', name: 'empty subject', over: { subject: '' }, outcome: 'carried' },
-    { field: 'tenantId', name: 'cross-tenant child', over: { tenantId: 'globex' }, outcome: 'refuses' },
-    { field: 'resourceIds', name: 'wildcard resources', over: { resourceIds: ['*'] }, outcome: 'refuses' },
+    { field: 'subject', name: 'empty subject', over: { subject: '' } },
+    { field: 'tenantId', name: 'cross-tenant child', over: { tenantId: 'globex' } },
+    { field: 'resourceIds', name: 'wildcard resources', over: { resourceIds: ['*'] } },
     {
       field: 'resourceIds',
       name: 'unknown resource',
       over: { resourceIds: ['repo:does-not-exist'] },
-      outcome: 'refuses',
     },
-    { field: 'resourceIds', name: 'empty resources', over: { resourceIds: [] }, outcome: 'refuses' },
+    { field: 'resourceIds', name: 'empty resources', over: { resourceIds: [] } },
     {
       field: 'actions',
       name: 'wildcard actions',
       over: { actions: ['*'] as IssueRequest['actions'] },
-      outcome: 'refuses',
     },
-    { field: 'actions', name: 'escalated action', over: { actions: ['delete'] }, outcome: 'refuses' },
+    { field: 'actions', name: 'escalated action', over: { actions: ['delete'] } },
     {
       field: 'actions',
       name: 'empty actions',
       over: { actions: [] as IssueRequest['actions'] },
-      outcome: 'refuses',
     },
     {
       field: 'maxClassification',
       name: 'classification above ceiling',
       over: { maxClassification: 'restricted' },
-      outcome: 'refuses',
     },
     {
       field: 'maxClassification',
       name: 'unknown classification',
       over: { maxClassification: 'top-secret' as IssueRequest['maxClassification'] },
-      outcome: 'refuses',
     },
-    { field: 'expiresAt', name: 'expiry beyond the parent', over: { expiresAt: now + 120_000 }, outcome: 'refuses' },
-    { field: 'expiresAt', name: 'expiry in the past', over: { expiresAt: now - 1 }, outcome: 'refuses' },
+    {
+      field: 'expiresAt',
+      name: 'expiry beyond the parent',
+      over: { expiresAt: now + 120_000 },
+    },
+    { field: 'expiresAt', name: 'expiry in the past', over: { expiresAt: now - 1 } },
     {
       field: 'singleUse',
       name: 'non-boolean singleUse',
       over: { singleUse: 'yes' as unknown as boolean },
-      outcome: 'carried',
     },
     {
       field: 'singleUse',
       name: 'child flips a single-use parent to non-single-use',
       over: { singleUse: false },
       parent: singleUseParent,
-      outcome: 'refuses',
     },
     {
       field: 'constraints',
@@ -518,39 +508,32 @@ describe('H1: issuance fuzzing, every IssueRequest field has an extreme case', (
       over: {
         constraints: [{ kind: 'file-path', pattern: '**' }] as unknown as IssueRequest['constraints'],
       },
-      outcome: 'carried',
     },
     {
       field: 'constraints',
       name: 'child widens the parent network hosts',
       over: { constraints: [{ kind: 'network-host', hosts: ['a.example.com', 'evil.example.com'] }] },
       parent: constrainedParent,
-      outcome: 'refuses',
     },
     {
       field: 'constraints',
       name: 'empty constraint list',
       over: { constraints: [] },
       parent: constrainedParent,
-      outcome: 'refuses',
     },
     {
       field: 'provenance',
       name: 'unknown provenance source',
       over: { provenance: { source: 'bogus' as IssueRequest['provenance']['source'] } },
-      outcome: 'carried',
     },
   ];
 
   for (const e of extremes) {
-    test(`extreme: ${e.name} (${e.outcome})`, () => {
-      const attempt = () =>
-        issueCapability(svcPrincipal(), childRequest(world, e.over), now, e.parent ?? parent);
-      if (e.outcome === 'refuses') {
-        assert.throws(attempt, CapabilityIssuanceError);
-      } else {
-        assert.doesNotThrow(attempt);
-      }
+    test(`extreme: ${e.name} refuses`, () => {
+      assert.throws(
+        () => issueCapability(svcPrincipal(), childRequest(world, e.over), now, e.parent ?? parent),
+        CapabilityIssuanceError,
+      );
     });
   }
 

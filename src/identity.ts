@@ -237,6 +237,11 @@ export class IdentityProvider {
     this.revocationLastSyncAt = Number.NEGATIVE_INFINITY;
   }
 
+  /** True once a feed is attached; the production assembly's health signal. */
+  hasRevocationFeed(): boolean {
+    return this.revocationFeed !== undefined;
+  }
+
   private syncRevocations(): void {
     const feed = this.revocationFeed;
     if (!feed) return;

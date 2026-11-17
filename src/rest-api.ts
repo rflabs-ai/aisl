@@ -16,7 +16,7 @@ import type { AuthContext, Principal, Action } from './domain.ts';
 import type { AuthorizationService } from './pdp.ts';
 import type { IdentityProvider } from './identity.ts';
 import type { EventStore } from './events.ts';
-import type { HealthState } from './health.ts';
+import type { HealthState, DependencyStatus } from './health.ts';
 import { assertDurableKeys } from './key-policy.ts';
 import { registerSessionRoutes, type SessionRouteDeps } from './rest-sessions.ts';
 import { registerAuditRoutes, type AuditRouteDeps } from './rest-audit.ts';
@@ -156,6 +156,12 @@ export interface RestApiDeps {
    * `{ idp, store }` shape is unchanged.
    */
   readonly health?: HealthState;
+  /**
+   * Ticket 06: H13 revocation-feed status. When wired, `/healthz` adds a
+   * `revocation` field: `unavailable` means the feed is not attached or the
+   * channel is recording errors, so `revoke-token` may not reach this node.
+   */
+  readonly revocationHealth?: () => DependencyStatus;
   /** Body size cap in bytes. Default: 1_048_576 (1 MiB). */
   readonly maxBodyBytes?: number;
   /**
@@ -222,6 +228,7 @@ export class RestApi {
   private readonly resolvePrincipalFn: (auth: AuthContext) => Principal | undefined;
   private readonly storeHealth: () => 'ok' | 'unavailable';
   private readonly health?: HealthState;
+  private readonly revocationHealth?: () => DependencyStatus;
   private readonly maxBodyBytes: number;
   private readonly incidentSync?: () => void;
   private readonly host: string;
@@ -237,6 +244,7 @@ export class RestApi {
     this.resolvePrincipalFn = deps.resolvePrincipal;
     this.storeHealth = deps.storeHealth ?? (() => 'ok');
     this.health = deps.health;
+    this.revocationHealth = deps.revocationHealth;
     this.maxBodyBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     this.incidentSync = deps.incidentSync;
     this.host = deps.host ?? '127.0.0.1';
@@ -244,9 +252,7 @@ export class RestApi {
 
     this.addRoute('GET', '/healthz', () => ({
       status: 200,
-      body: this.health
-        ? { idp: this.idp.getIdPHealth().status, ...this.health.snapshot() }
-        : { idp: this.idp.getIdPHealth().status, store: this.storeHealth() },
+      body: this.healthBody(),
     }));
     this.addRoute('POST', '/v1/authorize', (ctx) => this.authorizeRoute(ctx));
     for (const page of deps.staticPages ?? []) {
@@ -476,6 +482,18 @@ export class RestApi {
       return { ok: false };
     }
     return { ok: true, value: parsed };
+  }
+
+  /**
+   * The M14 shape is `{ idp, store }`; H15 adds `{ engine, clock }` when a
+   * `HealthState` is wired; ticket 06 adds `revocation` only when the assembly
+   * supplies the probe, so existing embedders see an unchanged body.
+   */
+  private healthBody(): Record<string, unknown> {
+    const base = this.health
+      ? { idp: this.idp.getIdPHealth().status, ...this.health.snapshot() }
+      : { idp: this.idp.getIdPHealth().status, store: this.storeHealth() };
+    return this.revocationHealth ? { ...base, revocation: this.revocationHealth() } : base;
   }
 
   private authorizeRoute(ctx: RestRequestContext): RestResponse {

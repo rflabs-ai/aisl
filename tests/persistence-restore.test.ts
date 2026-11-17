@@ -162,6 +162,36 @@ describe('M12 persistence API over Postgres (ADR-018 Stage-0 state store)', () =
     }
   });
 
+  /**
+   * Ticket 09 contract: `createProject` is an idempotent create keyed on the
+   * project id. The first call inserts; a repeat in the same tenant returns
+   * the existing row (created_at preserved, name refreshed) instead of a raw
+   * `projects_pkey` violation. A repeat under another tenant affects zero
+   * rows and refuses loudly: the id is global, the row is tenant-scoped.
+   */
+  test('projects: creating the same id twice is idempotent and tenant-scoped (ticket 09)', { skip: PG_SKIP }, async () => {
+    const store = await seededPersistenceStore(DATABASE_URL!);
+    try {
+      const first = await store.createProject('t1', 'proj-1', 'Acme platform');
+      const second = await store.createProject('t1', 'proj-1', 'Acme platform (renamed)');
+
+      assert.equal(second.id, 'proj-1');
+      assert.equal(second.tenantId, 't1');
+      assert.equal(second.createdAt.getTime(), first.createdAt.getTime(), 'repeat create keeps created_at');
+      assert.equal(second.name, 'Acme platform (renamed)', 'repeat create refreshes name');
+      assert.deepEqual((await store.listProjects('t1')).map((p) => p.id), ['proj-1'], 'one row, not two');
+
+      await assert.rejects(
+        store.createProject('t2', 'proj-1', 'Hostile takeover'),
+        /belongs to another tenant: refusing to create/,
+      );
+      assert.deepEqual(await store.getProject('t1', 'proj-1'), second, 'cross-tenant create changed nothing');
+      assert.deepEqual(await store.listProjects('t2'), [], 'cross-tenant create wrote no row');
+    } finally {
+      store.close();
+    }
+  });
+
   test('tasks: FK-scoped creation, status updates, per-project listing', { skip: PG_SKIP }, async () => {
     const store = await seededPersistenceStore(DATABASE_URL!);
     try {

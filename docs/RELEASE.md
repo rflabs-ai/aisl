@@ -13,7 +13,7 @@ projects ship something they cannot support.
 
 ## Source release — ready
 
-- [x] `npm run typecheck && npm test`: 839 pass, 0 fail, 21 Postgres skips (860 tests)
+- [x] `npm run typecheck && npm test`: 850 pass, 0 fail, 21 Postgres skips (871 tests)
 - [x] `npm run demo` and `npm run benchmark` run clean; SLO block passes
 - [x] `LICENSE` — Apache-2.0 with the patent grant
 - [x] `SECURITY.md` — private reporting, scope, and an explicit out-of-scope list
@@ -23,7 +23,7 @@ projects ship something they cannot support.
 - [x] `docs/PILOT-TARGETS.md` — 50 organizations, ranked by reply likelihood
 - [x] Safety gates 1, 2, 3 — evidence in `docs/SAFETY-2026-11-01.md`,
       tickets in `docs/safety/`
-- [x] `node scripts/pack-release.mjs` - 259 entries, 2.8 MB, forbidden: none.
+- [x] `node scripts/pack-release.mjs` - 265 entries, 2.9 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
 - [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release
@@ -32,7 +32,7 @@ projects ship something they cannot support.
 
 The tarball is correct and the installed CLI runs from it.
 
-- [x] `files` allowlist: 151 files, 366,599 bytes packed (1,407,408 unpacked).
+- [x] `files` allowlist: 153 files, 371,835 bytes packed (1,420,850 unpacked).
       Ships `dist`, `src`, `bin`, `tools/manifests`, `security-attacks`,
       `security-fixtures`, `tests/fixtures/policy`, `artifacts/sbom.json`, and
       `npm-shrinkwrap.json` (npm never publishes `package-lock.json`, so the
@@ -80,7 +80,7 @@ a reverse proxy that owns rate limits.*
 
 The order matters, and the last step is the least urgent.
 
-1. `npm publish` (the tarball is verified: 151 files, 366,599 bytes, and the
+1. `npm publish` (the tarball is verified: 153 files, 371,835 bytes, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
 2. `git tag v0.1.0`.

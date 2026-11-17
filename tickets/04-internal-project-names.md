@@ -1,6 +1,6 @@
 # Ticket 04: decide whether internal project names ship
 
-**Status:** open
+**Status:** done
 **Area:** privacy
 **Source:** 2026-11-12 privacy pass
 
@@ -13,6 +13,11 @@ classify them as personal data, so they were not scrubbed.
 
 ## Done when
 
-- [ ] Decide: ship them as provenance, or genericize them.
-- [ ] If genericizing, run the same `git filter-repo` pass and record it in
+- [x] Decide: ship them as provenance, or genericize them.
+      **Decision 2026-11-17: ship as provenance (ADR-045).** They are project
+      names, not personal data, credentials, or paths, and they are load-bearing
+      in ADR-022, M17/M18, README, ROADMAP, and SECURITY_CLAIMS. 116 lines
+      across 28 files.
+- [x] If genericizing, run the same `git filter-repo` pass and record it in
       `docs/HISTORY.md` before the first public push.
+      **Not applicable:** no rewrite. Reversible until the first push.

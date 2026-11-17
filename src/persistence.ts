@@ -258,12 +258,26 @@ export class PersistenceStore {
     }
   }
 
+  /**
+   * Idempotent create (ticket 09): the project id is the natural key, so a
+   * repeat create returns the existing row instead of raising
+   * `projects_pkey`. Same tenant: created_at is preserved and name is
+   * refreshed (last declaration wins). Another tenant: the conflict row is
+   * invisible under RLS, the update affects zero rows, and the call refuses
+   * loudly rather than silently reporting success for a row it cannot see.
+   */
   async createProject(tenantId: string, id: string, name: string): Promise<ProjectRow> {
     return this.run(tenantId, async (tx) => {
       const rows = await tx`
         INSERT INTO projects (id, tenant_id, name, created_at)
         VALUES (${id}, ${tenantId}, ${name}, now())
+        ON CONFLICT (id) DO UPDATE
+        SET name = EXCLUDED.name
+        WHERE projects.tenant_id = ${tenantId}
         RETURNING id, tenant_id, name, created_at`;
+      if (rows.length === 0) {
+        throw new Error(`project ${id} belongs to another tenant: refusing to create`);
+      }
       return toProject(rows[0]!);
     });
   }

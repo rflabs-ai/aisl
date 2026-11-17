@@ -43,3 +43,14 @@ Keep it one job. A matrix over two Node versions is the only fan-out.
   (prove it the same way).
 - Total runtime stays under the free-tier default; the local suite is about
   90 seconds plus install.
+
+## Result
+
+- `.github/workflows/verify.yml` added: `push` and `pull_request`, Node 22 and
+  24, `npm ci`, typecheck, test, a clean-tree check, and the pack gate.
+- Verified locally 2026-11-17: the YAML parses; `npm ci` installs 6 packages;
+  the same commands pass on `main` (839 pass, 0 fail, 21 Postgres skips); the
+  clean-tree check passes after a gate run.
+- **Not verified:** the workflow has not executed on GitHub. The repo has no
+  remote push yet, so this ticket stays open until the first green run. Flip it
+  to done then.

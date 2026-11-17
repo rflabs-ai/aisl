@@ -8,10 +8,38 @@
  */
 
 import type { Approval } from './policy.ts';
-import type { AuthorizationService } from './pdp.ts';
+import type { AuthorizationService, AuthorizeInput } from './pdp.ts';
 import { type EventStore } from './events.ts';
-import { type Principal } from './domain.ts';
+import { type AuthorizationDecision, type Principal } from './domain.ts';
 import { type ResourceRegistry, defineResource } from './registry.ts';
+
+/**
+ * Both data-plane gates ask the PDP and then record the answer. The event is a
+ * security record, so it lives here once: a field added to one copy and not the
+ * other would be a silent audit gap (ticket 14). The gate supplies only the
+ * metadata that differs; `reason` is read from the decision.
+ */
+function authorizeAndRecord(
+  authorization: AuthorizationService,
+  eventLog: EventStore,
+  input: AuthorizeInput,
+  metadata: (decision: AuthorizationDecision) => Readonly<Record<string, unknown>>,
+): AuthorizationDecision {
+  const decision = authorization.authorize(input);
+  eventLog.append({
+    tenantId: input.principal.tenantId,
+    principal: input.principal.id,
+    actor: input.principal.id,
+    actorKind: input.principal.kind,
+    action: input.action,
+    resourceId: input.resourceId,
+    decision: decision.decision,
+    denyReason: decision.denyReason,
+    result: decision.decision === 'deny' ? 'denied' : 'success',
+    metadata: metadata(decision),
+  });
+  return decision;
+}
 
 export interface NetworkRequest {
   readonly principal: Principal;
@@ -56,27 +84,19 @@ export class NetworkGateway {
       );
     }
 
-    const decision = this.authorization.authorize({
-      principal: req.principal,
-      action: 'network.egress',
-      resourceId,
-      networkHost: host,
-      approvals: req.approvals,
-      params: req.port === undefined ? {} : { port: req.port },
-    });
-
-    this.eventLog.append({
-      tenantId: req.principal.tenantId,
-      principal: req.principal.id,
-      actor: req.principal.id,
-      actorKind: req.principal.kind,
-      action: 'network.egress',
-      resourceId,
-      decision: decision.decision,
-      denyReason: decision.denyReason,
-      result: decision.decision === 'deny' ? 'denied' : 'success',
-      metadata: { phase: 'network-gateway', host, port: req.port ?? null, reason: decision.reason },
-    });
+    const decision = authorizeAndRecord(
+      this.authorization,
+      this.eventLog,
+      {
+        principal: req.principal,
+        action: 'network.egress',
+        resourceId,
+        networkHost: host,
+        approvals: req.approvals,
+        params: req.port === undefined ? {} : { port: req.port },
+      },
+      (d) => ({ phase: 'network-gateway', host, port: req.port ?? null, reason: d.reason }),
+    );
 
     return { allowed: decision.decision === 'allow', host, reason: decision.reason };
   }
@@ -135,25 +155,17 @@ export class SecretBroker {
       return { allowed: false, reason: 'unknown secret' };
     }
 
-    const decision = this.authorization.authorize({
-      principal: req.principal,
-      action: 'secret.use',
-      resourceId: secret.id,
-      approvals: req.approvals,
-    });
-
-    this.eventLog.append({
-      tenantId: req.principal.tenantId,
-      principal: req.principal.id,
-      actor: req.principal.id,
-      actorKind: req.principal.kind,
-      action: 'secret.use',
-      resourceId: secret.id,
-      decision: decision.decision,
-      denyReason: decision.denyReason,
-      result: decision.decision === 'deny' ? 'denied' : 'success',
-      metadata: { phase: 'secret-broker', label: secret.label },
-    });
+    const decision = authorizeAndRecord(
+      this.authorization,
+      this.eventLog,
+      {
+        principal: req.principal,
+        action: 'secret.use',
+        resourceId: secret.id,
+        approvals: req.approvals,
+      },
+      () => ({ phase: 'secret-broker', label: secret.label }),
+    );
 
     return decision.decision === 'allow'
       ? { allowed: true, value: secret.value, reason: decision.reason }

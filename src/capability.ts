@@ -23,11 +23,15 @@ export type Constraint =
   | { readonly kind: 'network-host'; readonly hosts: readonly string[] }
   | { readonly kind: 'param-equals'; readonly key: string; readonly value: string | number | boolean };
 
-export type CapabilitySource =
-  | 'session-bootstrap'
-  | 'human-approval'
-  | 'policy-grant'
-  | 'delegation';
+/** Single source of truth: the type is derived from the list, never duplicated. */
+export const CAPABILITY_SOURCES = [
+  'session-bootstrap',
+  'human-approval',
+  'policy-grant',
+  'delegation',
+] as const;
+
+export type CapabilitySource = (typeof CAPABILITY_SOURCES)[number];
 
 export interface Provenance {
   readonly source: CapabilitySource;
@@ -160,6 +164,10 @@ export function issueCapability(
   if (request.expiresAt <= now) {
     throw new CapabilityIssuanceError('capability expiry must be in the future');
   }
+  const requestError = issueRequestError(request);
+  if (requestError !== undefined) {
+    throw new CapabilityIssuanceError(requestError);
+  }
 
   // H1 (ADR-023, audit 02): ANY presented parent must be a live, held,
   // same-tenant, signed capability — regardless of issuer kind. Root's minting
@@ -244,6 +252,34 @@ function parentValidityError(parent: Capability, issuer: Principal, now: number)
 const ROOT_KIND = 'authorization';
 function authorityRequired(issuer: Principal): boolean {
   return issuer.kind !== ROOT_KIND;
+}
+
+/** Constraint kinds this issuer can evaluate. Anything else would be signed unread. */
+const CONSTRAINT_KINDS: ReadonlySet<string> = new Set(['network-host', 'param-equals']);
+
+/**
+ * Issuance-time shape check. The type is the contract; a caller that bypasses
+ * it (cast, JSON, another language) must still be refused here rather than
+ * signing a value the verifier cannot evaluate. A `constraints` entry with an
+ * unknown kind is the dangerous case: verifyCapability falls through to the
+ * param branch and silently satisfies it.
+ */
+function issueRequestError(request: IssueRequest): string | undefined {
+  if (typeof request.subject !== 'string' || request.subject.trim().length === 0) {
+    return 'capability subject must be a non-empty principal id';
+  }
+  if (request.singleUse !== undefined && typeof request.singleUse !== 'boolean') {
+    return 'capability singleUse must be a boolean when present';
+  }
+  for (const c of request.constraints ?? []) {
+    if (!CONSTRAINT_KINDS.has(c.kind)) {
+      return `unknown capability constraint kind '${String(c.kind)}'`;
+    }
+  }
+  if (request.provenance === undefined || !CAPABILITY_SOURCES.includes(request.provenance.source)) {
+    return `unknown capability provenance source '${String(request.provenance?.source)}'`;
+  }
+  return undefined;
 }
 
 /** Options for role-templated issuance; the role supplies the ceiling unless the request narrows it. */

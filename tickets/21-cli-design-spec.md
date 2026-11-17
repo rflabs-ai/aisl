@@ -1,6 +1,6 @@
 # Ticket 21: CLI design spec
 
-Status: open
+Status: done
 Area: product and design
 Source: operator request, 2026-11-17.
 
@@ -28,12 +28,29 @@ policy. There is no shared help grammar, output model, error vocabulary, or
 
 ## Done when
 
-- [ ] `docs/CLI-SPEC.md` exists and covers every section above.
-- [ ] The command tree is reviewable as a table.
-- [ ] The `serve` shape is concrete enough for ticket 20 to implement without
+- [x] `docs/CLI-SPEC.md` exists and covers every section above.
+- [x] The command tree is reviewable as a table.
+- [x] The `serve` shape is concrete enough for ticket 20 to implement without
       design decisions.
-- [ ] No `src/` change in this ticket.
+- [x] No `src/` change in this ticket.
 
 ## Notes
 
 Design is its own pass. Build is ticket 20 or a follow-up, not this ticket.
+
+## Result
+
+Spec: `docs/CLI-SPEC.md`. It defines the target tree (`serve`, `doctor`, `demo`,
+`verify`, `benchmark`, `corpus`, `policy`, `evidence`, `incident`, `build`,
+`update`, plus `completion`, `help`, `version`), the help grammar, human and JSON
+output models, typed errors and exit codes, config precedence with every variable
+named, security and accessibility rules, and the full `serve` contract for
+ticket 20.
+
+Renames, with reasons in the spec: `attack` / `adversarial` to `corpus run` /
+`corpus check`, `revoke-*` to `incident revoke <kind>`, the three `verify`
+subcommands to `aisl verify build|update|evidence`, and `evidence witness` to a
+`--witness` flag. Old spellings keep working until 1.0.0.
+
+No `src/` change. Ticket 20 is unblocked. Open questions are in section 14 of
+the spec.

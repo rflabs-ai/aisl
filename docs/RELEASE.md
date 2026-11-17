@@ -49,7 +49,7 @@ The tarball is correct and the installed CLI runs from it.
       already a devDependency. See ADR-044.
 - [ ] `npm publish` under the name `aisl` (unscoped name is free; a scoped
       `@<org>/aisl` also works once the org exists)
-- [ ] Tag `v0.1.0`
+- [x] Tag `v0.1.0` (2026-11-17)
 
 Known, and not a packaging defect: `aisl demo` sections 20-21 digest the
 committed tree (`git ls-files`, ADR-024), so a `node_modules` copy with no
@@ -83,7 +83,7 @@ The order matters, and the last step is the least urgent.
 1. `npm publish` (the tarball is verified: 153 files, 371,835 bytes, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
-2. `git tag v0.1.0`.
+2. `git tag v0.1.0` (done 2026-11-17).
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,
    `npm test`. This is the closest thing to a stranger who will not read the

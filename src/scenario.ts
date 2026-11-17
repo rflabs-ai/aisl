@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ContainerSandbox } from './container-sandbox.ts';
 import { type Check, secretLeakCheck, scopeCheck } from './verification.ts';
-import { type IdPHealth } from './identity.ts';
+import { type IdPHealth, type TokenRevocationFeed } from './identity.ts';
 import { AuditQueryService } from './audit-query.ts';
 import { type CapabilityRequestService } from './capability-request.ts';
 import { SessionManager } from './session-manager.ts';
@@ -92,6 +92,15 @@ export interface World {
   readonly sessions: SessionManager;
   /** H13: the incident response seam (kill switch, broadcast, preservation). */
   readonly incident: IncidentService;
+  /**
+   * H13 (ticket 06): the revocation channel this factory constructed. The
+   * production assembly attaches it to the identity service as its feed.
+   */
+  readonly revocation: RevocationChannel;
+  /** True when an injected identity service consumed the feed at assembly. */
+  readonly revocationAttached: boolean;
+  /** Why the attach did not happen, if it did not. */
+  readonly revocationAttachError?: string;
   /** H15: observed availability of the decision path's dependencies. */
   readonly health: HealthState;
   /** Set IdP health status for degraded-mode testing */
@@ -228,11 +237,31 @@ function makeRevocationChannel(injected?: RevocationChannel): RevocationChannel 
   return url ? new PostgresRevocationChannel({ url }) : new InMemoryRevocationChannel();
 }
 
+/**
+ * Ticket 06: the identity service the persistent world factory wires to the
+ * H13 feed. `IdentityProvider` satisfies this structurally: the feed adds
+ * incoming `revoke-token` records to the local revoked set, and `revokeToken`
+ * lets `IncidentService.revokeToken` apply locally before broadcasting.
+ */
+export interface WorldIdentity {
+  attachRevocationFeed(feed: TokenRevocationFeed, options?: { readonly syncIntervalMs?: number }): void;
+  revokeToken(tokenId: string): void;
+  isTokenRevoked(tokenId: string): boolean;
+}
+
 export interface WorldOptions {
   readonly sqlitePath?: string;
   readonly policies?: readonly PolicyRule[];
   /** H13: inject a shared channel to simulate multiple nodes in one process. */
   readonly channel?: RevocationChannel;
+  /**
+   * Ticket 06: the identity service that consumes the revocation feed. When
+   * omitted (demo/CLI worlds) no feed is attached; the factory records that
+   * as `revocationAttached: false` so the server health surface can report it.
+   */
+  readonly identity?: WorldIdentity;
+  /** Revocation feed poll interval, ms. Default: the identity service's 1 s. */
+  readonly revocationSyncIntervalMs?: number;
   /**
    * Force the in-memory event store regardless of `EVENT_STORE` — for
    * self-contained worlds (the demo's two-node incident simulation) that must
@@ -382,13 +411,32 @@ function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
 
   const audit = new AuditQueryService(authorization, eventLog, clock.now);
   const sessions = new SessionManager({ now: clock.now });
+  // Ticket 06: build the feed here and hand it to the identity service in the
+  // same step the incident service gets it. A failed attach is recorded, not
+  // skipped silently: the server health surface reports `revocation:
+  // unavailable` from `revocationAttached`/`revocationAttachError`.
+  const revocation = makeRevocationChannel(options.channel);
+  let revocationAttached = false;
+  let revocationAttachError: string | undefined;
+  if (options.identity !== undefined) {
+    try {
+      options.identity.attachRevocationFeed(
+        revocation,
+        options.revocationSyncIntervalMs !== undefined ? { syncIntervalMs: options.revocationSyncIntervalMs } : undefined,
+      );
+      revocationAttached = true;
+    } catch (error) {
+      revocationAttachError = error instanceof Error ? error.message : String(error);
+    }
+  }
   const incident = new IncidentService({
     authorization,
     sessions,
     audit,
     eventLog,
-    channel: makeRevocationChannel(options.channel),
+    channel: revocation,
     clock: clock.now,
+    ...(options.identity !== undefined ? { identity: options.identity } : {}),
   });
 
   return {
@@ -410,6 +458,9 @@ function assembleWorld(eventLog: EventStore, options: WorldOptions): World {
     audit,
     sessions,
     incident,
+    revocation,
+    revocationAttached,
+    ...(revocationAttachError !== undefined ? { revocationAttachError } : {}),
     health: authorization.healthState,
     setIdPHealth(status) {
       idpHealthStatus = status;

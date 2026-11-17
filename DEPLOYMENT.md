@@ -195,17 +195,26 @@ when given `tls: { key, cert }`.
   (default 30 s, hard cap 60 s) — keep NTP authenticated. Service/workload
   clients use the IdP's short-lived issuance (client-credentials flow); a
   long-lived static bearer token in a secrets file is refused at the seam.
-  Wire revocation across nodes: `IdentityProvider.attachRevocationFeed(channel)`
-  so `node src/cli.ts incident revoke-token <jti> <tenantId> <reason>` reaches
-  every node (Postgres channel across processes; in-memory is single-process).
+  Wire revocation across nodes: the production assembly
+  (`startRestServer` in `src/server.ts`) builds the persistent world with
+  `buildWorldAsync`, which constructs the H13 channel and calls
+  `IdentityProvider.attachRevocationFeed` on the identity service before the
+  REST server binds. A server assembled any other way must make that call
+  itself, or `node src/cli.ts incident revoke-token <jti> <tenantId> <reason>`
+  will not reach this node (Postgres channel across processes; in-memory is
+  single-process).
   Agent/workload identities derived in-process (`sessionAgent` →
   `workloadAuth`) are capped at 15 minutes by default, drop the launching
   human's claims/MFA methods, and still expire like any other auth.
-- **Health:** `GET /healthz` (no auth, no secrets) → `{ idp, store }`, or
+- **Health:** `GET /healthz` (no auth, no secrets) returns `{ idp, store }`, or
   `{ idp, store, engine, clock }` when the embedder wires a `HealthState`
-  (H15) — wire your monitor to it; IdP `unreachable` or any dependency
-  `unavailable` means every decision needing that dependency is failing
-  closed (H15).
+  (H15). The `startRestServer` assembly wires all of those and adds
+  `revocation`. `revocation: "unavailable"` means the H13 feed was not
+  attached (the reason is emitted once as a process warning) or the channel is
+  recording errors: `revoke-token` may not reach this node, and the token's
+  short lifetime is the only backstop until it clears. Wire your monitor to
+  it; IdP `unreachable` or any dependency `unavailable` means every decision
+  needing that dependency is failing closed (H15).
 - **Minimal UI (M15):** the static operator page (`tools/ui/index.html`) is
   served by the same loopback server when the embedder wires it via
   `staticPages` (`GET /ui`, `GET /`). It is a plain client of `/v1` — the
@@ -461,10 +470,12 @@ transparency log (H11/Stage-3), signed-but-malicious release (Claim 34).
 ### Incident response (H13, ADR-026)
 
 Runbooks for a live incident. In Postgres mode the revocation channel is the
-shared table (`revocation_channel`, migration 4) — an operator CLI process
-reaches the running node(s) within the poll interval (default 1 s). A server
-whose embedder wires `RestApiDeps.incidentSync` also pulls once per authorized
-request; otherwise convergence rides the PDP `authorize`/`issue` paths. In
+shared table (`revocation_channel`, migration 4): an operator CLI process
+reaches the running node(s) within the poll interval (default 1 s).
+`startRestServer` attaches the channel as the identity service's revocation
+feed and wires `RestApiDeps.incidentSync`, so a running node also pulls once
+per authorized request; otherwise convergence rides the PDP
+`authorize`/`issue` paths. In
 SQLite mode the channel is in-memory: the CLI's kill switch is local to that
 process, and the CLI says so.
 

@@ -1233,8 +1233,11 @@ async function benchmark(): Promise<void> {
     slo: { pass: slo.hardFailures === 0, hardFailures: slo.hardFailures, targets: slo.results },
   };
 
-  mkdirSync(join(ROOT, 'benchmarks'), { recursive: true });
-  writeFileSync(join(ROOT, 'benchmarks', 'results.json'), `${JSON.stringify(output, null, 2)}\n`);
+  // The committed artifact by default. Tests point AISL_BENCHMARK_OUT at a temp
+  // file so a gate run does not dirty a tracked file (ticket 17).
+  const outPath = process.env.AISL_BENCHMARK_OUT ?? join(ROOT, 'benchmarks', 'results.json');
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, `${JSON.stringify(output, null, 2)}\n`);
 
   heading('ASSURANCE TARGETS (ADR-014) — one measurable target per control');
   for (const t of slo.results) {

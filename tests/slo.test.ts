@@ -6,7 +6,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateSlo, SLO_TARGETS } from '../src/slo.ts';
@@ -63,25 +64,50 @@ describe('evaluateSlo gate semantics', () => {
 
 describe('benchmark integration (M10 slo block)', () => {
   test('benchmark exits 0 with a well-formed slo block; audit completeness 1.0; denominator widened', () => {
-    // execFileSync throws on a nonzero exit, so this assertion IS the gate check.
-    const stdout = execFileSync(process.execPath, ['src/cli.ts', 'benchmark'], { cwd: REPO_ROOT, encoding: 'utf8' });
-    const benchmarkJson = JSON.parse(readFileSync(join(REPO_ROOT, 'benchmarks', 'results.json'), 'utf8'));
-    assert.ok(stdout.includes('ASSURANCE TARGETS'), 'benchmark prints the readable target table');
+    const tracked = join(REPO_ROOT, 'benchmarks', 'results.json');
+    const trackedBefore = existsSync(tracked) ? readFileSync(tracked, 'utf8') : null;
+    const dir = mkdtempSync(join(tmpdir(), 'asl-benchmark-'));
+    const out = join(dir, 'results.json');
 
-    assert.equal(benchmarkJson.slo.pass, true);
-    assert.equal(benchmarkJson.slo.hardFailures, 0);
-    assert.equal(benchmarkJson.evidence.auditCompleteness, 1);
-    assert.equal(benchmarkJson.evidence.honestCorpusSessions, 100);
-    assert.ok(benchmarkJson.evidence.totalLegitimateResponses >= 100);
-    assert.ok(benchmarkJson.evidence.falseClaimRate <= 0.01);
+    try {
+      // execFileSync throws on a nonzero exit, so this assertion IS the gate check.
+      // AISL_BENCHMARK_OUT keeps the run off the tracked artifact (ticket 17).
+      const stdout = execFileSync(process.execPath, ['src/cli.ts', 'benchmark'], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: { ...process.env, AISL_BENCHMARK_OUT: out },
+      });
+      const benchmarkJson = JSON.parse(readFileSync(out, 'utf8'));
+      assert.ok(stdout.includes('ASSURANCE TARGETS'), 'benchmark prints the readable target table');
 
-    assert.deepEqual(Object.keys(benchmarkJson.slo).sort(), ['hardFailures', 'pass', 'targets']);
-    for (const row of benchmarkJson.slo.targets) {
-      assert.deepEqual(Object.keys(row).sort(), ['gate', 'id', 'measured', 'metric', 'pass', 'target']);
+      assert.equal(benchmarkJson.slo.pass, true);
+      assert.equal(benchmarkJson.slo.hardFailures, 0);
+      assert.equal(benchmarkJson.evidence.auditCompleteness, 1);
+      assert.equal(benchmarkJson.evidence.honestCorpusSessions, 100);
+      assert.ok(benchmarkJson.evidence.totalLegitimateResponses >= 100);
+      assert.ok(benchmarkJson.evidence.falseClaimRate <= 0.01);
+
+      assert.deepEqual(Object.keys(benchmarkJson.slo).sort(), ['hardFailures', 'pass', 'targets']);
+      for (const row of benchmarkJson.slo.targets) {
+        assert.deepEqual(Object.keys(row).sort(), ['gate', 'id', 'measured', 'metric', 'pass', 'target']);
+      }
+      assert.deepEqual(
+        benchmarkJson.slo.targets.map((r: { id: string }) => r.id),
+        SLO_TARGETS.map((t) => t.id),
+      );
+
+      // The test run must not touch the committed artifact.
+      assert.equal(existsSync(tracked), trackedBefore !== null, 'a test run does not create the tracked artifact');
+      if (trackedBefore !== null) {
+        assert.equal(readFileSync(tracked, 'utf8'), trackedBefore, 'a test run does not rewrite the tracked artifact');
+      }
+    } finally {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EPERM' && code !== 'EBUSY') throw error;
+      }
     }
-    assert.deepEqual(
-      benchmarkJson.slo.targets.map((r: { id: string }) => r.id),
-      SLO_TARGETS.map((t) => t.id),
-    );
   });
 });

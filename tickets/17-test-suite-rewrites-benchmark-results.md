@@ -1,6 +1,6 @@
 # The test suite rewrites a tracked file, so the tree is never clean
 
-Status: open
+Status: done
 Source: release readiness review 2026-11-16.
 Repo: `ai-security-layer`.
 
@@ -36,3 +36,14 @@ Do not make the test skip; the SLO block assertion is the point.
 - The SLO gate assertion still runs and still fails on a fabricated hard miss.
 - A test asserts the default output path is used only by the CLI entry point,
   not by the test.
+
+## Result
+
+- `src/cli.ts` writes to `AISL_BENCHMARK_OUT` when it is set, otherwise to
+  `benchmarks/results.json`. No flag, no new module, one conditional.
+- `tests/slo.test.ts` runs the benchmark with the override pointed at a temp
+  file, reads it from there, and asserts the tracked artifact is neither
+  created nor rewritten by a test run.
+- Verified 2026-11-16: after a full `npm test`, `git status --short` shows only
+  the edited source files. `npm run benchmark` still updates
+  `benchmarks/results.json`.

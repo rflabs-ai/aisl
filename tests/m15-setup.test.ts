@@ -43,6 +43,19 @@ describe('setup scripts (ADR-020)', () => {
     }
   });
 
+  test('postgres bootstrap: restart policy set, password by reference', () => {
+    const scripts: readonly [string, string][] = [
+      ['setup.ps1', PS1_TEXT],
+      ['setup.sh', SH_TEXT],
+    ];
+    for (const [name, text] of scripts) {
+      const line = text.split('\n').find((l) => l.includes('docker run'));
+      assert.ok(line, `${name}: no "docker run" line found`);
+      assert.match(line, /--restart unless-stopped/, `${name}: docker run must set --restart unless-stopped`);
+      assert.match(line, /-e "POSTGRES_PASSWORD=\$pg/, `${name}: password must be passed by env reference`);
+    }
+  });
+
   test('fail-closed: a missing prerequisite exits nonzero', () => {
     const pwsh = process.env.ProgramFiles
       ? join(process.env.ProgramFiles, 'PowerShell', '7', 'pwsh.exe')

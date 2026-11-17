@@ -80,7 +80,7 @@ if ($WithPostgres) {
         # ponytail: fixed port 5433 + throwaway password; real deployments
         # supply their own secret and TLS (DEPLOYMENT.md).
         $pgPassword = [guid]::NewGuid().ToString('N')
-        docker run -d --name sec-layer-pg -e "POSTGRES_PASSWORD=$pgPassword" -p 5433:5432 postgres:16 >$null
+        docker run -d --name sec-layer-pg --restart unless-stopped -e "POSTGRES_PASSWORD=$pgPassword" -p 5433:5432 postgres:16 >$null
         if ($LASTEXITCODE -ne 0) { Write-Host '  [FAIL] postgres bootstrap'; $script:failures += 1 }
         else {
             Write-Host '  [ok]   postgres container sec-layer-pg started on 5433'

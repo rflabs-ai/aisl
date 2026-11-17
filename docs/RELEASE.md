@@ -13,7 +13,7 @@ projects ship something they cannot support.
 
 ## Source release — ready
 
-- [x] `npm run typecheck && npm test`: 838 pass, 0 fail, 21 Postgres skips
+- [x] `npm run typecheck && npm test`: 839 pass, 0 fail, 21 Postgres skips (860 tests)
 - [x] `npm run demo` and `npm run benchmark` run clean; SLO block passes
 - [x] `LICENSE` — Apache-2.0 with the patent grant
 - [x] `SECURITY.md` — private reporting, scope, and an explicit out-of-scope list

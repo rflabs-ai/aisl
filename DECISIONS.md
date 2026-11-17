@@ -3273,3 +3273,39 @@ packaging test stages a repository to reach exit 0.
 **Future migration path:** emit a reproducibility record (compiler version,
 `dist` digest) into the build manifest, then a consumer can check the published
 bytes against the committed source instead of trusting the publisher.
+
+## ADR-045: Internal project names ship as provenance
+
+**Status:** accepted 2026-11-17, before the first public push.
+
+**Context:** the 2026-11-12 rewrite removed personal home paths from every
+commit. `AGENT-SESSION.md` and `PROMPTS/` still name three sibling projects:
+`control-plane`, `project-raven`, and `local-ai-system`. A scan of HEAD finds
+116 matching lines across 28 files, and they are load-bearing: ADR-022 makes
+`control-plane` the first federation client, M17/M18 describe the integration,
+and `README.md`, `ROADMAP.md`, `SECURITY_CLAIMS.md`, and `DEPLOYMENT.md` use the
+names to explain what the evidence plane is for.
+
+**Decision:** ship the names as provenance. They are project names, not personal
+data, credentials, or filesystem paths. The personal data the 2026-11-12 pass
+targeted is already gone. A security product whose claim is a verifiable audit
+trail should not rewrite its own design record to hide the systems it was built
+against.
+
+**Consequences:**
+
+- No history rewrite. The names are public from the first push.
+- The federation ADRs stay legible; no cross-reference breaks.
+- If a name later becomes a customer identifier or a personal identifier, the
+  fix is a forward edit with a dated note, not a rewrite. Revisit only then.
+- This decision is reversible until the first push. After it, a rewrite costs a
+  force-push and every clone.
+
+**Alternatives rejected:**
+
+- *Genericize now.* Rewrites ADR bodies across `DECISIONS.md` (187 KB),
+  `CURRENT_STATE.md` (95 KB), and 26 other files, for no security gain, and
+  contradicts the rule that ADR bodies are not rewritten in a cleanup pass.
+- *Squash history to a single `v1` commit.* Removes the audit trail the product
+  sells, and the 2026-11-01 note already reserved that choice for a commercial
+  entity, not for a source release.

@@ -66,7 +66,7 @@ if [ "${1:-}" = '--with-postgres' ] || [ "${2:-}" = '--with-postgres' ]; then
     # ponytail: fixed port 5433 + throwaway password; real deployments
     # supply their own secret and TLS (DEPLOYMENT.md).
     pg_password="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    if docker run -d --name sec-layer-pg -e "POSTGRES_PASSWORD=$pg_password" -p 5433:5432 postgres:16 >/dev/null; then
+    if docker run -d --name sec-layer-pg --restart unless-stopped -e "POSTGRES_PASSWORD=$pg_password" -p 5433:5432 postgres:16 >/dev/null; then
       echo '  [ok]   postgres container sec-layer-pg started on 5433'
       echo '         DATABASE_URL=postgres://postgres:<password>@localhost:5433/postgres — read the password from the container env (docker inspect), never from a log'
     else

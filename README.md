@@ -1,15 +1,16 @@
-# AISL — AI Security Layer
+# aiSL: AI Security Layer
 
 A high-assurance execution environment for AI agents.
 
-The project is **AISL**; the artifact and CLI are `aisl`. Older documents
-(ADRs, the roadmap, the claims log) say "ASL" — same thing, historical name.
+The project is **aiSL**; the artifact and CLI are `aisl`. Older documents
+(ADRs, the roadmap, the claims log) say "ASL" or "AISL", same thing, historical
+name.
 
 The premise is one sentence:
 
 > **The model is not the authority. The infrastructure is.**
 
-ASL lets a capable model act on sensitive code, documents, and data while an
+aiSL lets a capable model act on sensitive code, documents, and data while an
 infrastructure layer — not the model's good behavior — decides what it may
 actually do, executes it in a controlled environment, and records evidence of
 every decision.
@@ -20,7 +21,7 @@ every decision.
 policy evaluation, a signed hash-chained audit log with external anchoring, taint
 tracking across a session, content-level egress DLP, artifact admission, and an
 adversarial harness that runs on a schedule. It is the reference implementation
-of the AISL idea; the specification is `DECISIONS.md` plus `SECURITY_CLAIMS.md`.
+of the aiSL idea; the specification is `DECISIONS.md` plus `SECURITY_CLAIMS.md`.
 
 **This is not** production-ready, and the gaps are named rather than implied:
 
@@ -36,7 +37,7 @@ of the AISL idea; the specification is `DECISIONS.md` plus `SECURITY_CLAIMS.md`.
   the enumerated attacks still behave as specified — not that the system is safe.
 - **Pre-1.0.** Only the tip of `main` is supported. No backports.
 
-If you need any of those guarantees today, AISL is not the right choice. If you
+If you need any of those guarantees today, aiSL is not the right choice. If you
 want a defensible enforcement path you can read, test and audit, it is.
 
 ## The one boundary that matters
@@ -109,7 +110,7 @@ Optional environment:
 Convenience setup: `scripts/setup.ps1` (Windows) or `scripts/setup.sh`; pass
 `-WithPostgres` / `--with-postgres` to bootstrap a Postgres 16 container.
 
-## Running AISL
+## Running aiSL
 
 ASL is a **library + proof suite**, not a running service. There is no
 start/daemon command today — the commands above are the whole surface. The

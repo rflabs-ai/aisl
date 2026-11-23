@@ -58,7 +58,7 @@ Background on the business consequences: `docs/business-and-ip.md`.
 | --- | --- | --- |
 | **Company** | **deferred** (see below) | "Kept" is blocked: an identical live word mark in classes 9 and 42. A company name is not needed until incorporation, a signed agreement, or money. |
 | **Domain** | none purchased | The placeholder checked on 2026-11-01 is abandoned with the dropped name. Buy when a name exists. |
-| **GitHub org** | none active | The provisional org created on 2026-11-01 is abandoned. A new org comes with the name. |
+| **GitHub org** | **`rflabs-ai`** (display "RF Labs") | Renamed from the 2026-11-01 placeholder. The `rflabs` handle is taken by Refresh Labs; `rflabs-ai` is the available variant. |
 | **CLI / artifact** | **`aisl`** | npm `aisl` is free. Display name **aiSL**. Spoken as "aisle". The name in the repo, the terminal, and the logs. |
 | **Category** | **AI bailment** | Our coinage. A bailment is the legal relationship of holding another's property under a duty of care, with a duty to return and account. |
 | **Company line** | **Nothing leaves without a record.** | Hero, deck, footer, sticker. |

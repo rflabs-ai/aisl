@@ -221,7 +221,7 @@ current situation.
 | **Company mark** | The entity that signs agreements, owns the trademark, and appears on the contract | Registerable. Coined beats descriptive | **Missing.** This is the blocked slot |
 | **Product mark** | The CLI, the package, the thing in the terminal | Descriptive is fine. Availability and familiarity matter more than registrability | `aisl`, npm free, usable |
 
-`AISL` is a good product mark precisely because it is descriptive and weak, the
+`aiSL` is a good product mark precisely because it is descriptive and weak, the
 same way `terraform` or `syft` are. It is a bad company mark for exactly that
 reason. The two were being asked of one name, which is why the failure took the
 whole thing down.

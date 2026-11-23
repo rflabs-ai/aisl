@@ -66,7 +66,7 @@ From safety ticket 04. Both items are closed in code:
 - [x] **Fail closed on missing keys in production.** `src/key-policy.ts` refuses
       to start the REST server or open a persistent event store without the
       durable keys the evidence plane needs, and names each missing variable
-      plus how to produce it. `AISL_ALLOW_EPHEMERAL_KEYS=1` is the explicit,
+      plus how to produce it. `aiSL_ALLOW_EPHEMERAL_KEYS=1` is the explicit,
       warned override for a throwaway instance. The demo still runs with zero
       environment variables.
 - [x] **TLS at the edge.** `RestApi` terminates TLS when given `tls: { key, cert }`, and refuses a non-loopback bind without it, before a socket exists. `localhost` is not treated as loopback: the OS resolves it, so it can point anywhere.

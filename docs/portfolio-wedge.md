@@ -29,7 +29,7 @@ same answer, and conflating them caused the earlier confusion.
 | --- | --- |
 | Easiest to get a stranger to try it | `mcp-weight`, proven |
 | Easiest to get a stranger to pay | `fixture-cad`, shipped with a measurable advantage |
-| Best wedge that feeds AISL specifically | `vkeys`, because it shares the buyer |
+| Best wedge that feeds aiSL specifically | `vkeys`, because it shares the buyer |
 
 ## The rubric
 
@@ -52,10 +52,10 @@ marked otherwise.
 | --- | --- | --- | --- | --- |
 | **mcp-weight** | npm 0.1.0 and 0.2.0 on 2026-10-09, 0.2.1 on 2026-10-13; **458 downloads in the first week** (2026-10-05 to 2026-10-11); 6 MCP clients; read-only, secret-redacting | **Yes**, npm | Developer | **Only proven demand.** Type 1, no revenue model |
 | **fixture-cad** | PyPI `fixture-cad` 0.2.0, Apache-2.0; pytest 140, FreeCAD 92/0, Blender 29/0; **60-case planner benchmark 96.7-98.3% versus 57.6-74.6%** for the closest open-source assistant | **Yes**, PyPI | CAD and 3D professional | **Best shipped product with a verifiable advantage.** Narrow market |
-| **vkeys** | No `get` command by design; named profiles, rotation, scrubbed audit log; CI green; shipped (user, 2026-11-12) | **Yes** | Agent operator | **Best wedge for AISL.** No recorded traction number |
+| **vkeys** | No `get` command by design; named profiles, rotation, scrubbed audit log; CI green; shipped (user, 2026-11-12) | **Yes** | Agent operator | **Best wedge for aiSL.** No recorded traction number |
 | **eyewright** | PyPI v0.4.0 on 2026-10-12, Apache-2.0, zero required deps; 4 surfaces; 2,000-decision replay with Brier and KL; source private since 2026-11-07 | Yes, PyPI | Unclear | Shipped, buyer unresolved |
 | **control-plane** | 296 commits in about 5.5 weeks; 459 tests, 3 skipped; 2 runtime deps; **79% of commits agent-authored**; shipped and used daily | Yes, local | Developer | Credibility asset. Thin moat |
-| **AISL** | 122 commits in 26 days; 716 tests (695 pass, 21 Postgres-gated skips); 32 ADRs; 39 claims; ~14k lines, 48 modules; 2 runtime deps | No, library plus proof suite | Security lead | Highest ceiling, hardest door |
+| **aiSL** | 122 commits in 26 days; 716 tests (695 pass, 21 Postgres-gated skips); 32 ADRs; 39 claims; ~14k lines, 48 modules; 2 runtime deps | No, library plus proof suite | Security lead | Highest ceiling, hardest door |
 | **SQWease** | Zero-dep static app, 5 languages, SM-2; WCAG 2.2 AA, Lighthouse accessibility 1.0 on all six pages | Yes, GitHub Pages | Language learner | Live, free, no revenue shape |
 | **LSM** | 240+ tests; 8 benchmark suites; 1.000 versus 0.100 preference recall; QLoRA about $8 and 9.3h | No | Researcher | Preprint in preparation. Not a product |
 | **kgp** | P0 end-to-end plus evals (repo, 2026-10-27); claims index says zero pipeline code (summary dated 2026-10-15) | No | The author | Kept personal, by decision |
@@ -68,7 +68,7 @@ marked otherwise.
 
 My earlier answer was half right. Restated precisely:
 
-- **`vkeys` is better than AISL at getting customers.** It has an easier door
+- **`vkeys` is better than aiSL at getting customers.** It has an easier door
   (self-serve, minutes, low trust, sharp pain) and it now ships. But it is *not*
   better as a business: it is a per-machine developer tool with a low price
   ceiling and a thin moat.
@@ -84,12 +84,12 @@ My earlier answer was half right. Restated precisely:
 - **`kgp` was never a candidate.** I raised it because it was the pipeline that
   ingested the source video, then evaluated it as a honeypot. That was a
   category error: it is personal tooling by your own decision, and its audience
-  is not AISL's audience. Dropped.
+  is not aiSL's audience. Dropped.
 
 So the wedge recommendation stands, with a sharper reason:
 
-> **`vkeys` and AISL are the same story at two altitudes.** `vkeys` is "the agent
-> never holds the key." AISL is "the agent never holds authority." Same buyer,
+> **`vkeys` and aiSL are the same story at two altitudes.** `vkeys` is "the agent
+> never holds the key." aiSL is "the agent never holds authority." Same buyer,
 > same trust story, demoable in fifteen seconds.
 
 That is what makes it a wedge rather than a detour. `mcp-weight` and
@@ -104,7 +104,7 @@ So: do not build more. Instrument it. A download count, a GitHub star count, and
 one sentence from a stranger about why they installed it is worth more than the
 next feature. If it converts, it is the wedge. If it does not, the wedge is
 `fixture-cad` and the buyer changes from agent operators to CAD professionals,
-which is a different company than AISL.
+which is a different company than aiSL.
 
 ## Index drift worth fixing
 
@@ -115,7 +115,7 @@ now older than the repos.
 | --- | --- | --- | --- |
 | `kgp` | "Skeleton and verified environment. Zero pipeline code. Do not claim a working pipeline" (summary 2026-10-15) | `kgp/README.md` records P0 complete 2026-10-27, an eval at 18/20 QA with 20/20 citations valid, and the four-stage run executed on 2026-11-12 | Refresh the summary, then the index line |
 | `vkeys` | "CI green, published repo" | `.scratch/release/0.1-state.md` describes a private repo with a pending release, and the user reports it shipped on 2026-11-12 | Confirm which is true, then update |
-| `AISL` | "ASL" naming, library plus proof suite | `BRAND.md` dropped ASL and KEPT; the product is `aisl` and the company name is open | Update the name and add the open decision |
+| `aiSL` | "ASL" naming, library plus proof suite | `BRAND.md` dropped ASL and KEPT; the product is `aisl` and the company name is open | Update the name and add the open decision |
 
 The last one matters outside this document: the index is the page used under
 pressure, and it currently uses a name that `BRAND.md` says not to use.
@@ -124,7 +124,7 @@ pressure, and it currently uses a name that `BRAND.md` says not to use.
 
 - `vkeys` shows no traction after a measured period: the wedge moves to
   `fixture-cad`, and the buyer changes.
-- A design partner with data arrives for AISL: the standard path in
+- A design partner with data arrives for aiSL: the standard path in
   `business-and-ip.md` becomes the lead.
 - `mcp-weight` gains a paid surface (CI gate, team dashboard): it becomes the
   best-proven lead, with the caveat that type 1 monetization is hard.

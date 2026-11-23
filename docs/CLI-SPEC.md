@@ -98,8 +98,8 @@ PDP, appends to the signed event chain, and serves `/healthz`. Long lived and
 fail closed. The full contract is [section 10](#10-serve-contract).
 
 ```bash
-AISL_ALLOW_EPHEMERAL_KEYS=1 \
-AISL_IDP_ISSUER=https://login.example.com AISL_IDP_AUDIENCE=aisl \
+aiSL_ALLOW_EPHEMERAL_KEYS=1 \
+aiSL_IDP_ISSUER=https://login.example.com aiSL_IDP_AUDIENCE=aisl \
 aisl serve --port 8787 --principals ./principals.json
 ```
 
@@ -184,7 +184,7 @@ cannot pass by verifying nothing. An explicit subject fails (3) when its
 artifact is absent; that difference is deliberate.
 
 ```text
-AISL VERIFY
+aiSL VERIFY
 
   PASS   build manifest            signed tree matches the live tree
   SKIP   update                    no update descriptor on this host
@@ -376,8 +376,8 @@ Binds loopback by default. A non-loopback host needs --tls-cert and
 --tls-key, and is refused before a socket exists if either is missing.
 
 Example:
-  AISL_ALLOW_EPHEMERAL_KEYS=1 \
-  AISL_IDP_ISSUER=https://login.example.com AISL_IDP_AUDIENCE=aisl \
+  aiSL_ALLOW_EPHEMERAL_KEYS=1 \
+  aiSL_IDP_ISSUER=https://login.example.com aiSL_IDP_AUDIENCE=aisl \
   aisl serve --port 8787 --principals ./principals.json
 
 Options:
@@ -392,13 +392,13 @@ Options:
   -h, --help           this help
 
 Environment:
-  AISL_IDP_ISSUER, AISL_IDP_AUDIENCE, AISL_IDP_JWKS_URI,
-  AISL_IDP_ALGORITHMS, AISL_IDP_MAX_TOKEN_LIFETIME_SEC,
-  AISL_IDP_CLOCK_TOLERANCE_SEC, EVENT_STORE, DATABASE_URL,
+  aiSL_IDP_ISSUER, aiSL_IDP_AUDIENCE, aiSL_IDP_JWKS_URI,
+  aiSL_IDP_ALGORITHMS, aiSL_IDP_MAX_TOKEN_LIFETIME_SEC,
+  aiSL_IDP_CLOCK_TOLERANCE_SEC, EVENT_STORE, DATABASE_URL,
   MIGRATION_DATABASE_URL, EVENT_ANCHOR_PATH, EVENT_ANCHOR_WITNESS_URL,
   EVENT_SIGNING_PRIVATE_KEY_PEM, EVENT_SIGNING_PUBLIC_KEY_PEM,
   CAPABILITY_SIGNING_KEY, EVIDENCE_SEALING_KEY, SECRET_MASTER_KEY,
-  AISL_ALLOW_EPHEMERAL_KEYS
+  aiSL_ALLOW_EPHEMERAL_KEYS
 
 Exit codes:
   0    clean shutdown
@@ -670,7 +670,7 @@ aisl: verify refused: the signed manifest does not match this tree
 }
 ```
 
-`stack` is `null` unless `--debug` or `AISL_DEBUG=1`. No command ever prints a
+`stack` is `null` unless `--debug` or `aiSL_DEBUG=1`. No command ever prints a
 stack trace by default.
 
 Error codes are stable strings in a dotted namespace, lowercase kebab:
@@ -718,7 +718,7 @@ no hot config: restart the process. A resolution algorithm that changes under a
 running server is an incident, not a feature.
 
 The config file is `./aisl.config.json`, or the path in `--config` or
-`AISL_CONFIG`. A path named explicitly that does not exist is exit 3. The
+`aiSL_CONFIG`. A path named explicitly that does not exist is exit 3. The
 default path, when absent, is simply no config file. There is no parent
 directory walk and no home directory config, because a config you cannot see is
 a config that surprises you.
@@ -759,33 +759,33 @@ or paste into a ticket.
 
 An empty environment variable is unset, never "empty string". A boolean env
 variable is `1`/`true` (any case) or `0`/`false`; anything else is exit 3.
-`AISL_ALLOW_EPHEMERAL_KEYS` is the exception: it is `1`, exactly, because that
+`aiSL_ALLOW_EPHEMERAL_KEYS` is the exception: it is `1`, exactly, because that
 is the existing fail-closed behavior.
 
 ### Settings
 
 | Setting | Flag | Environment | Config key | Default |
 | --- | --- | --- | --- | --- |
-| bind address | `--host` | `AISL_HOST` | `host` | `127.0.0.1` |
-| port | `--port` | `AISL_PORT` | `port` | `8787` |
-| TLS certificate | `--tls-cert` | `AISL_TLS_CERT` | `tls.certPath` | none |
-| TLS private key | `--tls-key` | `AISL_TLS_KEY` | `tls.keyPath` | none |
-| principals file | `--principals` | `AISL_PRINCIPALS` | `principalsPath` | `./principals.json` |
-| SQLite store | `--sqlite` | `AISL_SQLITE_PATH` | `sqlitePath` | `./data/events.sqlite` |
-| config file | `--config` | `AISL_CONFIG` | n/a | `./aisl.config.json` |
+| bind address | `--host` | `aiSL_HOST` | `host` | `127.0.0.1` |
+| port | `--port` | `aiSL_PORT` | `port` | `8787` |
+| TLS certificate | `--tls-cert` | `aiSL_TLS_CERT` | `tls.certPath` | none |
+| TLS private key | `--tls-key` | `aiSL_TLS_KEY` | `tls.keyPath` | none |
+| principals file | `--principals` | `aiSL_PRINCIPALS` | `principalsPath` | `./principals.json` |
+| SQLite store | `--sqlite` | `aiSL_SQLITE_PATH` | `sqlitePath` | `./data/events.sqlite` |
+| config file | `--config` | `aiSL_CONFIG` | n/a | `./aisl.config.json` |
 | color | `--color`, `--no-color` | `NO_COLOR` | `output.color` | `auto` |
 | width | `--width` | `COLUMNS` | `output.width` | `80` |
-| debug | `--debug` | `AISL_DEBUG` | n/a | off |
-| benchmark output | `--out` | `AISL_BENCHMARK_OUT` | `benchmark.outPath` | `benchmarks/results.json` |
+| debug | `--debug` | `aiSL_DEBUG` | n/a | off |
+| benchmark output | `--out` | `aiSL_BENCHMARK_OUT` | `benchmark.outPath` | `benchmarks/results.json` |
 | incident actor | none | `INCIDENT_OPERATOR` | `incident.operator` | `operator:cli` |
-| IdP issuer | none | `AISL_IDP_ISSUER` | `idp.issuer` | none |
-| IdP audience | none | `AISL_IDP_AUDIENCE` | `idp.audience` | none |
-| IdP JWKS | none | `AISL_IDP_JWKS_URI` | `idp.jwksUri` | issuer discovery |
-| IdP algorithms | none | `AISL_IDP_ALGORITHMS` | `idp.algorithms` | `RS256,ES256` |
-| token lifetime ceiling | none | `AISL_IDP_MAX_TOKEN_LIFETIME_SEC` | `idp.maxTokenLifetimeSec` | `3600` |
-| clock tolerance | none | `AISL_IDP_CLOCK_TOLERANCE_SEC` | `idp.clockToleranceSec` | `30` |
+| IdP issuer | none | `aiSL_IDP_ISSUER` | `idp.issuer` | none |
+| IdP audience | none | `aiSL_IDP_AUDIENCE` | `idp.audience` | none |
+| IdP JWKS | none | `aiSL_IDP_JWKS_URI` | `idp.jwksUri` | issuer discovery |
+| IdP algorithms | none | `aiSL_IDP_ALGORITHMS` | `idp.algorithms` | `RS256,ES256` |
+| token lifetime ceiling | none | `aiSL_IDP_MAX_TOKEN_LIFETIME_SEC` | `idp.maxTokenLifetimeSec` | `3600` |
+| clock tolerance | none | `aiSL_IDP_CLOCK_TOLERANCE_SEC` | `idp.clockToleranceSec` | `30` |
 | event backend | none | `EVENT_STORE` | none | SQLite for `serve`, memory elsewhere |
-| ephemeral key override | none | `AISL_ALLOW_EPHEMERAL_KEYS` | none | off |
+| ephemeral key override | none | `aiSL_ALLOW_EPHEMERAL_KEYS` | none | off |
 
 Backend selection is deliberately environment-only. A typo in argv cannot point
 a server at a different evidence store. There is also no `--database-url`: a
@@ -813,7 +813,7 @@ public values are shown at most as a fingerprint.
 | `BUILD_SIGNING_IDENTITY` | no | signed manifest and descriptor label |
 | `NO_COLOR`, `COLUMNS`, `TERM` | no | output |
 
-Naming rule: CLI-owned variables use `AISL_`. The unprefixed names
+Naming rule: CLI-owned variables use `aiSL_`. The unprefixed names
 (`CAPABILITY_SIGNING_KEY`, `EVENT_*`, `BUILD_SIGNING_*`, `DATABASE_URL`) predate
 the rule, are documented in `README.md` and `DEPLOYMENT.md`, and are read by
 `src/key-policy.ts`. They are frozen until 1.0. Adding an alias for each would
@@ -908,12 +908,12 @@ seventh serve-specific flag is a design change to this document.
    socket is touched.
 2. Refuse if any flag value carries a connection string, a token, or key
    material (section 8).
-3. Require `AISL_IDP_ISSUER` and `AISL_IDP_AUDIENCE` (or the config keys). One
+3. Require `aiSL_IDP_ISSUER` and `aiSL_IDP_AUDIENCE` (or the config keys). One
    missing exits 3 with `config.missing-idp`, naming both.
 4. Call `assertDurableKeys('server')` before opening the store. Missing keys
    exit 3 with `config.missing-key`, one line per missing variable, its reason,
    and how to produce it. The existing `MissingDurableKeysError` message is
-   reused and wrapped to the width, not reworded. `AISL_ALLOW_EPHEMERAL_KEYS=1`
+   reused and wrapped to the width, not reworded. `aiSL_ALLOW_EPHEMERAL_KEYS=1`
    is the explicit, warned override.
 5. Load the principals file. Missing exits 3 `config.missing-principals`.
    Invalid exits 3 `config.invalid-file`.
@@ -1111,7 +1111,7 @@ restart at once.
 - `aisl serve --help` prints the block in section 4 and exits 0.
 - Missing durable keys exit 3 before a socket exists, naming every missing
   variable.
-- `AISL_ALLOW_EPHEMERAL_KEYS=1` starts and warns once.
+- `aiSL_ALLOW_EPHEMERAL_KEYS=1` starts and warns once.
 - `--host 0.0.0.0` without TLS exits 3 before bind; with both TLS files it
   serves HTTPS.
 - `--host localhost` is treated as non-loopback.

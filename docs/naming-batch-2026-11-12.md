@@ -72,9 +72,9 @@ Zero survivors that are both unoccupied and strong.**
 The batch did not fail. It produced a market signal.
 
 Four of the eleven blocked candidates are **live companies in this exact
-category**, and three of them describe AISL's own thesis almost word for word:
+category**, and three of them describe aiSL's own thesis almost word for word:
 
-| Company | Their line | Relation to AISL |
+| Company | Their line | Relation to aiSL |
 | --- | --- | --- |
 | Sigilith | "The authorisation layer for AI decisions. We sit in the path: the decision doesn't go out until it's policy-checked and sealed" | **Direct.** Same thesis, including "in the path" and "sealed" |
 | Custodel | "The oversight layer for the autonomous agents moving into compliance and risk. Observe, govern, audit, improve" | **Direct.** Governance and audit |
@@ -89,7 +89,7 @@ Three consequences:
 
 1. **The semantic field is closed.** Seal, custody, and attestation names are
    owned. Generating a batch 2 in the same field is waste.
-2. **AISL is not alone in the category.** The "authority for AI agents" space has
+2. **aiSL is not alone in the category.** The "authority for AI agents" space has
    at least three direct entrants naming themselves right now. That changes a
    business assumption in `business-and-ip.md`, which assumed the category coinage
    ("AI bailment") was open ground.

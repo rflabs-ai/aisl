@@ -20,7 +20,7 @@ are rarely the people who sign.
 
 ## Tier 1 — AI-native, selling into regulated markets (highest reply rate)
 
-Their buyers' security reviews ask the exact question AISL answers.
+Their buyers' security reviews ask the exact question aiSL answers.
 
 | # | Organization | Why they'd care | Ask for |
 | --- | --- | --- | --- |

@@ -17,7 +17,7 @@ product and wrong for a standard. The corrected position is at
 
 ---
 
-## 1. Where AISL sits in the open-source taxonomy
+## 1. Where aiSL sits in the open-source taxonomy
 
 The source video (`Q6PYuNwft-g`, Elie Steinbock, "How Open Source Founders
 Make Millions", uploaded 2026-11-02) splits open source into three kinds and
@@ -29,7 +29,7 @@ only gives a monetization playbook for the third:
 | 2. Infrastructure | MongoDB, Elasticsearch, Terraform | Real money, but he explicitly excludes it as "difficult to start" |
 | 3. SaaS | Inbox Zero, Papermark, PostHog, Sentry, GitLab | The playbook: subscription revenue |
 
-AISL is a **type 2 / type 3 hybrid**. The enforcement plane is infrastructure
+aiSL is a **type 2 / type 3 hybrid**. The enforcement plane is infrastructure
 (you adopt it, it sits underneath everything). The thing a customer actually
 buys, an operated plane with custody, attestation, and support, is SaaS.
 
@@ -37,9 +37,9 @@ The practical consequence: his type-3 playbook applies to the **operated
 product**, not to the library. Do not read his advice as "make the enforcement
 plane a subscription."
 
-He does make one claim that inverts for AISL. He says the winning SaaS
+He does make one claim that inverts for aiSL. He says the winning SaaS
 deliberately hides the word "open source" because users do not care, and that
-it "happened by chance that the code was open." For AISL, auditability *is* the
+it "happened by chance that the code was open." For aiSL, auditability *is* the
 product. Openness is the marketing and the trust mechanism, not a footnote. His
 own four reasons to open source (marketing, privacy, security, contributors)
 are the ones to lean on; his "keep it quiet" tactic is the one to ignore.
@@ -70,7 +70,7 @@ operating record, not a secret.
 | Instrument | What it covers here | Current state | Action |
 | --- | --- | --- | --- |
 | **Copyright** | The code, docs, the BRAND.md copy | Held automatically on creation. Apache-2.0 grants use, does not transfer ownership | None required. Optional US registration only if statutory damages matter |
-| **Trademark** | The name customers say, the mark on the pilot page | **Gap.** KEPT is blocked (Janus AI Solutions LLC, serial 50171161, classes 9, 41, 42, filed 2026-10-20). `AISL` is descriptive and weak. Nothing registered | This is the only registerable asset and it is missing. See `docs/naming-method.md` |
+| **Trademark** | The name customers say, the mark on the pilot page | **Gap.** KEPT is blocked (Janus AI Solutions LLC, serial 50171161, classes 9, 41, 42, filed 2026-10-20). `aiSL` is descriptive and weak. Nothing registered | This is the only registerable asset and it is missing. See `docs/naming-method.md` |
 | **Patent** | A specific novel mechanism, if one exists | None filed | Probably skip. Software patents are slow and expensive, and the value here is operational, not algorithmic. Revisit only if a specific verification mechanism is genuinely novel and a competitor could not design around it |
 | **Trade secret** | Pricing, the customer list, deployment playbooks, incident response, the parts of the roadmap not published | Exists by default, unprotected by process | Write down what stays private and who may see it. A trade secret with no boundary is not one |
 
@@ -92,8 +92,8 @@ Elie's toolbox, from the video, with what each one costs you:
 | Enterprise code kept out of the repo | Public repo stays liberal, enterprise features live elsewhere | Same requirement as above, harder to develop in the open |
 | Relicense closed | Cal.com (about a year ago) and Dub (recently) did this | Goodwill, and the contributors you attracted on the open promise |
 
-AISL today: Apache-2.0, one license, everything in `src/`, no `ee/`, no dual
-license. By the video's own taxonomy AISL is fully open and therefore fully
+aiSL today: Apache-2.0, one license, everything in `src/`, no `ee/`, no dual
+license. By the video's own taxonomy aiSL is fully open and therefore fully
 forkable and hostable by anyone, including a cloud provider. There is currently
 no license-based protection of any kind. That is a deliberate choice
 (`README.md`, "the patent grant is why it is not MIT"), not an oversight, but it
@@ -129,7 +129,7 @@ read before this document is used to justify anything.
 
 The short version, because it decides the license question:
 
-- A standard is a **format** two parties can implement independently. AISL as a
+- A standard is a **format** two parties can implement independently. aiSL as a
   whole is a **runtime**, and it *is* the security model, so nobody "interoperates"
   with it.
 - The standardizable asset is the **evidence bundle**: hash-chained events,
@@ -194,8 +194,8 @@ security is on you" burden a security buyer will pay to avoid.
 
 ## 7. What the company actually is
 
-The question that keeps returning: is AISL the product, or a shop that
-implements AISL for people? It is both, in a fixed order, and the order is the
+The question that keeps returning: is aiSL the product, or a shop that
+implements aiSL for people? It is both, in a fixed order, and the order is the
 business model.
 
 | Shape | What it sells | Cycle | Ceiling | Fits now? |
@@ -247,19 +247,19 @@ That closes the naming loop by force, which is the correct forcing function.
 
 ---
 
-## 8. Why AISL is a poor attention honeypot
+## 8. Why aiSL is a poor attention honeypot
 
 This matters for the "bring customers, investors, and cofounders to me"
 ambition, and it is not obvious.
 
-AISL's demo is a **denial**. Nothing happens, visibly, when the system works.
+aiSL's demo is a **denial**. Nothing happens, visibly, when the system works.
 The value is the absence of an event. That is a hard thing to make someone
 watch for fifteen seconds, and it is a hard thing to put on Product Hunt.
 
 Compare: `vkeys` shows a key that cannot be printed. `kgp` shows a cited answer
 from a video. Both produce a visible artifact in one command.
 
-So the honeypot and the revenue product are different assets, and AISL is the
+So the honeypot and the revenue product are different assets, and aiSL is the
 revenue product, not the honeypot. See `docs/portfolio-wedge.md` for the survey
 and the recommendation.
 

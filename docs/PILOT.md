@@ -1,4 +1,4 @@
-# AISL design-partner pilot
+# aiSL design-partner pilot
 
 **Six weeks. One agent workflow. One question answered: can you prove what your
 agents did?**
@@ -38,7 +38,7 @@ Three consequences you have probably already met:
    They are not signed, not chained, and not anchored anywhere the attacker
    cannot rewrite.
 
-AISL is built on the opposite premise: **the model is not the authority, the
+aiSL is built on the opposite premise: **the model is not the authority, the
 infrastructure is.**
 
 ---
@@ -48,7 +48,7 @@ infrastructure is.**
 | Week | Work | Output |
 | --- | --- | --- |
 | 1 | Map one real workflow: what the agent reads, decides, writes, and sends | A boundary diagram and the enforcement points that will exist |
-| 2–3 | Deploy AISL in front of that workflow, in a sandboxed copy of your environment | An agent running under capability-scoped authority |
+| 2–3 | Deploy aiSL in front of that workflow, in a sandboxed copy of your environment | An agent running under capability-scoped authority |
 | 4 | Policy in your terms: who may do what, to which classification, with whose approval | A policy file you own and can read |
 | 5 | Adversarial pass against *your* workflow, not the demo corpus | A written findings list, with each finding reproduced |
 | 6 | Evidence review and handover | A signed, anchored audit bundle for the pilot period, plus a runbook |
@@ -59,7 +59,7 @@ and a hash chain that proves nothing was rewritten afterwards.
 
 ---
 
-## What AISL enforces during the pilot
+## What aiSL enforces during the pilot
 
 - **Capability-based authority.** Every action carries a signed capability that
   names the resource, the action, the classification ceiling, and the expiry.
@@ -86,7 +86,7 @@ Honesty here saves us both a wasted quarter:
   attacker already owns the machine, they own the keys. Real isolation
   (microVM, HSM, attestation) is not shipped.
 - **It does not judge intent.** A model doing something harmful *inside* the
-  scope it was granted is out of reach. AISL constrains authority, not meaning.
+  scope it was granted is out of reach. aiSL constrains authority, not meaning.
 - **It does not replace your DLP, SIEM, or IdP.** It produces evidence; it does
   not ship a dashboard, a SOC, or a compliance certificate.
 - **It is pre-1.0.** Expect sharp edges, expect to be the person who finds them,
@@ -130,7 +130,7 @@ auto-renewal; at week six you decide yes or no, and either answer is fine.
 
 ## Who you would be working with
 
-AISL is a one-person project. There is no sales team and no support tier: the
+aiSL is a one-person project. There is no sales team and no support tier: the
 person who signs the pilot is the person who writes the code, answers the
 security questionnaire, and picks up when it breaks at 2am. For a six-week
 engagement that is an advantage; for a five-year contract it is not, and you

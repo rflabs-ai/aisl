@@ -29,7 +29,7 @@ was left, and what the next session should pick up.
 **Did:**
 - Added `docs/business-and-ip.md`: the open-source taxonomy, the legal stack (trademark is the gap, not copyright or patent), the three-layer license seam (format and denial free; custody, certification and support paid), and the DFY-to-product company shape.
 - Added `docs/naming-method.md`: legal-first naming, the six-surface USPTO map, and the Step 2b domain-first correction.
-- Added `docs/portfolio-wedge.md`: the wedge survey rebuilt from `shared-docs/CLAIMS-INDEX.md` instead of the control-plane registry. `vkeys` is the wedge that feeds AISL, `mcp-weight` has the only measured demand, `fixture-cad` has the best verifiable shipped claim.
+- Added `docs/portfolio-wedge.md`: the wedge survey rebuilt from `shared-docs/CLAIMS-INDEX.md` instead of the control-plane registry. `vkeys` is the wedge that feeds aiSL, `mcp-weight` has the only measured demand, `fixture-cad` has the best verifiable shipped claim.
 - Added `docs/naming-batch-2026-11-12.md`: 79 candidates across three batches. Concept field 0 survivors, two-syllable coinage 0 survivors, domain-first three-syllable 2 survivors with stated caveats.
 - Updated `BRAND.md`: the name deferral is now on the critical path, plus the two-name rule (company mark vs product mark).
 - Added `data/tm/` to `.gitignore`; raw screen payloads stay local.
@@ -37,7 +37,7 @@ was left, and what the next session should pick up.
 - Recorded the competitor finding: Sigilith, Custodel and Testari describe this thesis almost verbatim, so the category is not empty.
 
 **Left:**
-- No registered trademark. `AISL` is a descriptive product mark; the company mark is still unfilled.
+- No registered trademark. `aiSL` is a descriptive product mark; the company mark is still unfilled.
 - `nirastra` and `velethra` need a real clearance pass in classes 9 and 42, through the search export rather than the API.
 - The generator needs a sound profile; both survivors fail the ear test for opposite reasons.
 
@@ -117,7 +117,7 @@ was left, and what the next session should pick up.
   socket, and the world store factory refuses before opening a persistent store,
   when the keys that verify and decrypt existing evidence are missing.
   Demo, benchmark, tests and in-memory worlds are untouched and still run with
-  zero environment variables. Override: `AISL_ALLOW_EPHEMERAL_KEYS=1`, exact
+  zero environment variables. Override: `aiSL_ALLOW_EPHEMERAL_KEYS=1`, exact
   value only, one warning, never the default. Error text names every missing
   variable and the command that generates it.
 - **Incident: the pre-commit hook leaked `GIT_DIR`.** Git exports `GIT_DIR`,

@@ -9,7 +9,7 @@ Use GitHub's private vulnerability reporting on this repository:
 to the maintainers.
 
 If that is unavailable, email the maintainer at the address on the GitHub profile
-for `@kcpatterson`, with `AISL` in the subject line.
+for `@kcpatterson`, with `aiSL` in the subject line.
 
 ### What to include
 

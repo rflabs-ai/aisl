@@ -17,7 +17,7 @@ local part.
 
 - [ ] `aisl serve` starts the REST server with the same key policy as
       `startRestServer` (fail closed on missing durable keys;
-      `AISL_ALLOW_EPHEMERAL_KEYS=1` is the explicit override).
+      `aiSL_ALLOW_EPHEMERAL_KEYS=1` is the explicit override).
 - [ ] `--host`, `--port`, `--tls-cert`, `--tls-key` are documented and tested.
       A non-loopback bind without TLS is refused before a socket exists.
 - [ ] `/healthz` is reachable and reports `revocation` and `idp`.

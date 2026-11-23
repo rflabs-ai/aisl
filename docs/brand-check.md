@@ -80,7 +80,7 @@ building on this name is a brand you cannot register, in a class where an
 identical mark was filed first, with a holder who may enforce once their
 application matures.
 
-**Recommendation: drop KEPT as the company name.** Keep AISL as the product name,
+**Recommendation: drop KEPT as the company name.** Keep aiSL as the product name,
 which is what the code, the CLI and the pilot page already say.
 
 ## What the market screen did show
@@ -112,7 +112,7 @@ Until one of those happens, treat the name as **unverified**, not as safe.
 
 The order of fallback matters less than having one ready:
 
-1. **AISL** as the product name, with a different company name.
+1. **aiSL** as the product name, with a different company name.
 2. A coined mark with no dictionary meaning (fastest to clear, slowest to mean
    something).
 3. Buy a name that is already cleared by its owner.

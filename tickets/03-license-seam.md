@@ -6,7 +6,7 @@
 
 ## Why
 
-The license seam depends on whether AISL is sold as a standard or a product.
+The license seam depends on whether aiSL is sold as a standard or a product.
 That decision sets what stays open and what is paid, and it gates the packaging
 and pricing work that follows.
 

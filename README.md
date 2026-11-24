@@ -10,7 +10,7 @@ The premise is one sentence:
 
 > **The model is not the authority. The infrastructure is.**
 
-![aiSL CLI demo: a capability-gated task, denied attacks, and a verified evidence chain](https://raw.githubusercontent.com/rflabs-ai/aisl/main/docs/demo/aisl-demo.gif)
+![aiSL: a hostile document tries to export the PHI database, the capability check denies it, and the signed chain records it](https://raw.githubusercontent.com/rflabs-ai/aisl/main/docs/demo/aisl-use-case.png)
 
 aiSL lets a capable model act on sensitive code, documents, and data while an
 infrastructure layer — not the model's good behavior — decides what it may

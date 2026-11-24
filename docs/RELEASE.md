@@ -6,7 +6,7 @@ projects ship something they cannot support.
 | Release | Meaning | Status |
 | --- | --- | --- |
 | **Source** | someone can clone, read, build and run it | **ready** |
-| **Package** | `npm i aisl` works | **ready** (ships compiled `dist/`; `aisl demo` wants a git checkout) |
+| **Package** | `npm i @kcpatt27/aisl` works | **ready** (ships compiled `dist/`; `aisl demo` wants a git checkout) |
 | **Service** | someone else runs it exposed to a network | **conditionally ready**: an embedder must wire `RestApi`; no `serve` command, no CLI host, and in-process TLS is absent |
 
 ---
@@ -48,8 +48,9 @@ The tarball is correct and the installed CLI runs from it.
       `bin/aisl.mjs` launches `../dist/cli.js`. Development stays buildless
       (`node src/cli.ts demo`). No new runtime dependency: `typescript` was
       already a devDependency. See ADR-044.
-- [ ] `npm publish` under the name `aisl` (unscoped name is free; a scoped
-      `@<org>/aisl` also works once the org exists)
+- [ ] `npm publish` as `@kcpatt27/aisl` (scoped public; the unscoped `aisl`
+      name collides with the existing `asl` package and is refused by the
+      registry)
 - [x] Tag `v0.1.0` (2026-11-17); `v0.1.1` is tagged at publish.
 
 Known, and not a packaging defect: `aisl demo` sections 20-21 digest the

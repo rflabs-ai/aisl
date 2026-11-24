@@ -1,8 +1,11 @@
 {
-  "name": "aisl",
+  "name": "@kcpatt27/aisl",
   "version": "0.1.1",
   "description": "High-assurance AI execution environment: the model is not the authority, the infrastructure is.",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.18"

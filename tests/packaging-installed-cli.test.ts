@@ -20,9 +20,9 @@
 
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { git, gitEnv } from './helpers/git.ts';
 
@@ -30,6 +30,7 @@ const REPO_ROOT = join(import.meta.dirname, '..');
 const RUNTIME_DEPS = ['jose', 'postgres'];
 
 const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
+  name: string;
   files: string[];
   version: string;
 };
@@ -56,7 +57,8 @@ function buildIfNeeded(): void {
 }
 
 function stageInstall(root: string): string {
-  const pkgDir = join(root, 'node_modules', 'aisl');
+  const pkgDir = join(root, 'node_modules', ...pkg.name.split('/'));
+  mkdirSync(dirname(pkgDir), { recursive: true });
   // npm always ships package.json even though `files` does not name it.
   cpSync(join(REPO_ROOT, 'package.json'), join(pkgDir, 'package.json'));
   for (const entry of pkg.files) {

@@ -80,6 +80,16 @@ rest of the story.
   with RLS-enforced tenant isolation + per-tenant evidence keys, backup/restore,
   document ingestion, read-only Git integration, and a zero-dependency UI.
 
+## Install
+
+```bash
+npm install -g @kcpatt27/aisl
+```
+
+The CLI is `aisl`. The `demo` command expects a git checkout because sections
+20-21 digest the tracked tree; the other commands run from the installed
+package.
+
 ## Quick start
 
 Requires **Node.js >= 22.18** (uses native TypeScript execution, `node:test`,

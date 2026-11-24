@@ -20,7 +20,8 @@ every decision.
 **This is** a single-process enforcement plane: capability-based authority,
 policy evaluation, a signed hash-chained audit log with external anchoring, taint
 tracking across a session, content-level egress DLP, artifact admission, and an
-adversarial harness that runs on a schedule. It is the reference implementation
+adversarial harness that runs in CI or by hand; no scheduler is included. It is
+the reference implementation
 of the aiSL idea; the specification is `DECISIONS.md` plus `SECURITY_CLAIMS.md`.
 
 **This is not** production-ready, and the gaps are named rather than implied:
@@ -85,7 +86,7 @@ Requires **Node.js >= 22.18** (uses native TypeScript execution, `node:test`,
 `node:sqlite` — no build step).
 
 ```bash
-npm install                 # devDeps only: typescript + @types/node
+npm install                 # runtime + dev deps: jose, postgres, typescript, @types/node
 npm run typecheck           # tsc --noEmit
 npm test                    # unit + integration + security suites
 npm run demo                # MVP acceptance walkthrough

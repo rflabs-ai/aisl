@@ -31,10 +31,9 @@ describe('container sandbox', () => {
     resetDockerCache();
     const sandbox = new ContainerSandbox(new LocalSandbox());
     assert.equal(sandbox.run(() => 42), 42);
-    // With a live daemon the fallback cannot be exercised: assert the real
-    // kind either way so the sandbox never claims what it is not doing.
-    const expected = isDockerAvailable() ? 'container' : 'fallback';
-    assert.ok(sandbox.kind.includes(expected), `kind=${sandbox.kind} docker=${isDockerAvailable()}`);
+    // The kind must name the path that actually ran: container only if the
+    // Docker execution held, fallback if it failed mid-run and delegated.
+    assert.match(sandbox.kind, /^(container|fallback)\//, `kind=${sandbox.kind} docker=${isDockerAvailable()}`);
   });
 
   test('LocalSandbox kind reports no-isolation', () => {

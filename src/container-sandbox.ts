@@ -56,9 +56,11 @@ export interface ContainerSandboxOptions {
   readonly cpuQuota?: number;
   readonly pidsLimit?: number;
   readonly timeoutMs?: number;
+  /** Test seam: force the Docker path to fail so the fallback is exercised. */
+  readonly forceDockerFailure?: boolean;
 }
 
-const SANDBOX_DEFAULTS: Required<ContainerSandboxOptions> = {
+const SANDBOX_DEFAULTS: Required<Omit<ContainerSandboxOptions, 'forceDockerFailure'>> = {
   memoryLimit: '128m',
   cpuPeriod: 100_000,
   cpuQuota: 50_000,
@@ -71,17 +73,18 @@ const SANDBOX_DEFAULTS: Required<ContainerSandboxOptions> = {
  * of truth with `buildDockerArgs` so the lifecycle attestation (M16) records
  * effective vs declared limits without duplicating the defaults.
  */
-export function effectiveLimits(opts: ContainerSandboxOptions = {}): Required<ContainerSandboxOptions> {
+export function effectiveLimits(opts: ContainerSandboxOptions = {}): Required<Omit<ContainerSandboxOptions, 'forceDockerFailure'>> {
   return { ...SANDBOX_DEFAULTS, ...opts };
 }
 
 /**
  * Docker-backed sandbox. When Docker is unavailable, falls back to LocalSandbox
- * (zero isolation). The fallback is logged, not silent — a caller that expects
- * isolation must check `kind`.
+ * (zero isolation). The fallback is visible through `kind`, not silent — a
+ * caller that expects isolation must check it. A mid-run Docker failure also
+ * flips `kind` before delegating, so a constructor-time check cannot go stale.
  */
 export class ContainerSandbox implements Sandbox {
-  readonly kind: string;
+  kind: string;
   private readonly opts: ContainerSandboxOptions;
   private readonly fallback: Sandbox;
   private readonly useDocker: boolean;
@@ -129,6 +132,7 @@ export class ContainerSandbox implements Sandbox {
 
     try {
       ensureImage();
+      if (this.opts.forceDockerFailure) throw new Error('docker exec failed (forced)');
       const taskId = randomUUID();
       const workDir = mkdtempSync(join(tmpdir(), `sandbox-${taskId}-`));
 
@@ -153,6 +157,7 @@ export class ContainerSandbox implements Sandbox {
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('exec failed') || msg.includes('docker') || msg.includes('ENOENT')) {
+        this.kind = `fallback/${this.fallback.kind}`;
         return this.fallback.run(fn);
       }
       throw error;
@@ -164,6 +169,7 @@ export class ContainerSandbox implements Sandbox {
 
     try {
       ensureImage();
+      if (this.opts.forceDockerFailure) throw new Error('docker exec failed (forced)');
       const taskId = randomUUID();
       const workDir = mkdtempSync(join(tmpdir(), `sandbox-${taskId}-`));
 
@@ -188,6 +194,7 @@ export class ContainerSandbox implements Sandbox {
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('exec failed') || msg.includes('docker') || msg.includes('ENOENT')) {
+        this.kind = `fallback/${this.fallback.kind}`;
         return this.fallback.runTool(tool, ctx);
       }
       throw error;

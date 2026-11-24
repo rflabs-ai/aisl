@@ -1,7 +1,7 @@
 # SECURITY CLAIMS
 
-Every claim below uses the required structure. Nothing is claimed that is not
-tested. Where a claim has a ceiling, the ceiling is stated — not buried.
+Every claim below uses the required structure. Every claim names its mechanism,
+test, and limitation. Where a claim has a ceiling, the ceiling is stated — not buried.
 
 ---
 
@@ -382,7 +382,8 @@ boundary in both modes; a superuser connection bypasses RLS entirely.
 
 **Claim:** Egress to any host not explicitly allowlisted by a capability constraint
 **and** a policy rule is denied. IP literals are blocked at the proxy layer.
-Sessions have no route out except through the egress proxy.
+When the container sandbox is active, sessions have no route out except through
+the egress proxy. In `LocalSandbox` mode there is no network containment.
 
 **Mechanism:** `EgressProxy` (`src/egress-proxy.ts`) intercepts HTTP traffic,
 blocks IP literals, and routes every request through the PDP before forwarding.
@@ -427,7 +428,8 @@ key is never logged. Evidence records receive a redacted placeholder, not the
 plaintext value.
 
 **Mechanism:** `EnvelopeSecretBroker` (`src/envelope-secrets.ts`) encrypts each
-secret with a unique DEK derived via HKDF-SHA256 from a master key. Access is
+secret with a unique DEK derived via PBKDF2-SHA512 (100,000 iterations, 16-byte
+random salt) from a master key. Access is
 gated by the PDP; baseline policy grants no `secret.use` rule, so the default
 is denial. The broker decrypts only after authorization and records
 `[decrypted-withheld]` in the event log.
@@ -616,10 +618,11 @@ the AMR claim. A malicious or misconfigured IdP could omit MFA from the AMR.
 **Claim:** An approval issued for principal A on resource R cannot be used by
 principal B, and an approval for tenant A cannot authorize actions in tenant B.
 The policy engine's `approvalApplies` function matches on `principalId`,
-`action`, `resourceId`, and expiry — all four must match.
+`action`, `resourceId`, and expiry. Cross-tenant reuse is blocked by the PDP's
+resource-tenant guard, not by a tenant field on the approval.
 
-**Mechanism:** `approvalApplies` in `src/policy.ts:223`; tenant equality check
-in `src/policy.ts:269`; PDP tenant guard in `src/pdp.ts:273`.
+**Mechanism:** `approvalApplies` in `src/policy.ts:276`; PDP resource-tenant
+guard in `src/pdp.ts:914`.
 
 **Threat model:** TM-003 (cross-tenant), TM-001 (approval theft).
 
@@ -689,7 +692,7 @@ fetch failure, causing `verifyToken` to return `undefined`, causing
 the correct default.
 
 **Evidence:** IdP health tracking in `src/identity.ts`; distinct deny reason
-for IdP unavailability.
+for IdP unavailability; covered by `tests/h15-fail-closed-availability.test.ts`.
 
 **Test:** `src/identity.ts` IdP health tracking.
 
@@ -1595,12 +1598,10 @@ signature leaked), denied, 404 unknown, 403 cross-tenant, 401 unauthenticated.
 
 **Test:** `tests/m17-federation.test.ts`.
 
-**Known limitations:** the anchor registry is in-memory, so "first anchor" vs
-"lost predecessor" is not distinguished across an ASL restart — mismatch
-detection is advisory; the durable attestation is the `anchor.register` event
-itself, which the EventStore already persists append-only (upgrade: a
-persisted accepted-head table). Tenant isolation remains the shared-process
-residual (ASL known-gap #7); H8 closes it for non-personal tenants. Anchoring
+**Known limitations:** rehydration of accepted heads depends on the same event
+store retaining `anchor.register`; an attacker who rewrites the store and every
+witness still wins. Tenant isolation remains the shared-process
+residual (aiSL known-gap #7); H8 closes it for non-personal tenants. Anchoring
 is non-blocking-but-loud on the control-plane side; the dispatch gate is
 fail-closed (H15 direction). Client-side bypass, worker sandbox execution, and
 rate limiting on the federation seam are out of M17 scope (named in the
@@ -1737,8 +1738,8 @@ loud through `health()`. A channel outage still engages locally and reports
 (audit 19, live PG).
 CLI: `node src/cli.ts incident status|engage|lift|revoke-cap|
 revoke-session|revoke-token|preserve|report`; operator commands build a bootstrap-free
-world (no fixture issuance/appends) and print a diagnosable refusal instead of
-a stack trace.
+world (no fixture issuance/appends) and print a diagnosable refusal for known
+command errors.
 
 **Threat model:** TM-004 (operators and evidence integrity); ROADMAP H13
 failure modes — cannot revoke quickly, cannot freeze issuance, cannot
@@ -1982,8 +1983,8 @@ token and payload canary absent from events, responses, and errors on success
 and failure paths; no serialized `claims`).
 
 **Test:** `tests/h2-short-lived-credentials.test.ts`; the full gate
-(`npm run typecheck && npm test` — 653 tests / 634 pass / 0 fail / 19
-Postgres-mode skips).
+at the time of that milestone (`npm run typecheck && npm test` — 653 tests /
+634 pass / 0 fail / 19 Postgres-mode skips).
 
 **Known limitations:** the revoked set is in-memory per process (the Postgres
 channel is the durable coordination path); revocation propagation is
@@ -2048,8 +2049,8 @@ cross-tenant review was accepted — is captured at `.scratch/h8/red.txt`.
 
 **Test:** `tests/h8-cross-tenant-probe.test.ts`; `tests/evidence.test.ts`
 (seal extension); `tests/tenant-rls.test.ts` (live-DB RLS proofs); the full
-gate (`npm run typecheck && npm test` — 716 tests / 695 pass / 0 fail / 21
-Postgres-mode skips).
+gate at the time of that milestone (`npm run typecheck && npm test` — 716 tests
+/ 695 pass / 0 fail / 21 Postgres-mode skips).
 
 **Known limitations:** the probe proves isolation in the directions and with
 the markers it plants; it is not a proof of absence for unknown leak channels
@@ -2124,8 +2125,8 @@ verifying, a re-signed truncation detected, a fork detected, and a hold
 surviving a ledger rebuild (demo exits 0).
 
 **Test:** `tests/h11-tamper-evident-evidence.test.ts`;
-`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate 716 tests
-/ 695 pass / 0 fail / 21 Postgres-mode skips.
+`tests/h8-cross-tenant-probe.test.ts` (the retention row); full gate at the
+time of that milestone: 716 tests / 695 pass / 0 fail / 21 Postgres-mode skips.
 
 **Known limitations:** a bundle with no source/checkpoint presented verifies
 internally but is reported `unanchored` — external corroboration is only as

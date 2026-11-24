@@ -67,7 +67,7 @@ and a hash chain that proves nothing was rewritten afterwards.
   parent, not declared by the caller.
 - **One enforcement path.** Nothing executes unless both a capability and the
   policy allow it, through a single code path.
-- **Containment and egress control.** Taint labels follow data across a session;
+- **Egress control and data-flow labels.** Taint labels follow data across a session;
   egress is classified, canary-scanned, and byte-capped before it leaves.
 - **Evidence.** Hash-chained, per-event signed, externally anchored, with
   operator-held checkpoints and recorded legal holds. Rewriting the log is

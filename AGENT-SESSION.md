@@ -117,7 +117,7 @@ was left, and what the next session should pick up.
   socket, and the world store factory refuses before opening a persistent store,
   when the keys that verify and decrypt existing evidence are missing.
   Demo, benchmark, tests and in-memory worlds are untouched and still run with
-  zero environment variables. Override: `aiSL_ALLOW_EPHEMERAL_KEYS=1`, exact
+  zero environment variables. Override: `AISL_ALLOW_EPHEMERAL_KEYS=1`, exact
   value only, one warning, never the default. Error text names every missing
   variable and the command that generates it.
 - **Incident: the pre-commit hook leaked `GIT_DIR`.** Git exports `GIT_DIR`,

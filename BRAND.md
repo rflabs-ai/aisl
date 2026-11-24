@@ -69,7 +69,8 @@ Background on the business consequences: `docs/business-and-ip.md`.
 
 - **Kept** — dropped. Do not use it. See the deferred-name section above.
 - **aiSL** — the display name. The package, binary, and CLI stay `aisl`
-  (lowercase, monospace). Never `AISL`. In speech: "aisle".
+  (lowercase, monospace). Environment variables and code identifiers keep the
+  `AISL_` prefix. Never `AISL` in prose. In speech: "aisle".
 - **AI bailment** — lowercase "bailment". It is a category, not a product.
 
 ---

@@ -9,11 +9,13 @@
  */
 
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPublicKey } from 'node:crypto';
 import { runAttackCorpus } from './attacks.ts';
+import { hasSecretInArgv } from './argv-guard.ts';
 import {
   ADVERSARIAL_REPORT_VERSION,
   buildBaseline,
@@ -152,6 +154,7 @@ function resignChain(events: readonly SecurityEvent[]): SecurityEvent[] {
 async function demo(): Promise<void> {
   const world = await buildWorldAsync();
   const r = world.resources;
+  let failed = false;
 
   heading('MVP DEMO — high-assurance AI execution environment');
   console.log(`  tenant: ${TENANT_A}   model: scripted (assumed hostile)   sandbox: in-process (no isolation yet)`);
@@ -167,6 +170,7 @@ async function demo(): Promise<void> {
   for (const a of attacks) {
     const outcome = a.outcomes[0]!;
     const status = a.passed ? (outcome.decision === 'deny' ? 'DENY' : 'ALLOW') : 'FAIL';
+    if (!a.passed) failed = true;
     line(`${a.testCase.id} ${a.testCase.class}`, status, `${outcome.denyReason ?? outcome.decision}: ${outcome.reason}`);
     if (a.injectionSignals.length > 0) {
       console.log(`         injection signals detected (telemetry only): ${a.injectionSignals.length}`);
@@ -208,6 +212,7 @@ async function demo(): Promise<void> {
   const events = world.eventLog.all();
   const denied = events.filter((e) => e.decision === 'deny').length;
   const allowed = events.filter((e) => e.decision === 'allow').length;
+  if (!chain.valid || denied + allowed === 0) failed = true;
   console.log(`  events: ${events.length}   allow decisions: ${allowed}   deny decisions: ${denied}`);
   console.log(`  hash chain valid: ${chain.valid}${chain.valid ? '' : ` (broken at seq ${chain.firstBrokenSeq})`}`);
   console.log(`  head: ${events.at(-1)?.eventHash.slice(0, 32)}...`);
@@ -1001,6 +1006,7 @@ async function demo(): Promise<void> {
   }
 
   // Postgres mode: close the pools or the process hangs at exit.
+  if (failed) process.exitCode = 1;
   world.incident.close();
   world.eventLog.close();
 }
@@ -1235,7 +1241,14 @@ async function benchmark(): Promise<void> {
 
   // The committed artifact by default. Tests point AISL_BENCHMARK_OUT at a temp
   // file so a gate run does not dirty a tracked file (ticket 17).
-  const outPath = process.env.AISL_BENCHMARK_OUT ?? join(ROOT, 'benchmarks', 'results.json');
+  const outIdx = process.argv.indexOf('--out');
+  const outArg = outIdx >= 0 ? process.argv[outIdx + 1] : undefined;
+  if (outIdx >= 0 && (!outArg || outArg.startsWith('--'))) {
+    console.error('usage: benchmark --out <path>');
+    process.exitCode = 2;
+    return;
+  }
+  const outPath = outArg ?? process.env.AISL_BENCHMARK_OUT ?? join(ROOT, 'benchmarks', 'results.json');
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(output, null, 2)}\n`);
 
@@ -1302,6 +1315,20 @@ async function buildCommand(): Promise<void> {
 
   if (sub === 'keygen') {
     const keysDir = join(ROOT, '.build-keys');
+    const privatePath = join(keysDir, 'build-signing-private.pem');
+    if (existsSync(privatePath) && !process.argv.includes('--force')) {
+      console.error('refusing to overwrite an existing build signing key; pass --force to rotate');
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      execFileSync('git', ['ls-files', '--error-unmatch', '.build-keys'], { cwd: ROOT, stdio: 'ignore' });
+      console.error('refusing: .build-keys is tracked by git; untrack it before generating keys');
+      process.exitCode = 1;
+      return;
+    } catch {
+      // Not tracked, proceed.
+    }
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     mkdirSync(keysDir, { recursive: true });
     writeFileSync(join(keysDir, 'build-signing-private.pem'), privateKeyPem);
@@ -2157,7 +2184,12 @@ async function policyCommand(): Promise<void> {
   process.exitCode = 1;
 }
 
-const command = process.argv[2] ?? 'demo';
+const argv = process.argv.slice(2);
+if (hasSecretInArgv(argv)) {
+  console.error('usage.secret-in-argv: refusing a flag value that looks like key material');
+  process.exit(2);
+}
+const command = argv[0] ?? 'demo';
 if (command === 'demo') await demo();
 else if (command === 'attack') await attack();
 else if (command === 'adversarial') await adversarialCommand();

@@ -39,7 +39,7 @@ Do not make the test skip; the SLO block assertion is the point.
 
 ## Result
 
-- `src/cli.ts` writes to `aiSL_BENCHMARK_OUT` when it is set, otherwise to
+- `src/cli.ts` writes to `AISL_BENCHMARK_OUT` when it is set, otherwise to
   `benchmarks/results.json`. No flag, no new module, one conditional.
 - `tests/slo.test.ts` runs the benchmark with the override pointed at a temp
   file, reads it from there, and asserts the tracked artifact is neither

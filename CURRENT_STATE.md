@@ -59,8 +59,8 @@ TypeScript foundation on Node 24, ~16,200 lines of source across 60 modules
 (`src/` — `ingestion.ts`, `git-reader.ts`, `supply-chain.ts`,
 `rest-anchors.ts`, `updates.ts`, `incident.ts`, `health.ts`, `anchors.ts`,
 `retention.ts`, `adversarial.ts`, `policy-analysis.ts`, and
-`incident-store-pg.ts` are the latest additions), 872 tests
-(`tests/`, `security-tests/`; 850 pass, 22 Postgres-mode tests skip cleanly
+`incident-store-pg.ts` are the latest additions), 878 tests
+(`tests/`, `security-tests/`; 856 pass, 22 Postgres-mode tests skip cleanly
 without `DATABASE_URL`), a 12-case attack
 corpus (`security-attacks/`), legitimate-task fixtures and a document corpus
 (`security-fixtures/`), three policy fixtures (`tests/fixtures/policy/`), five
@@ -388,7 +388,8 @@ Dev dependencies: `typescript`, `@types/node`.
   bootstrap (`-WithPostgres` / `--with-postgres`) matching DEPLOYMENT.md's
   M12 workflow.
 - **Envelope encryption** (`src/envelope-secrets.ts`): AES-256-GCM envelope
-  encryption with HKDF-derived DEKs. Secrets are never stored in plaintext.
+  encryption with PBKDF2-SHA512-derived DEKs (100,000 iterations, 16-byte salt).
+  Secrets are never stored in plaintext.
   Evidence records get a redacted placeholder.
 - Gates: network egress decisions (PDP-gated + proxy-enforced), secret access
   decisions (PDP-gated + envelope-encrypted).
@@ -442,11 +443,10 @@ Dev dependencies: `typescript`, `@types/node`.
 
 ## What was tested
 
-All 872 tests run (850 green; 22 Postgres-mode tests skip without
+All 878 tests run (856 green; 22 Postgres-mode tests skip without
 `DATABASE_URL`/`RESTORE_DATABASE_URL`; the Postgres suites were verified
-live against a disposable `postgres:16` container — serialized run 612 tests
-(skipped suites enumerate their child cases once live), 611 pass, 1
-environment-gated skip, 0 fail). Coverage of the
+live against a disposable `postgres:16` container — serialized run 892 tests,
+892 pass, 0 environment-gated skips, 0 fail). Coverage of the
 twelve invariants plus M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M13, M14, M15, M16, M17, H1, H10, H12, H13, H15, H2, H8, H11:
 
 1 no capability -> deny (3) | 2 model cannot mint (3) | 3 document cannot

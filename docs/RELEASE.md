@@ -13,7 +13,7 @@ projects ship something they cannot support.
 
 ## Source release — ready
 
-- [x] `npm run typecheck && npm test`: 856 pass, 0 fail, 22 Postgres skips (878 tests)
+- [x] `npm run typecheck && npm test`: 857 pass, 0 fail, 22 Postgres skips (879 tests)
 - [x] `npm run demo` and `npm run benchmark` run clean; SLO block passes
 - [x] `LICENSE` — Apache-2.0 with the patent grant
 - [x] `SECURITY.md` — private reporting, scope, and an explicit out-of-scope list
@@ -33,7 +33,7 @@ projects ship something they cannot support.
 
 The tarball is correct and the installed CLI runs from it.
 
-- [x] `files` allowlist: 155 files, about 374.9 kB packed (about 1.4 MB unpacked).
+- [x] `files` allowlist: 155 files, about 375.5 kB packed (about 1.4 MB unpacked).
       Ships `dist`, `src`, `bin`, `tools/manifests`, `security-attacks`,
       `security-fixtures`, `tests/fixtures/policy`, `artifacts/sbom.json`, and
       `npm-shrinkwrap.json` (npm never publishes `package-lock.json`, so the
@@ -51,7 +51,7 @@ The tarball is correct and the installed CLI runs from it.
 - [ ] `npm publish` as `@kcpatt27/aisl` (scoped public; the unscoped `aisl`
       name collides with the existing `asl` package and is refused by the
       registry)
-- [x] Tag `v0.1.0` (2026-11-17); `v0.1.1` is tagged at publish.
+- [x] Tag `v0.1.0` (2026-11-17); `v0.1.1` (2026-11-24); `v0.1.2` is tagged at publish.
 
 Known, and not a packaging defect: `aisl demo` sections 20-21 digest the
 committed tree (`git ls-files`, ADR-024), so a `node_modules` copy with no
@@ -82,10 +82,10 @@ a reverse proxy that owns rate limits.*
 
 The order matters, and the last step is the least urgent.
 
-1. `npm publish` (the tarball is verified: 155 files, about 374.9 kB, and the
+1. `npm publish` (the tarball is verified: 155 files, about 375.5 kB, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
-2. `git tag v0.1.1` after the publish (`v0.1.0` was the previous tag).
+2. `git tag v0.1.2` after the publish (`v0.1.1` was the previous tag).
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,
    `npm test`. This is the closest thing to a stranger who will not read the

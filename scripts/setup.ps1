@@ -38,8 +38,13 @@ Write-Host '== ai-security-layer setup ==' -ForegroundColor Cyan
 
 # 1. Node >= 22.5 (package.json engines).
 Check 'node >= 22.5' {
-    $version = (node --version) -replace '^v', ''
-    $major, $minor = $version.Split('.')
+    # Normalize to one line first: some CI shells return an array here, and
+    # splitting an array yields an array of arrays, which fails the [int] cast.
+    $raw = @(node --version)[0]
+    $version = ([string]$raw).Trim() -replace '^v', ''
+    $parts = $version.Split('.')
+    $major = $parts[0]
+    $minor = $parts[1]
     if (-not $major -or -not $minor) { throw "unparsable version output: $version" }
     if ([int]$major -lt 22 -or ([int]$major -eq 22 -and [int]$minor -lt 5)) {
         throw "found $version, need >= 22.5"

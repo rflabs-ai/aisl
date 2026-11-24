@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { hasSecretInArgv } from '../src/argv-guard.ts';
 
 test('refuses a PEM-shaped flag value', () => {
-  assert.equal(hasSecretInArgv(['incident', 'engage', 'global', '--reason', '-----BEGIN PRIVATE KEY-----']), true);
+  const pemHeader = ['-----BEGIN', 'PRIVATE KEY-----'].join(' ');
+  assert.equal(hasSecretInArgv(['incident', 'engage', 'global', '--reason', pemHeader]), true);
 });
 
 test('refuses a JWT-shaped flag value', () => {

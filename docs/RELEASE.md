@@ -23,7 +23,7 @@ projects ship something they cannot support.
 - [x] `docs/PILOT-TARGETS.md` — 50 organizations, ranked by reply likelihood
 - [x] Safety gates 1, 2, 3 — evidence in `docs/SAFETY-2026-11-01.md`,
       tickets in `docs/safety/`
-- [x] `node scripts/pack-release.mjs` - 270 entries, 2.9 MB, forbidden: none.
+- [x] `node scripts/pack-release.mjs` - 273 entries, 2.9 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
 - [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release

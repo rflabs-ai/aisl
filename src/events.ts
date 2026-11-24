@@ -235,7 +235,15 @@ export function bundleFromEvents(events: readonly SecurityEvent[]): string {
   return canonicalJson({
     algorithm: 'sha256-chain-ed25519-v1',
     genesis: GENESIS_HASH,
-    events,
+    // Normalize each event through the same body used for hashing and signing.
+    // canonicalJson turns `undefined` into `null`, while eventBody drops
+    // undefined metadata keys through the JSON round trip; exporting the raw
+    // event made the bundle hash differently from the signed event (seq 27).
+    events: events.map((e) => ({
+      ...eventBody(e),
+      eventHash: e.eventHash,
+      signature: e.signature,
+    })),
     head: events.at(-1)?.eventHash ?? GENESIS_HASH,
   });
 }

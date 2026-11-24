@@ -229,6 +229,9 @@ async function demo(): Promise<void> {
   console.log(`  per-event signatures: every event has an Ed25519 signature (sample: ${sampleEvent?.signature ? sampleEvent.signature.slice(0, 24) + '...' : 'none'})`);
   console.log(`  signature chain verification: ${signed.valid ? 'VALID' : 'INVALID'}`);
   console.log(`  offline verifier (no DB): ${offline.valid ? 'VALID' : 'INVALID'} (${offline.eventCount} events)`);
+  if (process.env.AISL_DEMO_DEBUG) {
+    console.log(`  offline verifier errors: ${offline.errors.join('; ')}`);
+  }
   console.log(`  anchor file: ${anchorContent ? `${anchorContent.trim().split('\n').length} lines, head match: ${offline.anchorMatch ? 'yes' : 'NO'}` : 'not configured (set EVENT_ANCHOR_PATH to enable external witness)'}`);
 
   heading('12. M5: hierarchical resource matching (idPatterns)');

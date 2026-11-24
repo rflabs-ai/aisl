@@ -236,6 +236,26 @@ describe('M3: offline verifier (no database access)', () => {
     assert.equal(result.valid, false);
     assert.equal(result.signatureValid, false);
   });
+
+  test('an undefined metadata value does not change the exported hash', () => {
+    const log = new EventLog();
+    log.append({
+      tenantId: 't',
+      principal: 'p',
+      actor: 'p',
+      actorKind: 'agent',
+      action: 'secret.use',
+      resourceId: 'secret:test',
+      decision: 'deny',
+      denyReason: 'no-capability',
+      result: 'denied',
+      metadata: { phase: 'secret-broker', label: 'test key', encrypted: true, value: undefined },
+    });
+
+    const result = verifyBundle(log.bundle(), { publicKey: eventPublicKey() });
+    assert.equal(result.valid, true, result.errors.join('; '));
+    assert.equal(result.eventCount, 1);
+  });
 });
 
 describe('M3: signature forgery resistance', () => {

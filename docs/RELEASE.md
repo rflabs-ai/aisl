@@ -26,7 +26,8 @@ projects ship something they cannot support.
 - [x] `node scripts/pack-release.mjs` - 273 entries, 2.9 MB, forbidden: none.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
-- [ ] **Push to the org remote (not chosen yet)** — the only remaining step for this release
+- [x] CI green on Node 22 and 24 (the `verify` workflow)
+- [x] **Pushed to the org remote** — `rflabs-ai/aisl`, private until the release flip.
 
 ## Package release — ready
 

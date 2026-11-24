@@ -211,6 +211,28 @@ of them should stop feeling like a word you are evaluating and start feeling
 like the thing's name. If none does, widen the batch in the same cleared lane,
 which is cheap, rather than relaxing the gate, which is expensive.
 
+## Step 6b: dogfood the engine, with controls
+
+The decision engine (`eyewright`) can rank candidates, but only if it is shown to
+discriminate. Run it as a blind panel with controls:
+
+1. Put the real candidates in one batch with at least two controls: a name you
+   would accept, and the blocked name from the last failure (`KEPT`).
+2. Give the engine the same evidence for every entry. No extra help for the
+   candidates.
+3. Accept its ranking only when the good control lands above the candidate set
+   and the blocked control lands below it. If the engine cannot separate the
+   controls, it is not deciding anything and the decision stays human.
+4. Record the input file, the engine version, and the ranking. The output is
+   evidence to review, not a verdict to adopt.
+
+Dogfooding here has a second purpose: it exercises the product on a real,
+high-stakes decision, which is the only test that shows whether the engine is
+ready to be sold. A demo that only ever sees curated inputs proves nothing.
+
+The ear test (step 6) stays with the operator. The engine narrows the batch; it
+does not hear the name.
+
 ## Step 7: two names, two jobs
 
 Do not make one name carry both jobs. This is the structural fix for the

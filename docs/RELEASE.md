@@ -32,7 +32,7 @@ projects ship something they cannot support.
 
 The tarball is correct and the installed CLI runs from it.
 
-- [x] `files` allowlist: 153 files, about 372.6 kB packed (about 1.4 MB unpacked).
+- [x] `files` allowlist: 155 files, about 374.9 kB packed (about 1.4 MB unpacked).
       Ships `dist`, `src`, `bin`, `tools/manifests`, `security-attacks`,
       `security-fixtures`, `tests/fixtures/policy`, `artifacts/sbom.json`, and
       `npm-shrinkwrap.json` (npm never publishes `package-lock.json`, so the
@@ -80,7 +80,7 @@ a reverse proxy that owns rate limits.*
 
 The order matters, and the last step is the least urgent.
 
-1. `npm publish` (the tarball is verified: 153 files, about 372.6 kB, and the
+1. `npm publish` (the tarball is verified: 155 files, about 374.9 kB, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
 2. `git tag v0.1.1` after the publish (`v0.1.0` was the previous tag).

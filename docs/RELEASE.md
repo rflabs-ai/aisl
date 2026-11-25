@@ -85,7 +85,7 @@ The order matters, and the last step is the least urgent.
 1. `npm publish` (the tarball is verified: 155 files, about 375.5 kB, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
-2. `git tag v<version>` after the publish (`v0.1.2` was the previous tag).
+2. `git tag v<version>` after the publish (tags so far: `v0.1.0`, `v0.1.1`, `v0.1.2`).
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,
    `npm test`. This is the closest thing to a stranger who will not read the

@@ -5,13 +5,13 @@ projects ship something they cannot support.
 
 | Release | Meaning | Status |
 | --- | --- | --- |
-| **Source** | someone can clone, read, build and run it | **ready** |
-| **Package** | `npm i @kcpatt27/aisl` works | **ready** (ships compiled `dist/`; `aisl demo` wants a git checkout) |
+| **Source** | someone can clone, read, build and run it | **released 0.1.2** (2026-11-24) |
+| **Package** | `npm i @kcpatt27/aisl` works | **released 0.1.2** (ships compiled `dist/`; `aisl demo` wants a git checkout) |
 | **Service** | someone else runs it exposed to a network | **conditionally ready**: an embedder must wire `RestApi`; no `serve` command, no CLI host, and in-process TLS is absent |
 
 ---
 
-## Source release — ready
+## Source release — released 0.1.2
 
 - [x] `npm run typecheck && npm test`: 857 pass, 0 fail, 22 Postgres skips (879 tests)
 - [x] `npm run demo` and `npm run benchmark` run clean; SLO block passes
@@ -27,9 +27,9 @@ projects ship something they cannot support.
       Refuses on a token-shaped string or a local absolute path, and packs with
       `git archive`, so gitignored files cannot leak in
 - [x] CI green on Node 22 and 24 (the `verify` workflow)
-- [x] **Pushed to the org remote** — `rflabs-ai/aisl`, private until the release flip.
+- [x] **Pushed to the org remote** — `rflabs-ai/aisl`, public since 2026-11-24.
 
-## Package release — ready
+## Package release — released 0.1.2
 
 The tarball is correct and the installed CLI runs from it.
 
@@ -48,10 +48,10 @@ The tarball is correct and the installed CLI runs from it.
       `bin/aisl.mjs` launches `../dist/cli.js`. Development stays buildless
       (`node src/cli.ts demo`). No new runtime dependency: `typescript` was
       already a devDependency. See ADR-044.
-- [ ] `npm publish` as `@kcpatt27/aisl` (scoped public; the unscoped `aisl`
-      name collides with the existing `asl` package and is refused by the
-      registry)
-- [x] Tag `v0.1.0` (2026-11-17); `v0.1.1` (2026-11-24); `v0.1.2` is tagged at publish.
+- [x] `npm publish` as `@kcpatt27/aisl@0.1.2` (2026-11-24; scoped public; the
+      unscoped `aisl` name collides with the existing `asl` package and is
+      refused by the registry)
+- [x] Tag `v0.1.0` (2026-11-17); `v0.1.1` (2026-11-24); `v0.1.2` (2026-11-24).
 
 Known, and not a packaging defect: `aisl demo` sections 20-21 digest the
 committed tree (`git ls-files`, ADR-024), so a `node_modules` copy with no
@@ -85,7 +85,7 @@ The order matters, and the last step is the least urgent.
 1. `npm publish` (the tarball is verified: 155 files, about 375.5 kB, and the
    extracted CLI runs). `prepublishOnly` runs typecheck, tests, and the build,
    so a publish cannot ship a `dist` older than the source.
-2. `git tag v0.1.2` after the publish (`v0.1.1` was the previous tag).
+2. `git tag v<version>` after the publish (`v0.1.2` was the previous tag).
 3. `git push` to the org remote.
 4. Clean-clone test in a temp directory: clone, install, `npm run demo`,
    `npm test`. This is the closest thing to a stranger who will not read the
